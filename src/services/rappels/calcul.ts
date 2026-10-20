@@ -1,3 +1,5 @@
+import { alertesFinances, type FinancesRappels } from './previsions.js';
+
 /**
  * Calcul des rappels, repris de l'app (me-mobile/src/lib/reminders.ts) pour les envoyer depuis le serveur.
  * Tout est en heure locale de l'utilisateur, sous forme de texte : « AAAA-MM-JJ » et « AAAA-MM-JJTHH:MM ».
@@ -9,9 +11,10 @@ type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | 
 type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string };
 type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null };
 type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
-export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean } };
+export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels };
 export type ConfigRappels = { routineHeure?: string; rappelSoir?: string; agressifJMoins?: number; modes?: Partial<Record<Mode, { actif?: boolean }>> };
-export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string };
+/** canaux : pour couper le push ou l'email d'un rappel précis (alertes de budget) ; absent = selon les réglages du compte. */
+export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string; canaux?: { push: boolean; email: boolean } };
 
 const pad = (n: number) => String(n).padStart(2, '0');
 // Dates calculées en UTC : seules les chaînes comptent, le fuseau du serveur n'intervient pas.
@@ -93,13 +96,18 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
   const mission = jeu ? missionDuJour(e, jour) : [];
   const restants = mission.filter((m) => !m.fait);
   const { serie, pointsDuJour, jokers } = serieDuJour(e, jour);
+  const fin = alertesFinances(e.finances, jour, soir);
+  const budget = fin.budgetDuJour ? ` Budget du jour : ${fin.budgetDuJour}.` : '';
 
   // Matin : la mission du jour, avec les points à gagner et la série à tenir.
   if (restants.length) {
     const pts = restants.reduce((s, m) => s + m.points, 0) + POINTS.parfait;
     const suite = pointsDuJour ? `Déjà ${pointsDuJour} pts aujourd'hui.` : serie ? `Série de ${pluriel(serie, 'jour', 'jours')} à tenir.` : `Pour commencer : ${restants[0].titre}.`;
-    add(matin, 'Ta mission du jour est prête', `${pluriel(restants.length, 'action', 'actions')}, jusqu'à ${pts} pts à gagner. ${suite}`, 'briefing', 'briefing', true);
-  } else add(matin, 'Ton briefing me est prêt', 'Agenda, relances, tâches et habitudes du jour.', 'briefing', 'briefing', true);
+    add(matin, 'Ta mission du jour est prête', `${pluriel(restants.length, 'action', 'actions')}, jusqu'à ${pts} pts à gagner. ${suite}${budget}`, 'briefing', 'briefing', true);
+  } else add(matin, 'Ton briefing me est prêt', `Agenda, relances, tâches et habitudes du jour.${budget}`, 'briefing', 'briefing', true);
+
+  // Alertes de budget : une seule fois par période et par niveau, d'où une clé sans date du jour.
+  for (const a of fin.alertes) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux });
 
   // Soir : un coup de pouce seulement s'il change quelque chose (série en danger, journée parfaite toute proche).
   if (jeu && !pointsDuJour && serie)

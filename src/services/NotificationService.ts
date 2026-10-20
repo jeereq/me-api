@@ -62,15 +62,17 @@ export const NotificationService = {
         data: nouveaux.map((r) => ({ userId: u.id, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: prefs.app === false })),
         skipDuplicates: true,
       });
-      if (nouveaux.length && prefs.app !== false) {
+      const enPush = nouveaux.filter((r) => r.canaux?.push !== false);
+      if (enPush.length && prefs.app !== false) {
         // Un seul push par passage : le rappel s'il est seul, sinon un résumé.
-        const m = nouveaux.length === 1 ? { titre: nouveaux[0].titre, corps: nouveaux[0].corps, mode: nouveaux[0].mode } : { titre: `${nouveaux.length} rappels`, corps: nouveaux.map((r) => r.titre).join(' · '), mode: nouveaux[0].mode };
-        await PushService.envoyer(u.id, { ...m, tag: nouveaux[0].cle });
+        const m = enPush.length === 1 ? { titre: enPush[0].titre, corps: enPush[0].corps, mode: enPush[0].mode } : { titre: `${enPush.length} rappels`, corps: enPush.map((r) => r.titre).join(' · '), mode: enPush[0].mode };
+        await PushService.envoyer(u.id, { ...m, tag: enPush[0].cle });
       }
-      if (nouveaux.length && mailActif && prefs.email !== false) {
-        const m = email(nouveaux, u.nom);
+      const parMail = nouveaux.filter((r) => r.canaux?.email !== false);
+      if (parMail.length && mailActif && prefs.email !== false) {
+        const m = email(parMail, u.nom);
         if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) {
-          await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: nouveaux.map((r) => r.cle) } }, data: { parEmail: true } });
+          await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });
         }
       }
     }
