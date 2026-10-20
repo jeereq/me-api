@@ -11,7 +11,7 @@
     "dev": "tsx watch src/app.ts",
     "postinstall": "prisma generate",
     "build": "prisma generate && esbuild ./src/app.ts --bundle --platform=node --format=esm --outfile=dist/app.js --packages=external --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
-    "start": "node dist/app.js",
+    "start": "prisma migrate deploy && node dist/app.js",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

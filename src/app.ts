@@ -16,6 +16,7 @@ import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
 import { assurerAdmin } from './services/AdminSeed.js';
 import { HttpError } from './utils/http.js';
+import { messagePrisma, prisma } from './utils/prisma.js';
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET doit être défini (32 caractères minimum) : sans lui, les sessions seraient signées avec une clé devinable.');
@@ -28,8 +29,15 @@ app.use(helmet());
 app.use(cors({ origin: (process.env.CORS_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean), methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
 app.use(express.json({ limit: '2mb' }));
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+// Vérifie aussi la base : ouvrir /api/health dans un navigateur dit si elle répond et si les tables existent.
+app.get('/api/health', async (_req, res) => {
+  try {
+    await prisma.user.count();
+    res.json({ ok: true, base: 'ok' });
+  } catch (err) {
+    console.error(err);
+    res.status(503).json({ ok: false, base: messagePrisma(err) ?? 'erreur inconnue, voir les logs du serveur' });
+  }
 });
 app.use('/api/auth', authRoutes);
 app.use('/api/espace', espaceRoutes);
@@ -60,7 +68,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
   console.error(err);
-  res.status(500).json({ error: 'Erreur serveur' });
+  const base = messagePrisma(err);
+  res.status(base ? 503 : 500).json({ error: base ?? 'Erreur serveur' });
 });
 
 const port = Number(process.env.PORT) || 4000;

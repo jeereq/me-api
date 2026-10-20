@@ -28,7 +28,8 @@ Pour générer `JWT_SECRET` : `openssl rand -hex 32`. Le serveur refuse de déma
 ## Déployer (Render, Railway, Fly…)
 
 - Build : `npm install && npm run build && npm run prisma:migrate:deploy`
-- Start : `npm start`
+- Start : `npm start` (applique aussi les migrations en attente avant de lancer le serveur)
+- Pour vérifier : ouvre `https://ton-serveur/api/health`. `{"ok":true,"base":"ok"}` veut dire que la base répond et que ses tables existent ; sinon, le message dit quoi corriger.
 - Variables : celles de `.env.example`.
 
 Ensuite, dans l'app mobile, mets l'adresse du serveur dans `EXPO_PUBLIC_API_URL` (fichier `.env` de me-mobile).
