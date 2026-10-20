@@ -27,6 +27,7 @@ model User {
   fuseau       String   @default("UTC")
   espace       Espace?
   integrations Integration[]
+  notifications Notification[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -75,4 +76,24 @@ model Integration {
 
   @@unique([userId, fournisseur, compte])
   @@index([userId])
+}
+
+/// Rappel envoyé à un compte : visible dans l'app (centre de notifications) et, si activé, par email.
+model Notification {
+  id      String   @id @default(cuid())
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Identifiant du rappel (jour, heure, élément) : un rappel n'est jamais envoyé deux fois.
+  cle     String
+  titre   String
+  corps   String
+  mode    String
+  /// Heure locale prévue, « AAAA-MM-JJTHH:MM »
+  quand   String
+  lu      Boolean  @default(false)
+  parEmail Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, cle])
+  @@index([userId, createdAt])
 }

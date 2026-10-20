@@ -7,6 +7,7 @@ Le backend de « me », ton assistant personnel. Il sert l'app mobile [me-mobile
 - **configuration système** lisible par tous les comptes, modifiable par les admins ;
 - **gestion des comptes** pour les admins ;
 - **assistant IA** : relais vers OpenAI, la clé API reste sur le serveur ;
+- **rappels** : calculés par le serveur selon le mode de chaque élément, visibles dans l'app et envoyés par email avec SendGrid ;
 - **comptes connectés** : Google Agenda et Gmail, Outlook et Microsoft To Do, Trello, Slack, synchronisés toutes les 15 minutes.
 
 Stack : Node 20+, Express, TypeScript, Prisma et PostgreSQL, JWT, zod, helmet, express-rate-limit.
@@ -58,6 +59,9 @@ Toutes les routes sauf `health`, `register` et `login` demandent l'en-tête `Aut
 | DELETE | `/api/integrations/:id` | compte | Déconnecte le compte et oublie ses jetons |
 | GET | `/api/sync` | compte | Éléments importés : `{ integrations, agenda, taches, relances }` |
 | POST | `/api/sync` | compte | Relit tous les comptes tout de suite, puis comme GET |
+| GET | `/api/notifications` | compte | 50 derniers rappels et nombre de non lus |
+| POST | `/api/notifications/lues` | compte | `{ ids? }` : marque lus (tous sans `ids`) |
+| POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
 | POST | `/api/assistant` | compte | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
 
 Les erreurs ont la forme `{ "error": "message lisible" }`.
@@ -69,6 +73,14 @@ Règles :
 - Le dernier admin ne peut être ni rétrogradé ni supprimé.
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.
+
+## Rappels (app et email)
+
+Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son fuseau horaire, avec les mêmes règles que l'app : briefing du matin, mode normal le jour J à 9 h, agressif à J-3, J-1, matin et soir puis chaque jour de retard, coach le soir, bilan hebdo le dimanche soir. Le mode passif n'envoie rien.
+
+- Chaque rappel apparaît dans le centre de notifications de l'app (cloche), une seule fois.
+- Si SendGrid est configuré (`SENDGRID_API_KEY`, `SENDGRID_FROM`) et que l'admin n'a pas coupé le canal « Mail à moi-même », les rappels d'un même passage partent en un seul email.
+- Chacun peut couper les emails ou les notifications dans l'app (Mon compte > Notifications).
 
 ## Comptes connectés
 
@@ -94,7 +106,7 @@ src/routes/              une route par domaine
 src/controllers/         lecture de la requête, réponse HTTP
 src/services/            logique métier et accès à la base
 src/services/integrations/  un connecteur par service externe
-src/cron/                synchronisation toutes les 15 minutes
+src/cron/                synchronisation (15 min) et rappels (5 min)
 src/middlewares/         JWT, rôle admin, validation zod, limites de débit
 src/validators/          schémas zod
 src/utils/crypto.ts      chiffrement des jetons

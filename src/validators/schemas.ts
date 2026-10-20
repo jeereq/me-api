@@ -42,3 +42,4 @@ export type AssistantBody = z.infer<typeof assistantSchema>['body'];
 export const integrationParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
 export const patchIntegrationSchema = integrationParamsSchema.extend({ body: z.object({ ctx: z.enum(['perso', 'pro']) }) });
 export const trelloJetonSchema = z.object({ body: z.object({ state: z.string().max(2000).optional(), token: z.string().max(500).nullable().optional() }) });
+export const notificationsLuesSchema = z.object({ body: z.object({ ids: z.array(z.string()).max(200).optional() }).optional() });

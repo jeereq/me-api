@@ -9,8 +9,10 @@ import authRoutes from './routes/auth.routes.js';
 import configRoutes from './routes/config.routes.js';
 import espaceRoutes from './routes/espace.routes.js';
 import membreRoutes from './routes/membre.routes.js';
+import { initRappelsCron } from './cron/rappels.js';
 import { initSynchronisationCron } from './cron/synchronisation.js';
 import integrationRoutes from './routes/integration.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
 import { HttpError } from './utils/http.js';
 
@@ -35,6 +37,7 @@ app.use('/api/membres', membreRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });
@@ -63,4 +66,5 @@ const port = Number(process.env.PORT) || 4000;
 app.listen(port, () => {
   console.log(`me-api écoute sur le port ${port}`);
   initSynchronisationCron();
+  initRappelsCron();
 });
