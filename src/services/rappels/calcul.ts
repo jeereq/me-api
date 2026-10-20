@@ -6,9 +6,10 @@
 export type Mode = 'passif' | 'normal' | 'agressif' | 'coach' | 'hebdo';
 type Frequence = 'quotidien' | 'hebdo' | 'mensuel';
 type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[] };
-type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode };
-type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode };
-export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; habitudes?: Habitude[] };
+type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string };
+type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null };
+type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
+export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean } };
 export type ConfigRappels = { routineHeure?: string; rappelSoir?: string; agressifJMoins?: number; modes?: Partial<Record<Mode, { actif?: boolean }>> };
 export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string };
 
@@ -45,6 +46,37 @@ function pastDue(h: Habitude, s: string) {
   return false;
 }
 const doneIn = (h: Habitude, s: string) => (h.coches || []).some((c) => periodKey(h.frequence, c) === periodKey(h.frequence, s));
+const habitToday = (h: Habitude, s: string) => habitDue(h, s) || (!doneIn(h, s) && h.frequence !== 'quotidien' && h.mode === 'agressif' && pastDue(h, s));
+
+// Points de la mission, comme dans l'app (me-mobile/src/lib/jeu.ts et mission.ts).
+const POINTS = { habitude: 10, relance: 15, tache: 15, tacheHaute: 20, ponctuel: 5, parfait: 50 };
+
+/** La mission du jour de l'app : relances arrivées à échéance, tâches urgentes, habitudes prévues (faites ou non). */
+export function missionDuJour(e: EspaceRappels, jour: string) {
+  const bientot = addDays(jour, 2);
+  const out: { titre: string; fait: boolean; points: number }[] = [];
+  for (const r of e.relances || [])
+    if ((r.statut === 'a_faire' && r.date <= jour) || (r.statut === 'repondu' && r.reponduLe === jour)) out.push({ titre: `Relancer ${r.contact}`, fait: r.statut === 'repondu', points: POINTS.relance });
+  for (const t of e.taches || [])
+    if ((t.statut !== 'fait' && (t.priorite === 'haute' || (t.echeance && t.echeance <= bientot))) || (t.statut === 'fait' && t.faitLe === jour))
+      out.push({ titre: t.titre, fait: t.statut === 'fait', points: (t.priorite === 'haute' ? POINTS.tacheHaute : POINTS.tache) + (t.echeance && jour <= t.echeance ? POINTS.ponctuel : 0) });
+  for (const h of e.habitudes || []) if (habitToday(h, jour) || (h.coches || []).includes(jour)) out.push({ titre: h.nom, fait: doneIn(h, jour), points: POINTS.habitude });
+  return out;
+}
+
+/** Série de jours actifs (au moins un point gagné ou jour sauvé par un joker) jusqu'à aujourd'hui, et points du jour. */
+export function serieDuJour(e: EspaceRappels, jour: string) {
+  const gains = Object.values(e.jeu?.gains || {});
+  const actifs = new Set([...gains.map((g) => g.d), ...(e.jeu?.joursSauves || [])]);
+  let cur = actifs.has(jour) ? jour : addDays(jour, -1);
+  let serie = 0;
+  while (actifs.has(cur)) {
+    serie++;
+    cur = addDays(cur, -1);
+  }
+  return { serie, pointsDuJour: gains.reduce((s, g) => s + (g.d === jour ? g.p : 0), 0), jokers: e.jeu?.jokers || 0 };
+}
+const pluriel = (n: number, un: string, plusieurs: string) => `${n} ${n > 1 ? plusieurs : un}`;
 
 /** Rappels d'une journée (heure locale), avec les mêmes règles que les notifications du téléphone. */
 export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string): Rappel[] {
@@ -53,10 +85,28 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
   const matin = c.routineHeure || '07:00';
   const soir = c.rappelSoir || '19:00';
   const jMoins = c.agressifJMoins || 3;
-  const add = (heure: string, titre: string, corps: string, mode: Rappel['mode'], id: string) =>
-    out.push({ quand: `${jour}T${heure}`, titre, corps, mode, cle: `${jour}T${heure}|${id}|${titre}` });
+  // Une clé « stable » ne dépend pas du titre : le rappel part une seule fois, même si son texte change entre deux passages.
+  const add = (heure: string, titre: string, corps: string, mode: Rappel['mode'], id: string, stable = false) =>
+    out.push({ quand: `${jour}T${heure}`, titre, corps, mode, cle: `${jour}T${heure}|${id}${stable ? '' : `|${titre}`}` });
 
-  add(matin, 'Ton briefing me est prêt', 'Agenda, relances, tâches et habitudes du jour.', 'briefing', 'briefing');
+  const jeu = e.notifs?.recompenses !== false;
+  const mission = jeu ? missionDuJour(e, jour) : [];
+  const restants = mission.filter((m) => !m.fait);
+  const { serie, pointsDuJour, jokers } = serieDuJour(e, jour);
+
+  // Matin : la mission du jour, avec les points à gagner et la série à tenir.
+  if (restants.length) {
+    const pts = restants.reduce((s, m) => s + m.points, 0) + POINTS.parfait;
+    const suite = pointsDuJour ? `Déjà ${pointsDuJour} pts aujourd'hui.` : serie ? `Série de ${pluriel(serie, 'jour', 'jours')} à tenir.` : `Pour commencer : ${restants[0].titre}.`;
+    add(matin, 'Ta mission du jour est prête', `${pluriel(restants.length, 'action', 'actions')}, jusqu'à ${pts} pts à gagner. ${suite}`, 'briefing', 'briefing', true);
+  } else add(matin, 'Ton briefing me est prêt', 'Agenda, relances, tâches et habitudes du jour.', 'briefing', 'briefing', true);
+
+  // Soir : un coup de pouce seulement s'il change quelque chose (série en danger, journée parfaite toute proche).
+  if (jeu && !pointsDuJour && serie)
+    add(soir, `Ta série de ${pluriel(serie, 'jour', 'jours')} est en danger`, `Une seule action avant minuit suffit pour la garder.${jokers ? ' Sinon, un joker la protégera.' : ''}`, 'coach', 'serie', true);
+  else if (jeu && !pointsDuJour && restants.length) add(soir, "Ta mission t'attend", `Coche une action ce soir, par exemple « ${restants[0].titre} », pour lancer ta série.`, 'coach', 'serie', true);
+  else if (jeu && pointsDuJour && restants.length && restants.length <= 3)
+    add(soir, 'Presque une journée parfaite', `Encore ${pluriel(restants.length, 'action', 'actions')} : ${restants.map((m) => m.titre).join(', ')}. Bonus de ${POINTS.parfait} pts à la clé.`, 'coach', 'serie', true);
 
   const dates = [
     ...(e.relances || []).filter((r) => r.statut === 'a_faire' && r.date).map((r) => ({ id: r.id, titre: `Relancer ${r.contact}`, detail: r.sujet, date: r.date, mode: r.mode })),

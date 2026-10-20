@@ -83,6 +83,7 @@ Règles :
 
 Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son fuseau horaire, avec les mêmes règles que l'app : briefing du matin, mode normal le jour J à 9 h, agressif à J-3, J-1, matin et soir puis chaque jour de retard, coach le soir, bilan hebdo le dimanche soir. Le mode passif n'envoie rien.
 
+- Avec les récompenses (réglage « Mission et série » dans Mon compte, actif par défaut), le briefing du matin annonce la mission du jour : nombre d'actions, points à gagner, série à tenir. À l'heure du rappel du soir, un coup de pouce part seulement s'il sert : série en danger (aucun point aujourd'hui), mission pas commencée, ou journée parfaite à 3 actions près.
 - Chaque rappel apparaît dans le centre de notifications de l'app (cloche), une seule fois.
 - Si SendGrid est configuré (`SENDGRID_API_KEY`, `SENDGRID_FROM`) et que l'admin n'a pas coupé le canal « Mail à moi-même », les rappels d'un même passage partent en un seul email.
 - Si les clés VAPID sont configurées (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, générées par `npx web-push generate-vapid-keys`), chaque appareil activé dans l'app reçoit aussi une notification push, même app fermée. Sur iPhone, il faut l'app web ajoutée à l'écran d'accueil (iOS 16.4 ou plus).
