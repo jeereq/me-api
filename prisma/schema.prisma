@@ -1,0 +1,44 @@
+generator client {
+  provider      = "prisma-client-js"
+  /// Binaire Linux pour l'hébergement (OpenSSL 3).
+  binaryTargets = ["native", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  UTILISATEUR
+}
+
+/// Un compte « me ». Le premier compte créé devient admin.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  nom          String   @default("")
+  role         Role     @default(UTILISATEUR)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  espace       Espace?
+}
+
+/// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
+/// Stocké en un seul document JSON, lu et écrit uniquement par son propriétaire.
+model Espace {
+  userId String   @id
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data   Json
+  majLe  DateTime @default(now())
+}
+
+/// Configuration système (ligne unique id = 1) : lisible par tous les comptes, modifiable par les admins.
+model Config {
+  id     Int      @id @default(1)
+  data   Json
+  majLe  DateTime @updatedAt
+  majPar String?
+}
