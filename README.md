@@ -52,6 +52,8 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/auth/google/echange` | public | `{ code }` → `{ token, user }` |
 | GET | `/api/auth/me` | compte | Le compte connecté (`motDePasse`, `google` : modes de connexion) |
 | PATCH | `/api/auth/me` | compte | `{ nom?, motDePasseActuel?, nouveauMotDePasse? }` ; un changement de mot de passe renvoie un nouveau `token` |
+| GET | `/api/auth/me/export` | compte | Toutes les données du compte en JSON (espace, comptes connectés sans leurs jetons, notifications) |
+| POST | `/api/auth/me/deconnecter-tout` | compte | Ferme les sessions de tous les appareils → nouveau `{ token, user }` pour celui-ci |
 | DELETE | `/api/auth/me` | compte | `{ confirmation: email }` : supprime le compte et toutes ses données |
 | GET | `/api/espace` | compte | `{ espace: { data, majLe } \| null }` |
 | PUT | `/api/espace` | compte | `{ data }` → `{ majLe }` |

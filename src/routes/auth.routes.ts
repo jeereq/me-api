@@ -20,5 +20,7 @@ router.get('/google/callback', asyncHandler(AuthController.googleCallback));
 router.post('/google/echange', authLimiter, validateRequest(codeSchema), asyncHandler(AuthController.googleEchange));
 router.get('/me', authenticateJWT, asyncHandler(AuthController.me));
 router.patch('/me', authenticateJWT, validateRequest(updateMeSchema), asyncHandler(AuthController.updateMe));
+router.get('/me/export', authenticateJWT, asyncHandler(AuthController.exporter));
+router.post('/me/deconnecter-tout', authenticateJWT, asyncHandler(AuthController.deconnecterTout));
 router.delete('/me', authenticateJWT, validateRequest(supprimerCompteSchema), asyncHandler(AuthController.supprimer));
 export default router;

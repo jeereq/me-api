@@ -143,6 +143,35 @@ export const AuthService = {
     return input.nouveauMotDePasse ? session(user) : { user: publicUser(user) };
   },
 
+  /**
+   * Toutes les données du compte gardées par le serveur, pour l'export (droit d'accès et de portabilité).
+   * Les jetons d'accès aux comptes connectés n'en font pas partie : ce sont des secrets, pas des données de la personne.
+   */
+  async exporter(userId: string) {
+    const u = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: {
+        espace: true,
+        integrations: { select: { fournisseur: true, compte: true, ctx: true, derniereSync: true, donnees: true, createdAt: true } },
+        notifications: { select: { titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
+        abonnementsPush: { select: { appareil: true, createdAt: true } },
+      },
+    });
+    return {
+      exporteLe: new Date().toISOString(),
+      compte: { email: u.email, nom: u.nom, role: u.role, fuseau: u.fuseau, emailVerifie: u.emailVerifie, connexionGoogle: !!u.googleId, creeLe: u.createdAt },
+      espace: u.espace?.data ?? null,
+      comptesConnectes: u.integrations,
+      notifications: u.notifications,
+      appareilsPush: u.abonnementsPush,
+    };
+  },
+
+  /** Ferme toutes les sessions ouvertes (autres appareils compris) ; celle-ci reçoit un nouveau jeton. */
+  async deconnecterTout(userId: string) {
+    return session(await prisma.user.update({ where: { id: userId }, data: { sessionsLe: maintenant() } }));
+  },
+
   /** Suppression définitive du compte et de toutes ses données, confirmée en retapant son email. */
   async supprimer(userId: string, confirmation: string) {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { integrations: true } });

@@ -12,14 +12,15 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
   }
   try {
     const { userId, iat } = verifyToken(header.substring(7));
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, role: true, motDePasseLe: true } });
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, role: true, motDePasseLe: true, sessionsLe: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable' });
       return;
     }
-    // Mot de passe changé depuis l'ouverture de cette session : on la ferme.
-    if (user.motDePasseLe && (iat ?? 0) * 1000 < user.motDePasseLe.getTime()) {
-      res.status(401).json({ error: 'Mot de passe changé, reconnecte-toi.' });
+    // Mot de passe changé, ou tous les appareils déconnectés, depuis l'ouverture de cette session : on la ferme.
+    const ouverte = (iat ?? 0) * 1000;
+    if ((user.motDePasseLe && ouverte < user.motDePasseLe.getTime()) || (user.sessionsLe && ouverte < user.sessionsLe.getTime())) {
+      res.status(401).json({ error: user.sessionsLe && ouverte < user.sessionsLe.getTime() ? 'Session fermée depuis un autre appareil, reconnecte-toi.' : 'Mot de passe changé, reconnecte-toi.' });
       return;
     }
     req.user = { id: user.id, email: user.email, nom: user.nom, role: user.role };

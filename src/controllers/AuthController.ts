@@ -60,6 +60,13 @@ export const AuthController = {
   updateMe: async (req: Request, res: Response) => {
     res.json(await AuthService.updateMe(req.user!.id, req.body));
   },
+  exporter: async (req: Request, res: Response) => {
+    res.setHeader('Content-Disposition', 'attachment; filename="me-export.json"');
+    res.json(await AuthService.exporter(req.user!.id));
+  },
+  deconnecterTout: async (req: Request, res: Response) => {
+    res.json(await AuthService.deconnecterTout(req.user!.id));
+  },
   supprimer: async (req: Request, res: Response) => {
     res.json(await AuthService.supprimer(req.user!.id, req.body.confirmation));
   },

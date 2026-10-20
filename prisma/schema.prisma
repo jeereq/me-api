@@ -27,6 +27,8 @@ model User {
   googleId     String?  @unique
   /// Dernier changement de mot de passe : les sessions ouvertes avant sont refusées.
   motDePasseLe DateTime?
+  /// « Déconnecter tous mes appareils » : les sessions ouvertes avant sont refusées.
+  sessionsLe   DateTime?
   role         Role     @default(UTILISATEUR)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
