@@ -62,6 +62,9 @@ Toutes les routes sauf `health`, `register` et `login` demandent l'en-tête `Aut
 | POST | `/api/sync` | compte | Relit tous les comptes tout de suite, puis comme GET |
 | GET | `/api/notifications` | compte | 50 derniers rappels et nombre de non lus |
 | POST | `/api/notifications/lues` | compte | `{ ids? }` : marque lus (tous sans `ids`) |
+| GET | `/api/notifications/push` | compte | Clé publique VAPID et nombre d'appareils abonnés |
+| POST | `/api/notifications/push` | compte | Abonne ce navigateur aux notifications push |
+| DELETE | `/api/notifications/push` | compte | Désabonne ce navigateur |
 | POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
 | POST | `/api/assistant` | compte | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
 
@@ -82,6 +85,7 @@ Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son f
 
 - Chaque rappel apparaît dans le centre de notifications de l'app (cloche), une seule fois.
 - Si SendGrid est configuré (`SENDGRID_API_KEY`, `SENDGRID_FROM`) et que l'admin n'a pas coupé le canal « Mail à moi-même », les rappels d'un même passage partent en un seul email.
+- Si les clés VAPID sont configurées (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, générées par `npx web-push generate-vapid-keys`), chaque appareil activé dans l'app reçoit aussi une notification push, même app fermée. Sur iPhone, il faut l'app web ajoutée à l'écran d'accueil (iOS 16.4 ou plus).
 - Chacun peut couper les emails ou les notifications dans l'app (Mon compte > Notifications).
 
 ## Comptes connectés

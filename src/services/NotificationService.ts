@@ -1,6 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
+import { PushService } from './PushService.js';
 import { local } from './integrations/http.js';
 import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from './rappels/calcul.js';
 
@@ -61,6 +62,11 @@ export const NotificationService = {
         data: nouveaux.map((r) => ({ userId: u.id, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: prefs.app === false })),
         skipDuplicates: true,
       });
+      if (nouveaux.length && prefs.app !== false) {
+        // Un seul push par passage : le rappel s'il est seul, sinon un résumé.
+        const m = nouveaux.length === 1 ? { titre: nouveaux[0].titre, corps: nouveaux[0].corps, mode: nouveaux[0].mode } : { titre: `${nouveaux.length} rappels`, corps: nouveaux.map((r) => r.titre).join(' · '), mode: nouveaux[0].mode };
+        await PushService.envoyer(u.id, { ...m, tag: nouveaux[0].cle });
+      }
       if (nouveaux.length && mailActif && prefs.email !== false) {
         const m = email(nouveaux, u.nom);
         if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) {
@@ -77,7 +83,7 @@ export const NotificationService = {
       prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 50, select: { id: true, titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true } }),
       prisma.notification.count({ where: { userId, lu: false } }),
     ]);
-    return { notifications, nonLues, email: EmailService.configure() };
+    return { notifications, nonLues, email: EmailService.configure(), push: PushService.configure() };
   },
 
   async marquerLues(userId: string, ids?: string[]) {
@@ -89,10 +95,11 @@ export const NotificationService = {
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const r: Rappel = { quand: new Date().toISOString().slice(0, 16), titre: 'Essai de notification', corps: 'Si tu lis ceci, les rappels de me fonctionnent.', mode: 'briefing', cle: `test|${Date.now()}` };
     await prisma.notification.create({ data: { userId, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand } });
-    if (!EmailService.configure()) return { email: false, raison: "SendGrid n'est pas configuré sur le serveur." };
+    const push = await PushService.envoyer(userId, { titre: r.titre, corps: r.corps, mode: r.mode, tag: r.cle });
+    if (!EmailService.configure()) return { email: false, push, raison: "SendGrid n'est pas configuré sur le serveur." };
     const m = email([r], u.nom);
     const ok = await EmailService.envoyer(u.email, m.sujet, m.texte, m.html);
     if (!ok) throw new HttpError(502, "SendGrid a refusé l'envoi : vérifie la clé et l'expéditeur.");
-    return { email: true };
+    return { email: true, push };
   },
 };

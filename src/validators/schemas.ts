@@ -43,3 +43,9 @@ export const integrationParamsSchema = z.object({ params: z.object({ id: z.strin
 export const patchIntegrationSchema = integrationParamsSchema.extend({ body: z.object({ ctx: z.enum(['perso', 'pro']) }) });
 export const trelloJetonSchema = z.object({ body: z.object({ state: z.string().max(2000).optional(), token: z.string().max(500).nullable().optional() }) });
 export const notificationsLuesSchema = z.object({ body: z.object({ ids: z.array(z.string()).max(200).optional() }).optional() });
+
+const endpoint = z.string().url().max(1000).refine((u) => u.startsWith('https://'), 'Adresse push invalide.');
+export const pushAbonnementSchema = z.object({
+  body: z.object({ endpoint, keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(4).max(100) }), appareil: z.string().max(120).optional() }),
+});
+export const pushDesabonnementSchema = z.object({ body: z.object({ endpoint }) });

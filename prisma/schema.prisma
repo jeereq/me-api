@@ -28,6 +28,7 @@ model User {
   espace       Espace?
   integrations Integration[]
   notifications Notification[]
+  abonnementsPush PushAbonnement[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -96,4 +97,18 @@ model Notification {
 
   @@unique([userId, cle])
   @@index([userId, createdAt])
+}
+
+/// Un navigateur ou une app web installée qui reçoit les rappels même fermée (Web Push).
+model PushAbonnement {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  appareil  String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
