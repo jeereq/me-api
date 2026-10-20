@@ -6,7 +6,7 @@ Le backend de « me », ton assistant personnel. Il sert l'app mobile [me-mobile
 - **espace privé** par compte (relances, tâches, habitudes, contacts, journal, agenda, sources, audio), que seul son propriétaire lit et écrit ;
 - **configuration système** lisible par tous les comptes, modifiable par les admins ;
 - **gestion des comptes** pour les admins ;
-- **assistant IA** : relais vers Claude, la clé API reste sur le serveur.
+- **assistant IA** : relais vers OpenAI, la clé API reste sur le serveur.
 
 Stack : Node 20+, Express, TypeScript, Prisma et PostgreSQL, JWT, zod, helmet, express-rate-limit.
 
@@ -16,7 +16,7 @@ Stack : Node 20+, Express, TypeScript, Prisma et PostgreSQL, JWT, zod, helmet, e
 git clone https://github.com/jeereq/me-api.git
 cd me-api
 npm install
-cp .env.example .env        # puis remplis DATABASE_URL, JWT_SECRET et ANTHROPIC_API_KEY
+cp .env.example .env        # puis remplis DATABASE_URL, JWT_SECRET et OPENAI_API_KEY
 npm run prisma:migrate      # crée les tables
 npm run dev                 # http://localhost:4000/api/health
 ```
@@ -50,6 +50,7 @@ Toutes les routes sauf `health`, `register` et `login` demandent l'en-tête `Aut
 | PATCH | `/api/membres/:id` | admin | `{ role: "ADMIN" \| "UTILISATEUR" }` |
 | DELETE | `/api/membres/:id` | admin | Supprime le compte et son espace |
 | GET | `/api/assistant` | compte | `{ disponible }` : clé configurée et IA activée par l'admin |
+| GET | `/api/assistant/modeles` | admin | `{ modeles, actuel }` : modèles OpenAI disponibles avec la clé du serveur |
 | POST | `/api/assistant` | compte | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
 
 Les erreurs ont la forme `{ "error": "message lisible" }`.
@@ -57,6 +58,7 @@ Les erreurs ont la forme `{ "error": "message lisible" }`.
 Règles :
 
 - `SIGNUP_OPEN=false` ferme les inscriptions une fois le premier compte créé ; l'admin crée alors les comptes à la main ou les rouvre.
+- Le modèle OpenAI se choisit dans l'app (Configuration, réservé à l'admin) ; sans choix, c'est `OPENAI_MODEL`, puis `gpt-4o-mini`.
 - Le dernier admin ne peut être ni rétrogradé ni supprimé.
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.

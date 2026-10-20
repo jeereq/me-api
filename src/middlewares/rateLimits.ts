@@ -13,7 +13,7 @@ export const authLimiter = [
   rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, skipSuccessfulRequests: true, standardHeaders: 'draft-7', legacyHeaders: false, message }),
 ];
 
-/** Assistant IA : 30 demandes / 10 min par compte, pour garder la facture Claude sous contrôle. */
+/** Assistant IA : 30 demandes / 10 min par compte, pour garder la facture OpenAI sous contrôle. */
 export const assistantLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: 30,
