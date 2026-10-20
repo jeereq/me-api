@@ -6,7 +6,8 @@ Le backend de « me », ton assistant personnel. Il sert l'app mobile [me-mobile
 - **espace privé** par compte (relances, tâches, habitudes, contacts, journal, agenda, sources, audio), que seul son propriétaire lit et écrit ;
 - **configuration système** lisible par tous les comptes, modifiable par les admins ;
 - **gestion des comptes** pour les admins ;
-- **assistant IA** : relais vers OpenAI, la clé API reste sur le serveur.
+- **assistant IA** : relais vers OpenAI, la clé API reste sur le serveur ;
+- **comptes connectés** : Google Agenda et Gmail, Outlook et Microsoft To Do, Trello, Slack, synchronisés toutes les 15 minutes.
 
 Stack : Node 20+, Express, TypeScript, Prisma et PostgreSQL, JWT, zod, helmet, express-rate-limit.
 
@@ -51,6 +52,12 @@ Toutes les routes sauf `health`, `register` et `login` demandent l'en-tête `Aut
 | DELETE | `/api/membres/:id` | admin | Supprime le compte et son espace |
 | GET | `/api/assistant` | compte | `{ disponible }` : clé configurée et IA activée par l'admin |
 | GET | `/api/assistant/modeles` | admin | `{ modeles, actuel }` : modèles OpenAI disponibles avec la clé du serveur |
+| GET | `/api/integrations` | compte | Services configurés sur le serveur et comptes connectés |
+| GET | `/api/integrations/:service/connecter?retour=` | compte | `{ url }` de la page d'autorisation (google, microsoft, trello, slack) |
+| PATCH | `/api/integrations/:id` | compte | `{ ctx: "perso" \| "pro" }` |
+| DELETE | `/api/integrations/:id` | compte | Déconnecte le compte et oublie ses jetons |
+| GET | `/api/sync` | compte | Éléments importés : `{ integrations, agenda, taches, relances }` |
+| POST | `/api/sync` | compte | Relit tous les comptes tout de suite, puis comme GET |
 | POST | `/api/assistant` | compte | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
 
 Les erreurs ont la forme `{ "error": "message lisible" }`.
@@ -63,18 +70,36 @@ Règles :
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.
 
+## Comptes connectés
+
+Chaque compte me peut connecter plusieurs comptes externes (par exemple Gmail perso et Google Workspace pro), depuis l'écran **Agendas & outils** de l'app. Le serveur garde les jetons chiffrés et relit les comptes toutes les 15 minutes.
+
+| Service | Agenda | Tâches | Relances |
+| --- | --- | --- | --- |
+| Google | Rendez-vous des 14 prochains jours (agendas affichés, ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours | Fils où ton dernier message attend une réponse depuis plus de N jours |
+| Microsoft | Rendez-vous des 14 prochains jours (agenda principal, ou ceux du filtre) | Mails avec drapeau, tâches To Do ouvertes | Mails envoyés sans réponse depuis plus de N jours |
+| Trello | Échéances des 14 prochains jours | Cartes où tu es membre, non terminées | |
+| Slack | | Messages des derniers jours qui te mentionnent ou t'écrivent en direct | Tes questions restées sans réponse dans leur fil |
+
+N est le « délai avant relance » de la configuration système (3 jours par défaut). Les filtres et les types d'import se règlent par source dans l'app.
+
+Pour activer un service, crée son application OAuth (les étapes sont dans `.env.example`), remplis ses variables, `PUBLIC_URL` et `ENCRYPTION_KEY`, puis redémarre. Le bouton « Connecter » apparaît alors dans l'app.
+
 ## Organisation
 
 ```
-prisma/schema.prisma     modèles User, Espace, Config
+prisma/schema.prisma     modèles User, Espace, Config, Integration
 src/app.ts               serveur Express et gestion des erreurs
 src/routes/              une route par domaine
 src/controllers/         lecture de la requête, réponse HTTP
 src/services/            logique métier et accès à la base
+src/services/integrations/  un connecteur par service externe
+src/cron/                synchronisation toutes les 15 minutes
 src/middlewares/         JWT, rôle admin, validation zod, limites de débit
 src/validators/          schémas zod
+src/utils/crypto.ts      chiffrement des jetons
 ```
 
 ## Prochaines étapes
 
-Connexion des comptes externes (Google Agenda et Gmail, Outlook, Trello, Slack) en OAuth côté serveur, synchronisation planifiée, et envoi des rappels par notification push depuis le serveur.
+Envoi des rappels par notification push depuis le serveur, et d'autres services (Notion, Asana, Todoist, iCloud).

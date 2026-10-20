@@ -29,9 +29,10 @@ export const AuthService = {
     return { token: generateToken({ userId: user.id }), user: publicUser(user) };
   },
 
-  async updateMe(userId: string, input: { nom?: string; motDePasseActuel?: string; nouveauMotDePasse?: string }) {
-    const data: { nom?: string; passwordHash?: string } = {};
+  async updateMe(userId: string, input: { nom?: string; fuseau?: string; motDePasseActuel?: string; nouveauMotDePasse?: string }) {
+    const data: { nom?: string; fuseau?: string; passwordHash?: string } = {};
     if (input.nom !== undefined) data.nom = input.nom;
+    if (input.fuseau !== undefined) data.fuseau = input.fuseau;
     if (input.nouveauMotDePasse) {
       const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
       if (!input.motDePasseActuel || !(await bcrypt.compare(input.motDePasseActuel, user.passwordHash))) throw new HttpError(400, 'Mot de passe actuel incorrect.');

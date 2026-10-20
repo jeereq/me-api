@@ -23,7 +23,10 @@ model User {
   role         Role     @default(UTILISATEUR)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  /// Fuseau IANA du téléphone (ex. Europe/Paris), pour placer les rendez-vous importés à la bonne heure.
+  fuseau       String   @default("UTC")
   espace       Espace?
+  integrations Integration[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -41,4 +44,35 @@ model Config {
   data   Json
   majLe  DateTime @updatedAt
   majPar String?
+}
+
+enum Fournisseur {
+  GOOGLE
+  MICROSOFT
+  TRELLO
+  SLACK
+}
+
+/// Un compte externe connecté (plusieurs par fournisseur possibles : Gmail perso et Google Workspace pro, par exemple).
+/// Les jetons sont chiffrés (AES-256-GCM, clé ENCRYPTION_KEY).
+model Integration {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fournisseur   Fournisseur
+  /// Email ou nom du compte externe
+  compte        String
+  /// perso ou pro : contexte des éléments importés
+  ctx           String      @default("perso")
+  accessToken   String
+  refreshToken  String?
+  expiresAt     DateTime?
+  /// Derniers éléments importés : { agenda, taches, relances }
+  donnees       Json?
+  derniereSync  DateTime?
+  erreur        String?
+  createdAt     DateTime    @default(now())
+
+  @@unique([userId, fournisseur, compte])
+  @@index([userId])
 }

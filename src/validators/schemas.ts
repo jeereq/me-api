@@ -5,8 +5,17 @@ const password = z.string({ required_error: 'Mot de passe requis' }).min(8, 'Le 
 
 export const registerSchema = z.object({ body: z.object({ email, password, nom: z.string().trim().max(80).optional() }) });
 export const loginSchema = z.object({ body: z.object({ email, password: z.string().min(1, 'Mot de passe requis') }) });
+const fuseauValide = (f: string) => {
+  try {
+    new Intl.DateTimeFormat('fr', { timeZone: f });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const updateMeSchema = z.object({
-  body: z.object({ nom: z.string().trim().max(80).optional(), motDePasseActuel: z.string().optional(), nouveauMotDePasse: password.optional() }),
+  body: z.object({ nom: z.string().trim().max(80).optional(), fuseau: z.string().max(60).refine(fuseauValide, 'Fuseau horaire inconnu').optional(), motDePasseActuel: z.string().optional(), nouveauMotDePasse: password.optional() }),
 });
 
 const document = z.record(z.unknown(), { invalid_type_error: 'Document JSON attendu' });
@@ -29,3 +38,7 @@ export const assistantSchema = z.object({
   }),
 });
 export type AssistantBody = z.infer<typeof assistantSchema>['body'];
+
+export const integrationParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
+export const patchIntegrationSchema = integrationParamsSchema.extend({ body: z.object({ ctx: z.enum(['perso', 'pro']) }) });
+export const trelloJetonSchema = z.object({ body: z.object({ state: z.string().max(2000).optional(), token: z.string().max(500).nullable().optional() }) });
