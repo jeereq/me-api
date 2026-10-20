@@ -14,6 +14,7 @@ import { initSynchronisationCron } from './cron/synchronisation.js';
 import integrationRoutes from './routes/integration.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
+import { assurerAdmin } from './services/AdminSeed.js';
 import { HttpError } from './utils/http.js';
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
@@ -63,6 +64,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
+// Le compte admin des variables d'environnement est prêt avant d'accepter des connexions.
+await assurerAdmin();
+
 app.listen(port, () => {
   console.log(`me-api écoute sur le port ${port}`);
   initSynchronisationCron();

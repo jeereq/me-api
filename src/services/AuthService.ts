@@ -15,7 +15,7 @@ export const AuthService = {
         const count = await tx.user.count();
         if (count > 0 && process.env.SIGNUP_OPEN === 'false') throw new HttpError(403, "Les inscriptions sont fermées. Demande à l'admin.");
         if (await tx.user.findUnique({ where: { email } })) throw new HttpError(409, 'Un compte existe déjà avec cet email.');
-        return tx.user.create({ data: { email, passwordHash, nom, role: count === 0 ? 'ADMIN' : 'UTILISATEUR' } });
+        return tx.user.create({ data: { email, passwordHash, nom, role: count === 0 && !process.env.ADMIN_EMAIL ? 'ADMIN' : 'UTILISATEUR' } });
       },
       { isolationLevel: 'Serializable' },
     );
