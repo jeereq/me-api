@@ -13,6 +13,12 @@ export const authLimiter = [
   rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, skipSuccessfulRequests: true, standardHeaders: 'draft-7', legacyHeaders: false, message }),
 ];
 
+/** Emails de compte (confirmation, mot de passe oublié) : 5 / 15 min par email, 30 / 15 min par IP, réussites comprises. */
+export const mailLimiter = [
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, keyGenerator: emailKey, standardHeaders: 'draft-7', legacyHeaders: false, message }),
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message }),
+];
+
 /** Assistant IA : 30 demandes / 10 min par compte, pour garder la facture OpenAI sous contrôle. */
 export const assistantLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,

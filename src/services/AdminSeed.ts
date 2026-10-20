@@ -15,13 +15,14 @@ export async function assurerAdmin() {
 
   const existant = await prisma.user.findUnique({ where: { email } });
   if (!existant) {
-    await prisma.user.create({ data: { email, passwordHash: await bcrypt.hash(password, 12), nom: process.env.ADMIN_NOM || '', role: 'ADMIN' } });
+    await prisma.user.create({ data: { email, passwordHash: await bcrypt.hash(password, 12), nom: process.env.ADMIN_NOM || '', role: 'ADMIN', emailVerifie: true } });
     console.log(`Compte admin créé : ${email}`);
     return;
   }
-  const data: { role?: 'ADMIN'; passwordHash?: string } = {};
+  const data: { role?: 'ADMIN'; passwordHash?: string; emailVerifie?: boolean } = {};
   if (existant.role !== 'ADMIN') data.role = 'ADMIN';
-  if (!(await bcrypt.compare(password, existant.passwordHash))) data.passwordHash = await bcrypt.hash(password, 12);
+  if (!existant.emailVerifie) data.emailVerifie = true;
+  if (!existant.passwordHash || !(await bcrypt.compare(password, existant.passwordHash))) data.passwordHash = await bcrypt.hash(password, 12);
   if (Object.keys(data).length) {
     await prisma.user.update({ where: { id: existant.id }, data });
     console.log(`Compte admin mis à jour : ${email}`);

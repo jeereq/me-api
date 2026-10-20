@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { verifyToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
 
-/** Vérifie le token et recharge le compte : un compte supprimé ou rétrogradé l'est tout de suite. */
+/** Vérifie le token et recharge le compte : un compte supprimé, rétrogradé ou dont le mot de passe a changé l'est tout de suite. */
 export const authenticateJWT = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -11,13 +11,18 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
     return;
   }
   try {
-    const { userId } = verifyToken(header.substring(7));
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, role: true } });
+    const { userId, iat } = verifyToken(header.substring(7));
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, role: true, motDePasseLe: true } });
     if (!user) {
       res.status(401).json({ error: 'Compte introuvable' });
       return;
     }
-    req.user = user;
+    // Mot de passe changé depuis l'ouverture de cette session : on la ferme.
+    if (user.motDePasseLe && (iat ?? 0) * 1000 < user.motDePasseLe.getTime()) {
+      res.status(401).json({ error: 'Mot de passe changé, reconnecte-toi.' });
+      return;
+    }
+    req.user = { id: user.id, email: user.email, nom: user.nom, role: user.role };
     next();
   } catch {
     res.status(401).json({ error: 'Session expirée, reconnecte-toi.' });

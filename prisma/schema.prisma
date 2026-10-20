@@ -18,8 +18,15 @@ enum Role {
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
-  passwordHash String
+  /// Absent pour un compte créé avec Google (sans mot de passe).
+  passwordHash String?
   nom          String   @default("")
+  /// Adresse confirmée par le lien reçu par email (ou par Google).
+  emailVerifie Boolean  @default(false)
+  /// Identifiant Google (« sub ») pour « Continuer avec Google ».
+  googleId     String?  @unique
+  /// Dernier changement de mot de passe : les sessions ouvertes avant sont refusées.
+  motDePasseLe DateTime?
   role         Role     @default(UTILISATEUR)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -29,6 +36,7 @@ model User {
   integrations Integration[]
   notifications Notification[]
   abonnementsPush PushAbonnement[]
+  jetons       JetonCompte[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -111,4 +119,25 @@ model PushAbonnement {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+enum TypeJeton {
+  VERIFICATION
+  REINITIALISATION
+  CONNEXION
+}
+
+/// Lien à usage unique envoyé par email (confirmation, nouveau mot de passe) ou code de retour de « Continuer avec Google ».
+/// Seule l'empreinte SHA-256 du jeton est gardée.
+model JetonCompte {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      TypeJeton
+  empreinte String    @unique
+  expireLe  DateTime
+  utiliseLe DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, type])
 }

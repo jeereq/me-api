@@ -5,6 +5,12 @@ const password = z.string({ required_error: 'Mot de passe requis' }).min(8, 'Le 
 
 export const registerSchema = z.object({ body: z.object({ email, password, nom: z.string().trim().max(80).optional() }) });
 export const loginSchema = z.object({ body: z.object({ email, password: z.string().min(1, 'Mot de passe requis') }) });
+export const emailSchema = z.object({ body: z.object({ email }) });
+const jeton = z.string({ required_error: 'Lien incomplet' }).min(10, 'Lien incomplet').max(200);
+export const jetonSchema = z.object({ body: z.object({ jeton }) });
+export const reinitialiserSchema = z.object({ body: z.object({ jeton, password }) });
+export const codeSchema = z.object({ body: z.object({ code: jeton }) });
+export const supprimerCompteSchema = z.object({ body: z.object({ confirmation: z.string({ required_error: 'Confirmation requise' }).max(320) }) });
 const fuseauValide = (f: string) => {
   try {
     new Intl.DateTimeFormat('fr', { timeZone: f });

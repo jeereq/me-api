@@ -36,15 +36,23 @@ Ensuite, dans l'app mobile, mets l'adresse du serveur dans `EXPO_PUBLIC_API_URL`
 
 ## API
 
-Toutes les routes sauf `health`, `register` et `login` demandent l'en-tête `Authorization: Bearer <token>`.
+Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent l'en-tête `Authorization: Bearer <token>`.
 
 | Méthode | Route | Rôle | Effet |
 | --- | --- | --- | --- |
 | GET | `/api/health` | public | Le serveur répond |
-| POST | `/api/auth/register` | public | `{ email, password, nom? }` → `{ token, user }` |
-| POST | `/api/auth/login` | public | `{ email, password }` → `{ token, user }` |
-| GET | `/api/auth/me` | compte | Le compte connecté |
-| PATCH | `/api/auth/me` | compte | `{ nom?, motDePasseActuel?, nouveauMotDePasse? }` |
+| GET | `/api/auth/options` | public | `{ google, email }` : connexion Google et emails de compte disponibles |
+| POST | `/api/auth/register` | public | `{ email, password, nom? }` → `{ token, user }`, ou `{ verification: true, email }` si l'email doit être confirmé |
+| POST | `/api/auth/login` | public | `{ email, password }` → `{ token, user }` ; 403 `EMAIL_NON_VERIFIE` tant que l'email n'est pas confirmé |
+| POST | `/api/auth/verifier` | public | `{ jeton }` (lien reçu par email) → `{ token, user }` |
+| POST | `/api/auth/verifier/renvoyer` | public | `{ email }` : renvoie le lien de confirmation |
+| POST | `/api/auth/oubli` | public | `{ email }` : envoie un lien de réinitialisation (1 h) |
+| POST | `/api/auth/reinitialiser` | public | `{ jeton, password }` → `{ token, user }` ; ferme les autres sessions |
+| GET | `/api/auth/google/debut?retour=` | public | Redirige vers Google ; au retour, l'app reçoit `?google=<code>` (ou `?erreur_google=`) |
+| POST | `/api/auth/google/echange` | public | `{ code }` → `{ token, user }` |
+| GET | `/api/auth/me` | compte | Le compte connecté (`motDePasse`, `google` : modes de connexion) |
+| PATCH | `/api/auth/me` | compte | `{ nom?, motDePasseActuel?, nouveauMotDePasse? }` ; un changement de mot de passe renvoie un nouveau `token` |
+| DELETE | `/api/auth/me` | compte | `{ confirmation: email }` : supprime le compte et toutes ses données |
 | GET | `/api/espace` | compte | `{ espace: { data, majLe } \| null }` |
 | PUT | `/api/espace` | compte | `{ data }` → `{ majLe }` |
 | GET | `/api/config` | compte | `{ config }` |
@@ -78,6 +86,13 @@ Règles :
 - Le dernier admin ne peut être ni rétrogradé ni supprimé.
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.
+
+## Comptes : Google, confirmation, mot de passe oublié
+
+- **Confirmation de l'email** : si SendGrid et l'adresse de l'app (`APP_URL`) sont configurés, un nouveau compte reçoit un lien (valable 24 h) et ne peut se connecter qu'après l'avoir ouvert. Sinon, le compte est actif tout de suite. Les comptes créés avant cette version sont considérés comme confirmés.
+- **Mot de passe oublié** : lien valable 1 h, à usage unique ; le nouveau mot de passe ferme toutes les autres sessions. Les demandes répondent pareil que l'email ait un compte ou non.
+- **Continuer avec Google** : utilise le même client OAuth que les sources Google (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL`), avec seulement `openid email profile`. Ajoute l'URI de redirection `{PUBLIC_URL}/api/auth/google/callback` dans la console Google. Un compte existant avec la même adresse est relié (s'il n'avait jamais été confirmé, son mot de passe est retiré, par sécurité).
+- Les liens des emails et le retour de Google pointent vers `APP_URL` (sinon la première adresse https d'`APP_REDIRECT_URLS`). Seule l'empreinte des jetons est gardée en base.
 
 ## Rappels (app et email)
 
