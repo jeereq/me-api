@@ -56,3 +56,19 @@ export const pushAbonnementSchema = z.object({
   body: z.object({ endpoint, keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(4).max(100) }), appareil: z.string().max(120).optional() }),
 });
 export const pushDesabonnementSchema = z.object({ body: z.object({ endpoint }) });
+
+// Équipes : un espace partagé entre plusieurs comptes, avec un rôle par membre (voir services/equipes/droits.ts).
+const nomEquipe = z.string({ required_error: "Nom de l'équipe requis" }).trim().min(1, "Nom de l'équipe requis").max(60);
+const emojiEquipe = z.string().trim().max(8).optional();
+const roleEquipe = z.enum(['PROPRIETAIRE', 'MEMBRE', 'LECTEUR'], { required_error: 'Rôle requis', invalid_type_error: 'Rôle inconnu' });
+const equipeParams = z.object({ id: z.string().min(1) });
+
+export const equipeParamsSchema = z.object({ params: equipeParams });
+export const creerEquipeSchema = z.object({ body: z.object({ nom: nomEquipe, emoji: emojiEquipe }) });
+export const patchEquipeSchema = z.object({ params: equipeParams, body: z.object({ nom: nomEquipe.optional(), emoji: emojiEquipe }) });
+export const inviterEquipeSchema = z.object({ params: equipeParams, body: z.object({ email, role: roleEquipe }) });
+export const invitationParamsSchema = z.object({ params: equipeParams.extend({ invitationId: z.string().min(1) }) });
+export const jetonInvitationSchema = z.object({ body: z.object({ jeton }) });
+export const equipeMembreParamsSchema = z.object({ params: equipeParams.extend({ membreId: z.string().min(1) }) });
+export const roleMembreSchema = z.object({ params: equipeParams.extend({ membreId: z.string().min(1) }), body: z.object({ role: roleEquipe }) });
+export const putEspaceEquipeSchema = z.object({ params: equipeParams, body: z.object({ data: document, baseRevision: z.number().int().min(0).optional() }) });

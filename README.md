@@ -58,6 +58,18 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/espace` | compte | `{ espace: { data, majLe, revision } \| null }` |
 | PUT | `/api/espace` | compte | `{ data, baseRevision? }` → `{ majLe, revision }`, ou **409** `{ code: "CONFLIT", espace }` (voir ci-dessous) |
 | GET | `/api/config` | compte | `{ config }` |
+| GET | `/api/equipes` | compte | Les équipes du compte, avec leurs membres (et les invitations en attente pour un propriétaire) |
+| POST | `/api/equipes` | compte | `{ nom, emoji? }` → `{ id }` ; celui qui crée est propriétaire |
+| PATCH | `/api/equipes/:id` | propriétaire | `{ nom?, emoji? }` |
+| DELETE | `/api/equipes/:id` | propriétaire | Supprime l'équipe, ses membres, ses invitations et son espace |
+| POST | `/api/equipes/:id/invitations` | propriétaire | `{ email, role }` → envoie le lien par email, ou le renvoie dans `lien` si les emails ne sont pas configurés |
+| DELETE | `/api/equipes/:id/invitations/:invitationId` | propriétaire | Annule une invitation en attente |
+| POST | `/api/equipes/invitation/apercu` | compte | `{ jeton }` → quelle équipe, qui invite, et si ce compte peut accepter |
+| POST | `/api/equipes/invitation/rejoindre` | compte | `{ jeton }` → `{ id }` ; le compte doit porter l'adresse invitée |
+| PATCH | `/api/equipes/:id/membres/:membreId` | propriétaire | `{ role }` |
+| DELETE | `/api/equipes/:id/membres/:membreId` | propriétaire, ou soi-même | Retire quelqu'un, ou quitte l'équipe |
+| GET | `/api/equipes/:id/espace` | membre | `{ espace: { data, majLe, revision } \| null }` |
+| PUT | `/api/equipes/:id/espace` | membre sauf lecteur | `{ data, baseRevision? }` → `{ majLe, revision }`, ou **409** `{ code: "CONFLIT", espace }` |
 | PUT | `/api/config` | admin | `{ data }` → `{ config }` |
 | GET | `/api/membres` | admin | Liste des comptes |
 | PATCH | `/api/membres/:id` | admin | `{ role: "ADMIN" \| "UTILISATEUR" }` |
@@ -127,6 +139,22 @@ N est le « délai avant relance » de la configuration système (3 jours par d�
 
 Pour activer un service, crée son application OAuth (les étapes sont dans `.env.example`), remplis ses variables, `PUBLIC_URL` et `ENCRYPTION_KEY`, puis redémarre. Le bouton « Connecter » apparaît alors dans l'app.
 
+## Équipes : un espace partagé
+
+Une équipe réunit plusieurs comptes autour d'un **espace partagé** : budgets, projets, tâches et habitudes communs, à côté de l'espace privé de chacun.
+
+Trois rôles (`src/services/equipes/droits.ts`) :
+
+- **Propriétaire** : tout, y compris inviter, changer un rôle, retirer quelqu'un et supprimer l'équipe.
+- **Membre** : lit et écrit l'espace partagé.
+- **Lecteur** : lit seulement ; une écriture renvoie **403** `LECTURE_SEULE`.
+
+Une équipe garde toujours au moins un propriétaire : rétrograder ou retirer le dernier renvoie **400** `DERNIER_PROPRIETAIRE`.
+
+**Invitations** : un lien valable 7 jours, à usage unique, dont seule l'empreinte SHA-256 est gardée, comme les liens de compte. Le compte qui accepte doit porter l'adresse invitée (sinon **403** `AUTRE_ADRESSE`). Sans SendGrid ni `APP_URL`, la réponse contient le `lien` : à celui qui invite de le transmettre. On n'invite pas directement un propriétaire : on nomme la personne une fois qu'elle a rejoint.
+
+L'espace de l'équipe suit **exactement les mêmes révisions et les mêmes conflits** que l'espace privé : les deux passent par `src/services/espaces/document.ts` (voir la section suivante).
+
 ## Synchro entre appareils : versions et conflits
 
 Chaque espace a un numéro de `revision`, augmenté de 1 à chaque écriture. L'app envoie avec son `PUT` la `baseRevision` qu'elle a lue en dernier ; l'écriture n'a lieu que si le serveur est encore à cette version (une seule requête SQL, donc sans course entre deux appareils). Sinon le serveur répond **409** avec la version actuelle, l'app fusionne les deux versions puis réessaie, au lieu d'écraser les changements de l'autre appareil.
@@ -154,12 +182,14 @@ npm test    # lanceur natif de Node via tsx : rappels, chiffrement des jetons, J
 ## Organisation
 
 ```
-prisma/schema.prisma     modèles User, Espace, Config, Integration, VerrouCron…
+prisma/schema.prisma     modèles User, Espace, Config, Integration, Equipe, VerrouCron…
 src/app.ts               serveur Express et gestion des erreurs
 src/routes/              une route par domaine
 src/controllers/         lecture de la requête, réponse HTTP
 src/services/            logique métier et accès à la base
 src/services/integrations/  un connecteur par service externe
+src/services/espaces/    le contrat de révision, partagé par l'espace privé et celui d'une équipe
+src/services/equipes/    les droits de chaque rôle
 src/cron/                synchronisation (15 min) et rappels (5 min)
 src/middlewares/         JWT, rôle admin, validation zod, limites de débit
 src/validators/          schémas zod

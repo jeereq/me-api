@@ -39,6 +39,7 @@ model User {
   notifications Notification[]
   abonnementsPush PushAbonnement[]
   jetons       JetonCompte[]
+  equipes      EquipeMembre[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -153,4 +154,65 @@ model JetonCompte {
   createdAt DateTime  @default(now())
 
   @@index([userId, type])
+}
+
+enum RoleEquipe {
+  PROPRIETAIRE
+  MEMBRE
+  LECTEUR
+}
+
+/// Une équipe : des comptes « me » qui partagent un espace (budgets, objectifs, projets, tâches, habitudes).
+model Equipe {
+  id          String   @id @default(cuid())
+  nom         String
+  emoji       String   @default("👥")
+  createdAt   DateTime @default(now())
+  membres     EquipeMembre[]
+  invitations InvitationEquipe[]
+  espace      EspaceEquipe?
+}
+
+/// Un compte dans une équipe, avec ce qu'il y a le droit de faire.
+model EquipeMembre {
+  id       String     @id @default(cuid())
+  equipeId String
+  equipe   Equipe     @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     RoleEquipe @default(MEMBRE)
+  depuisLe DateTime   @default(now())
+
+  @@unique([equipeId, userId])
+  @@index([userId])
+}
+
+/// Invitation à rejoindre une équipe : un lien à usage unique, envoyé à une adresse email, qui expire.
+/// Seule l'empreinte SHA-256 du jeton est gardée, comme pour les liens de compte.
+model InvitationEquipe {
+  id        String     @id @default(cuid())
+  equipeId  String
+  equipe    Equipe     @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+  /// Adresse invitée, en minuscules : seul le compte qui porte cette adresse peut accepter.
+  email     String
+  role      RoleEquipe @default(MEMBRE)
+  empreinte String     @unique
+  /// Qui a invité (gardé même si le compte part de l'équipe).
+  parNom    String     @default("")
+  expireLe  DateTime
+  utiliseLe DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([equipeId])
+  @@index([email])
+}
+
+/// L'espace partagé d'une équipe : un document JSON et les mêmes révisions que l'espace privé.
+model EspaceEquipe {
+  equipeId String   @id
+  equipe   Equipe   @relation(fields: [equipeId], references: [id], onDelete: Cascade)
+  data     Json
+  majLe    DateTime @default(now())
+  /// Numéro de version, +1 à chaque écriture : un appareil qui écrit sur une version périmée est refusé (409).
+  revision Int      @default(0)
 }

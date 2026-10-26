@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import assistantRoutes from './routes/assistant.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import configRoutes from './routes/config.routes.js';
+import equipeRoutes from './routes/equipe.routes.js';
 import espaceRoutes from './routes/espace.routes.js';
 import membreRoutes from './routes/membre.routes.js';
 import { initRappelsCron } from './cron/rappels.js';
@@ -41,6 +42,7 @@ app.get('/api/health', async (_req, res) => {
 });
 app.use('/api/auth', authRoutes);
 app.use('/api/espace', espaceRoutes);
+app.use('/api/equipes', equipeRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/membres', membreRoutes);
 app.use('/api/assistant', assistantRoutes);

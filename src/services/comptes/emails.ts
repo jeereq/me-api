@@ -53,3 +53,19 @@ export const EmailsCompte = {
     return EmailService.envoyer(email, 'Réinitialise ton mot de passe Me', m.texte, m.html);
   },
 };
+
+export const EmailsEquipe = {
+  /** Le lien d'invitation, renvoyé à celui qui invite quand les emails ne partent pas d'ici. */
+  lienInvitation: (jeton: string) => `${adresseApp() ?? ''}/equipe?invitation=${encodeURIComponent(jeton)}`,
+
+  invitation(email: string, jeton: string, equipe: string, parNom: string) {
+    const m = gabarit(
+      'Invitation',
+      `${parNom} t'invite à rejoindre l'équipe « ${equipe} » sur Me. En acceptant, tu partageras ses budgets, ses projets, ses tâches et ses habitudes.`,
+      "Rejoindre l'équipe",
+      EmailsEquipe.lienInvitation(jeton),
+      "Ce lien est valable 7 jours et ne sert qu'une fois. Il faut l'ouvrir avec le compte Me qui porte cette adresse email. Si tu ne connais pas cette équipe, ignore cet email.",
+    );
+    return EmailService.envoyer(email, `${parNom} t'invite dans « ${equipe} » sur Me`, m.texte, m.html);
+  },
+};
