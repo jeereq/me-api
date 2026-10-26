@@ -38,3 +38,30 @@ describe('budgets qui suivent des catégories', () => {
     assert.equal(p?.budgets.find((b) => b.nom.includes('Restos'))?.depense ?? 0, 0);
   });
 });
+
+describe('budgets jusqu’à une date', () => {
+  const jour = '2026-11-10';
+  it('ne compte plus un budget après sa date de fin', () => {
+    const b = [{ id: 'v', nom: 'Vacances', emoji: '🏖️', montant: 300, periode: 'mois' as const, fin: '2026-10-31' }];
+    const p = prevision({ budgets: b, depenses: [{ id: 'a', montant: 50, budget: 'v', date: jour }] }, 'mois', jour);
+    assert.equal(p?.plafond, 0);
+  });
+  it('répartit une enveloppe sur toute sa durée', () => {
+    // 600 du 1er au 30 novembre puis rien : le mois de novembre porte tout, la semaine en porte 7/30.
+    const b = [{ id: 'e', nom: 'Travaux', emoji: '🔨', montant: 600, periode: 'mois' as const, debut: '2026-11-01', fin: '2026-11-30', enveloppe: true }];
+    assert.equal(prevision({ budgets: b, depenses: [] }, 'mois', jour)?.plafond, 600);
+    assert.equal(prevision({ budgets: b, depenses: [] }, 'semaine', jour)?.plafond, 140);
+  });
+  it('prorate un budget qui s’arrête en cours de mois', () => {
+    const b = [{ id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const, fin: '2026-11-15' }];
+    assert.equal(prevision({ budgets: b, depenses: [] }, 'mois', jour)?.plafond, 150);
+  });
+  it('ne range plus par catégorie dans un budget terminé', () => {
+    const b = [
+      { id: 'g', nom: 'Total', emoji: '💰', montant: 1000, periode: 'mois' as const, global: true },
+      { id: 'r', nom: 'Restos', emoji: '🍽️', montant: 10, periode: 'mois' as const, categories: ['sortie'], fin: '2026-10-31' },
+    ];
+    const p = prevision({ budgets: b, depenses: [{ id: 'a', montant: 80, budget: null, categories: ['sortie'], date: jour }] }, 'mois', jour);
+    assert.equal(p?.budgets.length, 0);
+  });
+});

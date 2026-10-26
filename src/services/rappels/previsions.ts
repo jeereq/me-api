@@ -6,7 +6,7 @@
 
 type Periode = 'jour' | 'semaine' | 'mois' | 'trimestre' | 'annee';
 export type Horizon = Periode;
-type Budget = { id: string; nom: string; emoji: string; montant: number; periode: Periode; global?: boolean; /** Catégories suivies : une dépense de l'une d'elles va dans ce budget si elle n'en a pas choisi un. */ categories?: string[] };
+type Budget = { id: string; nom: string; emoji: string; montant: number; periode: Periode; global?: boolean; /** Catégories suivies : une dépense de l'une d'elles va dans ce budget si elle n'en a pas choisi un. */ categories?: string[]; /** Premier et dernier jour où le budget compte (facultatifs). */ debut?: string; fin?: string; /** Le montant couvre toute la durée `debut`–`fin` au lieu de revenir chaque période. */ enveloppe?: boolean };
 type Depense = { id: string; montant: number; budget: string | null; categories?: string[]; date: string; /** Moitié d'un virement entre deux comptes de l'utilisateur : ce n'est pas une dépense. */ lien?: string };
 export type AlertesFinances = { horizons?: Partial<Record<Horizon, boolean>>; seuil?: number; heure?: string; matin?: boolean; push?: boolean; email?: boolean };
 export type FinancesRappels = { devise?: string; budgets?: Budget[]; depenses?: Depense[]; alertes?: AlertesFinances };
@@ -40,9 +40,21 @@ export function bornes(p: Periode, d: string) {
 }
 
 const plafond = (b: Budget, vue: Periode) => (b.periode === vue ? b.montant : arrondi((b.montant * PAR_AN[b.periode]) / PAR_AN[vue]));
-function plafondTotal(budgets: Budget[], vue: Periode) {
-  const g = budgets.find((b) => b.global);
-  return g ? plafond(g, vue) : budgets.reduce((s, b) => s + plafond(b, vue), 0);
+/**
+ * Plafond d'un budget sur les jours `debut`–`fin` (une période de la vue) : 0 hors de ses dates, au prorata des jours
+ * couverts sinon ; une enveloppe est répartie sur toute sa durée. Même calcul que l'app (finances.ts, `plafondSur`).
+ */
+function plafondSur(b: Budget, vue: Periode, debut: string, fin: string) {
+  const a = b.debut && b.debut > debut ? b.debut : debut;
+  const z = b.fin && b.fin < fin ? b.fin : fin;
+  if (a > z) return 0;
+  if (b.enveloppe && b.debut && b.fin) return arrondi((b.montant * jours(a, z)) / jours(b.debut, b.fin));
+  const p = plafond(b, vue);
+  return a === debut && z === fin ? p : arrondi((p * jours(a, z)) / jours(debut, fin));
+}
+function plafondTotal(budgets: Budget[], vue: Periode, debut: string, fin: string) {
+  const g = budgets.find((b) => b.global && plafondSur(b, vue, debut, fin) > 0);
+  return g ? plafondSur(g, vue, debut, fin) : budgets.filter((b) => !b.global).reduce((s, b) => s + plafondSur(b, vue, debut, fin), 0);
 }
 /** Le budget total est fixé par jour (budget global « par jour », ou seulement des budgets par jour). */
 const budgetJournalier = (budgets: Budget[]) => {
@@ -53,13 +65,15 @@ const budgetJournalier = (budgets: Budget[]) => {
  * Le budget d'une dépense : celui choisi à la main, sinon le premier budget (hors global) qui suit l'une de ses catégories.
  * Même règle que l'app (me-mobile/src/lib/categories.ts, `idBudgetDe`).
  */
-export function idBudgetDe(budgets: Budget[], d: { budget?: string | null; categories?: string[] }): string | null {
+export function idBudgetDe(budgets: Budget[], d: { budget?: string | null; categories?: string[]; date?: string }): string | null {
   if (d.budget) {
     const b = budgets.find((x) => x.id === d.budget && !x.global);
     if (b) return b.id;
   }
   if (!d.categories?.length) return null;
-  return budgets.find((b) => !b.global && b.categories?.some((c) => d.categories!.includes(c)))?.id ?? null;
+  // Un budget daté ne suit ses catégories que pendant ses dates.
+  const actif = (b: Budget) => !d.date || ((!b.debut || d.date >= b.debut) && (!b.fin || d.date <= b.fin));
+  return budgets.find((b) => !b.global && actif(b) && b.categories?.some((c) => d.categories!.includes(c)))?.id ?? null;
 }
 const somme = (dep: Depense[], a: string, b: string, budget?: string, budgets: Budget[] = []) => arrondi(dep.filter((x) => x.date >= a && x.date <= b && (budget === undefined || idBudgetDe(budgets, x) === budget)).reduce((s, x) => s + x.montant, 0));
 
@@ -82,7 +96,7 @@ export function prevision(f: FinancesRappels, horizon: Horizon, d: string, seuil
     const etatJour = (x: number, pl: number): Etat => (x > pl ? 'depasse' : x > 0 && x >= seuil * pl ? 'risque' : 'ok');
     // Budgets de catégorie fixés par jour : comparés à la dépense du jour.
     const lignes = budgets
-      .filter((b) => !b.global && b.periode === 'jour')
+      .filter((b) => !b.global && b.periode === 'jour' && !b.enveloppe && plafondSur(b, 'jour', d, d) > 0)
       .map((b) => {
         const y = somme(dep, d, d, b.id, budgets);
         return { nom: `${b.emoji} ${b.nom}`, plafond: b.montant, depense: y, projection: y, etat: etatJour(y, b.montant) };
@@ -91,12 +105,12 @@ export function prevision(f: FinancesRappels, horizon: Horizon, d: string, seuil
       .sort((a, b) => b.depense / b.plafond - a.depense / a.plafond);
     if (budgetJournalier(budgets)) {
       // Budget fixé par jour : le même montant chaque jour, sans report.
-      const pl = arrondi(plafondTotal(budgets, 'jour'));
+      const pl = arrondi(plafondTotal(budgets, 'jour', d, d));
       return { horizon, plafond: pl, depense: auj, projection: auj, parJour: pl, etat: etatJour(auj, pl), budgets: lignes };
     }
     // Sinon, ce qui reste du mois, réparti sur les jours restants (aujourd'hui compris).
     const { debut, fin } = bornes('mois', d);
-    const pl = plafondTotal(budgets, 'mois');
+    const pl = plafondTotal(budgets, 'mois', debut, fin);
     const avant = somme(dep, debut, addDays(d, -1));
     const parJour = Math.max(0, arrondi((pl - avant) / jours(d, fin)));
     return { horizon, plafond: parJour, depense: auj, projection: auj, parJour: Math.max(0, arrondi((pl - avant - auj) / Math.max(1, jours(d, fin) - 1))), etat: etatJour(auj, parJour), budgets: lignes };
@@ -106,18 +120,18 @@ export function prevision(f: FinancesRappels, horizon: Horizon, d: string, seuil
   const total = jours(debut, fin);
   const assez = ecoules >= JOURS_MIN[horizon];
   const etat = (x: number, pl: number, proj: number): Etat => (x > pl ? 'depasse' : assez && x > 0 && proj >= seuil * pl && (seuil < 1 || proj > pl) ? 'risque' : 'ok');
-  const pl = arrondi(plafondTotal(budgets, horizon));
+  const pl = arrondi(plafondTotal(budgets, horizon, debut, fin));
   const x = somme(dep, debut, d);
   const proj = arrondi((x / ecoules) * total);
   const lignes = budgets
     .filter((b) => !b.global)
     .map((b) => {
-      const p = plafond(b, horizon);
+      const p = plafondSur(b, horizon, debut, fin);
       const y = somme(dep, debut, d, b.id, budgets);
       const pr = arrondi((y / ecoules) * total);
       return { nom: `${b.emoji} ${b.nom}`, plafond: p, depense: y, projection: pr, etat: etat(y, p, pr) };
     })
-    .filter((b) => b.etat !== 'ok')
+    .filter((b) => b.etat !== 'ok' && (b.plafond > 0 || b.depense > 0))
     .sort((a, b) => b.projection / b.plafond - a.projection / a.plafond);
   return { horizon, plafond: pl, depense: x, projection: proj, parJour: Math.max(0, arrondi((pl - x) / jours(d, fin))), etat: etat(x, pl, proj), budgets: lignes };
 }
