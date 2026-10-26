@@ -104,7 +104,7 @@ describe('rappelsDuJour avec des réglages personnalisés', () => {
     assert.match(resume[0].corps, /2 habitudes/);
     const coach = sansBriefing(h('coach'), {});
     assert.equal(coach.length, 1);
-    assert.equal(coach[0].titre, 'Coach me');
+    assert.equal(coach[0].titre, 'Coach Me');
   });
   it('bilan de la semaine déplacé au vendredi, ou supprimé', () => {
     const w = espace({ taches: [tache({ mode: 'hebdo', echeance: '2026-10-30' })] });

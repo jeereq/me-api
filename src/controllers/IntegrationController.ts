@@ -34,14 +34,14 @@ export const IntegrationController = {
   trelloRetour: (_req: Request, res: Response) => {
     const nonce = randomBytes(16).toString('base64');
     res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; style-src 'unsafe-inline'`);
-    res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>me</title>
+    res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Me</title>
 <body style="background:#04080C;color:#E6F7FF;font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0"><p id="m">Connexion à Trello…</p>
 <script nonce="${nonce}">
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
 const state = new URLSearchParams(location.search).get('state');
 fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, token }) })
   .then((r) => r.json()).then((r) => { location.replace(r.redirection); })
-  .catch(() => { document.getElementById('m').textContent = 'La connexion a échoué. Retourne dans me et réessaie.'; });
+  .catch(() => { document.getElementById('m').textContent = 'La connexion a échoué. Retourne dans Me et réessaie.'; });
 </script>`);
   },
 

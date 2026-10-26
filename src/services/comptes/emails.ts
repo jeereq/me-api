@@ -23,7 +23,7 @@ function gabarit(titre: string, intro: string, bouton: string, lien: string, fin
   const html =
     `<div style="background:#04080C;padding:28px 16px;font-family:-apple-system,Segoe UI,Roboto,sans-serif">` +
     `<div style="max-width:520px;margin:0 auto">` +
-    `<div style="font-size:30px;font-weight:800;color:#DCF3FF">me<span style="color:#38D9FF">.</span></div>` +
+    `<div style="font-size:30px;font-weight:800;color:#DCF3FF">Me<span style="color:#38D9FF">.</span></div>` +
     `<div style="color:#38D9FF;font-family:monospace;font-size:11px;letter-spacing:2px;margin:4px 0 20px">${echapper(titre.toUpperCase())}</div>` +
     `<p style="color:#DCF3FF;font-size:15px;line-height:1.5">${echapper(intro)}</p>` +
     `<p style="margin:24px 0"><a href="${echapper(lien)}" style="background:#38D9FF;color:#04080C;font-weight:700;text-decoration:none;padding:12px 20px;border-radius:10px;display:inline-block">${echapper(bouton)}</a></p>` +
@@ -37,8 +37,8 @@ function gabarit(titre: string, intro: string, bouton: string, lien: string, fin
 export const EmailsCompte = {
   verification(email: string, jeton: string) {
     const lien = `${adresseApp()}/verifier?jeton=${encodeURIComponent(jeton)}`;
-    const m = gabarit('Confirme ton email', 'Bienvenue sur me ! Confirme ton adresse email pour activer ton compte.', 'Confirmer mon email', lien, "Ce lien est valable 24 heures. Si tu n'as pas créé de compte sur me, ignore cet email.");
-    return EmailService.envoyer(email, 'Confirme ton email pour me', m.texte, m.html);
+    const m = gabarit('Confirme ton email', 'Bienvenue sur Me ! Confirme ton adresse email pour activer ton compte.', 'Confirmer mon email', lien, "Ce lien est valable 24 heures. Si tu n'as pas créé de compte sur me, ignore cet email.");
+    return EmailService.envoyer(email, 'Confirme ton email pour Me', m.texte, m.html);
   },
 
   reinitialisation(email: string, jeton: string) {
@@ -50,6 +50,6 @@ export const EmailsCompte = {
       lien,
       "Ce lien est valable 1 heure et ne sert qu'une fois. Si tu n'as rien demandé, ignore cet email : ton mot de passe ne change pas.",
     );
-    return EmailService.envoyer(email, 'Réinitialise ton mot de passe me', m.texte, m.html);
+    return EmailService.envoyer(email, 'Réinitialise ton mot de passe Me', m.texte, m.html);
   },
 };
