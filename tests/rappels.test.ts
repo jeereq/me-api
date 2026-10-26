@@ -101,11 +101,11 @@ describe('rappelsDuJour : habitudes et bilan', () => {
 
   it('coach : un message le soir avec les habitudes du jour, sauf si elles sont cochées', () => {
     const e = espace({ habitudes: [habitude({}), habitude({ id: 'h2', nom: 'Lecture' })] });
-    const coach = rappelsDuJour(e, cfg, LUNDI).find((x) => x.titre === 'Coach me')!;
+    const coach = rappelsDuJour(e, cfg, LUNDI).find((x) => x.titre === 'Coach Me')!;
     assert.equal(coach.quand, `${LUNDI}T19:00`);
     assert.match(coach.corps, /2 habitudes/);
     const faites = espace({ habitudes: [habitude({ coches: [LUNDI] })] });
-    assert.equal(rappelsDuJour(faites, cfg, LUNDI).some((x) => x.titre === 'Coach me'), false);
+    assert.equal(rappelsDuJour(faites, cfg, LUNDI).some((x) => x.titre === 'Coach Me'), false);
   });
 
   it('une habitude mensuelle tombe le bon jour, et le dernier jour d’un mois court', () => {

@@ -106,7 +106,7 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     const pts = restants.reduce((s, m) => s + m.points, 0) + POINTS.parfait;
     const suite = pointsDuJour ? `Déjà ${pointsDuJour} pts aujourd'hui.` : serie ? `Série de ${pluriel(serie, 'jour', 'jours')} à tenir.` : `Pour commencer : ${restants[0].titre}.`;
     add(matin, 'Ta mission du jour est prête', `${pluriel(restants.length, 'action', 'actions')}, jusqu'à ${pts} pts à gagner. ${suite}${budget}`, 'briefing', 'briefing', true);
-  } else add(matin, 'Ton briefing me est prêt', `Agenda, relances, tâches et habitudes du jour.${budget}`, 'briefing', 'briefing', true);
+  } else add(matin, 'Ton briefing Me est prêt', `Agenda, relances, tâches et habitudes du jour.${budget}`, 'briefing', 'briefing', true);
 
   // Alertes de budget : une seule fois par période et par niveau, d'où une clé sans date du jour.
   for (const a of fin.alertes) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux });
@@ -141,7 +141,7 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     const r = reglesDuMode(c, h.mode);
     if (habitDue(h, jour)) {
       if (r.resume) (resumes[h.mode] ||= []).push(h.nom);
-      else r.jourJ.forEach((t, i) => (r.jourJ.length === 1 ? add(heure(t), h.nom, "C'est le jour.", h.mode, h.id) : i === 0 ? add(heure(t), `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id) : add(heure(t), `Pas encore fait : ${h.nom}`, 'Coche-le dans me dès que c’est fait.', h.mode, h.id)));
+      else r.jourJ.forEach((t, i) => (r.jourJ.length === 1 ? add(heure(t), h.nom, "C'est le jour.", h.mode, h.id) : i === 0 ? add(heure(t), `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id) : add(heure(t), `Pas encore fait : ${h.nom}`, 'Coche-le dans Me dès que c’est fait.', h.mode, h.id)));
     } else if (!r.resume && h.frequence !== 'quotidien') {
       if (pastDue(h, jour)) {
         if (r.retard) add(heure(r.heure), `En retard : ${h.nom}`, 'Toujours pas coché pour cette période.', h.mode, h.id);
@@ -152,7 +152,7 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     const noms = resumes[m];
     if (!noms?.length) continue;
     const corps = `${noms.length > 1 ? `${noms.length} habitudes` : '1 habitude'} à tenir aujourd'hui : ${noms.slice(0, 3).join(', ')}.`;
-    if (m === 'coach') add(soir, 'Coach me', `${corps} Ne casse pas ta série.`, 'coach', 'coach');
+    if (m === 'coach') add(soir, 'Coach Me', `${corps} Ne casse pas ta série.`, 'coach', 'coach');
     else add(soir, 'Tes habitudes du jour', corps, m, `resume-${m}`);
   }
 

@@ -13,8 +13,8 @@ type Prefs = { app?: boolean; email?: boolean };
 const echapper = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 function email(rappels: Rappel[], nom: string) {
-  const sujet = rappels.length === 1 ? rappels[0].titre : `${rappels.length} rappels de me`;
-  const texte = `${nom ? `Bonjour ${nom},\n\n` : ''}${rappels.map((r) => `• ${r.titre}\n  ${r.corps}`).join('\n\n')}\n\n— me, ton assistant personnel`;
+  const sujet = rappels.length === 1 ? rappels[0].titre : `${rappels.length} rappels de Me`;
+  const texte = `${nom ? `Bonjour ${nom},\n\n` : ''}${rappels.map((r) => `• ${r.titre}\n  ${r.corps}`).join('\n\n')}\n\n— Me, ton assistant personnel`;
   const lignes = rappels
     .map(
       (r) =>
@@ -26,11 +26,11 @@ function email(rappels: Rappel[], nom: string) {
   const html =
     `<div style="background:#04080C;padding:28px 16px;font-family:-apple-system,Segoe UI,Roboto,sans-serif">` +
     `<div style="max-width:520px;margin:0 auto">` +
-    `<div style="font-size:30px;font-weight:800;color:#DCF3FF">me<span style="color:#38D9FF">.</span></div>` +
+    `<div style="font-size:30px;font-weight:800;color:#DCF3FF">Me<span style="color:#38D9FF">.</span></div>` +
     `<div style="color:#38D9FF;font-family:monospace;font-size:11px;letter-spacing:2px;margin:4px 0 20px">TES RAPPELS</div>` +
     (nom ? `<p style="color:#DCF3FF;font-size:15px">Bonjour ${echapper(nom)},</p>` : '') +
     `<table role="presentation" width="100%" cellspacing="0" cellpadding="0">${lignes}</table>` +
-    `<p style="color:#86A7B8;font-size:12px;margin-top:18px">Tu reçois cet email parce que les rappels par email sont activés dans me (Mon compte).</p>` +
+    `<p style="color:#86A7B8;font-size:12px;margin-top:18px">Tu reçois cet email parce que les rappels par email sont activés dans Me (Mon compte).</p>` +
     `</div></div>`;
   return { sujet, texte, html };
 }
@@ -95,7 +95,7 @@ export const NotificationService = {
   /** Envoie un rappel d'essai, dans l'app et par email, pour vérifier la configuration. */
   async tester(userId: string) {
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    const r: Rappel = { quand: new Date().toISOString().slice(0, 16), titre: 'Essai de notification', corps: 'Si tu lis ceci, les rappels de me fonctionnent.', mode: 'briefing', cle: `test|${Date.now()}` };
+    const r: Rappel = { quand: new Date().toISOString().slice(0, 16), titre: 'Essai de notification', corps: 'Si tu lis ceci, les rappels de Me fonctionnent.', mode: 'briefing', cle: `test|${Date.now()}` };
     await prisma.notification.create({ data: { userId, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand } });
     const push = await PushService.envoyer(userId, { titre: r.titre, corps: r.corps, mode: r.mode, tag: r.cle });
     if (!EmailService.configure()) return { email: false, push, raison: "SendGrid n'est pas configuré sur le serveur." };

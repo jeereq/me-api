@@ -10,7 +10,7 @@ export const EmailService = {
         headers: { Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           personalizations: [{ to: [{ email: to }] }],
-          from: { email: process.env.SENDGRID_FROM, name: process.env.SENDGRID_FROM_NAME || 'me' },
+          from: { email: process.env.SENDGRID_FROM, name: process.env.SENDGRID_FROM_NAME || 'Me' },
           subject: sujet,
           content: [
             { type: 'text/plain', value: texte },
