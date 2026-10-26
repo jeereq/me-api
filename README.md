@@ -55,8 +55,8 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/auth/me/export` | compte | Toutes les données du compte en JSON (espace, comptes connectés sans leurs jetons, notifications) |
 | POST | `/api/auth/me/deconnecter-tout` | compte | Ferme les sessions de tous les appareils → nouveau `{ token, user }` pour celui-ci |
 | DELETE | `/api/auth/me` | compte | `{ confirmation: email }` : supprime le compte et toutes ses données |
-| GET | `/api/espace` | compte | `{ espace: { data, majLe } \| null }` |
-| PUT | `/api/espace` | compte | `{ data }` → `{ majLe }` |
+| GET | `/api/espace` | compte | `{ espace: { data, majLe, revision } \| null }` |
+| PUT | `/api/espace` | compte | `{ data, baseRevision? }` → `{ majLe, revision }`, ou **409** `{ code: "CONFLIT", espace }` (voir ci-dessous) |
 | GET | `/api/config` | compte | `{ config }` |
 | PUT | `/api/config` | admin | `{ data }` → `{ config }` |
 | GET | `/api/membres` | admin | Liste des comptes |
@@ -122,10 +122,34 @@ N est le « délai avant relance » de la configuration système (3 jours par d�
 
 Pour activer un service, crée son application OAuth (les étapes sont dans `.env.example`), remplis ses variables, `PUBLIC_URL` et `ENCRYPTION_KEY`, puis redémarre. Le bouton « Connecter » apparaît alors dans l'app.
 
+## Synchro entre appareils : versions et conflits
+
+Chaque espace a un numéro de `revision`, augmenté de 1 à chaque écriture. L'app envoie avec son `PUT` la `baseRevision` qu'elle a lue en dernier ; l'écriture n'a lieu que si le serveur est encore à cette version (une seule requête SQL, donc sans course entre deux appareils). Sinon le serveur répond **409** avec la version actuelle, l'app fusionne les deux versions puis réessaie, au lieu d'écraser les changements de l'autre appareil.
+
+Une app plus ancienne, qui n'envoie pas `baseRevision`, continue de fonctionner : sa dernière écriture gagne, comme avant.
+
+## Tâches planifiées, plusieurs instances
+
+Les rappels (toutes les 5 min) et la synchro des comptes connectés (toutes les 15 min) tournent dans le processus du serveur. Un **verrou à bail dans la base** (table `VerrouCron`) garantit qu'un seul passage tourne à la fois, même avec plusieurs instances ou un redémarrage en plein passage : si l'instance tombe, son bail expire et une autre reprend au passage suivant.
+
+Pour ne faire tourner les tâches que sur une instance, mets `RUN_CRONS=false` sur les autres (par défaut, toutes les instances les lancent, ce qui reste sûr grâce au verrou).
+
+## Sauvegardes
+
+- **Base hébergée** (Render, Neon, Railway…) : active les sauvegardes automatiques du plan, et vérifie qu'une restauration fonctionne.
+- **Sauvegarde manuelle** : `scripts/sauvegarde.sh` fait un `pg_dump` compressé de `DATABASE_URL` (`./scripts/sauvegarde.sh [dossier]`). Restauration : `pg_restore --clean --if-exists -d "$DATABASE_URL" fichier.dump`.
+- **Données d'un seul compte** : chaque utilisateur peut les exporter avec `GET /api/auth/me/export`.
+
+## Tests
+
+```bash
+npm test    # lanceur natif de Node via tsx : rappels, chiffrement des jetons, JWT, validation
+```
+
 ## Organisation
 
 ```
-prisma/schema.prisma     modèles User, Espace, Config, Integration
+prisma/schema.prisma     modèles User, Espace, Config, Integration, VerrouCron…
 src/app.ts               serveur Express et gestion des erreurs
 src/routes/              une route par domaine
 src/controllers/         lecture de la requête, réponse HTTP
@@ -139,4 +163,4 @@ src/utils/crypto.ts      chiffrement des jetons
 
 ## Prochaines étapes
 
-Envoi des rappels par notification push depuis le serveur, et d'autres services (Notion, Asana, Todoist, iCloud).
+D'autres services (Notion, Asana, Todoist, iCloud), et, si les données grossissent, sortir de l'espace JSON unique les listes qui s'allongent (dépenses, relances, journal) vers des tables SQL.

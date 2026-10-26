@@ -25,7 +25,8 @@ export const updateMeSchema = z.object({
 });
 
 const document = z.record(z.unknown(), { invalid_type_error: 'Document JSON attendu' });
-export const putEspaceSchema = z.object({ body: z.object({ data: document }) });
+// baseRevision : la version de l'espace lue en dernier par l'appareil (absent pour les anciennes versions de l'app : la dernière écriture gagne).
+export const putEspaceSchema = z.object({ body: z.object({ data: document, baseRevision: z.number().int().min(0).optional() }) });
 export const putConfigSchema = z.object({ body: z.object({ data: document }) });
 
 export const membreParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
