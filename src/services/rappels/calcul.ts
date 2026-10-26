@@ -1,18 +1,20 @@
+import { type ConfigModes, heureDe, type Mode, reglesDuMode, MODES_LISTE } from './modes.js';
 import { alertesFinances, type FinancesRappels } from './previsions.js';
+
+export type { Mode } from './modes.js';
 
 /**
  * Calcul des rappels, repris de l'app (me-mobile/src/lib/reminders.ts) pour les envoyer depuis le serveur.
  * Tout est en heure locale de l'utilisateur, sous forme de texte : « AAAA-MM-JJ » et « AAAA-MM-JJTHH:MM ».
  */
 
-export type Mode = 'passif' | 'normal' | 'agressif' | 'coach' | 'hebdo';
 type Frequence = 'quotidien' | 'hebdo' | 'mensuel';
 type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[] };
 type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string };
 type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null };
 type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
 export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels };
-export type ConfigRappels = { routineHeure?: string; rappelSoir?: string; agressifJMoins?: number; modes?: Partial<Record<Mode, { actif?: boolean }>> };
+export type ConfigRappels = ConfigModes & { routineHeure?: string; rappelSoir?: string };
 /** canaux : pour couper le push ou l'email d'un rappel précis (alertes de budget) ; absent = selon les réglages du compte. */
 export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string; canaux?: { push: boolean; email: boolean } };
 
@@ -120,41 +122,49 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     ...(e.relances || []).filter((r) => r.statut === 'a_faire' && r.date).map((r) => ({ id: r.id, titre: `Relancer ${r.contact}`, detail: r.sujet, date: r.date, mode: r.mode })),
     ...(e.taches || []).filter((t) => t.statut !== 'fait' && t.echeance).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
   ];
+  const heure = (t: string) => heureDe(t, matin, soir);
   for (const x of dates) {
     if (!actif(x.mode)) continue;
-    if ((x.mode === 'normal' || x.mode === 'coach') && x.date === jour) add('09:00', x.titre, x.detail, x.mode, x.id);
-    if (x.mode === 'agressif') {
-      if (x.date === jour) {
-        add(matin, `Aujourd'hui : ${x.titre}`, x.detail, x.mode, x.id);
-        add(soir, `Pas encore fait : ${x.titre}`, x.detail, x.mode, x.id);
-      } else if (jour > x.date) add('09:00', `En retard : ${x.titre}`, `Prévu le ${x.date}. ${x.detail}`, x.mode, x.id);
-      else for (const j of [jMoins, 1]) if (addDays(jour, j) === x.date) add('09:00', `Dans ${j} j : ${x.titre}`, x.detail, x.mode, x.id);
-    }
+    const r = reglesDuMode(c, x.mode);
+    if (x.date === jour) {
+      // Une seule heure : le titre tel quel ; plusieurs : on insiste (« Aujourd'hui », puis « Pas encore fait »).
+      r.jourJ.forEach((t, i) => add(heure(t), r.jourJ.length === 1 ? x.titre : i === 0 ? `Aujourd'hui : ${x.titre}` : `Pas encore fait : ${x.titre}`, x.detail, x.mode, x.id));
+    } else if (jour > x.date) {
+      if (r.retard) add(heure(r.heure), `En retard : ${x.titre}`, `Prévu le ${x.date}. ${x.detail}`, x.mode, x.id);
+    } else for (const j of r.avant) if (addDays(jour, j) === x.date) add(heure(r.heure), `Dans ${j} j : ${x.titre}`, x.detail, x.mode, x.id);
   }
 
-  const coach: string[] = [];
+  // Habitudes : rappel individuel, ou message du soir regroupé pour les modes à « résumé ».
+  const resumes: Partial<Record<Mode, string[]>> = {};
   for (const h of e.habitudes || []) {
-    if (!actif(h.mode) || h.mode === 'passif' || doneIn(h, jour)) continue;
-    const due = habitDue(h, jour);
-    if (h.mode === 'normal' && due) add('09:00', h.nom, "C'est le jour.", h.mode, h.id);
-    if (h.mode === 'agressif') {
-      if (due) {
-        add(matin, `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id);
-        add(soir, `Pas encore fait : ${h.nom}`, 'Coche-le dans me dès que c’est fait.', h.mode, h.id);
-      } else if (h.frequence !== 'quotidien' && pastDue(h, jour)) add('09:00', `En retard : ${h.nom}`, 'Toujours pas coché pour cette période.', h.mode, h.id);
-      else for (const j of [jMoins, 1]) if (h.frequence !== 'quotidien' && habitDue(h, addDays(jour, j))) add('09:00', `Dans ${j} j : ${h.nom}`, 'Prépare-toi.', h.mode, h.id);
+    if (!actif(h.mode) || doneIn(h, jour)) continue;
+    const r = reglesDuMode(c, h.mode);
+    if (habitDue(h, jour)) {
+      if (r.resume) (resumes[h.mode] ||= []).push(h.nom);
+      else r.jourJ.forEach((t, i) => (r.jourJ.length === 1 ? add(heure(t), h.nom, "C'est le jour.", h.mode, h.id) : i === 0 ? add(heure(t), `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id) : add(heure(t), `Pas encore fait : ${h.nom}`, 'Coche-le dans me dès que c’est fait.', h.mode, h.id)));
+    } else if (!r.resume && h.frequence !== 'quotidien') {
+      if (pastDue(h, jour)) {
+        if (r.retard) add(heure(r.heure), `En retard : ${h.nom}`, 'Toujours pas coché pour cette période.', h.mode, h.id);
+      } else for (const j of r.avant) if (habitDue(h, addDays(jour, j))) add(heure(r.heure), `Dans ${j} j : ${h.nom}`, 'Prépare-toi.', h.mode, h.id);
     }
-    if (h.mode === 'coach' && due) coach.push(h.nom);
   }
-  if (coach.length) add(soir, 'Coach me', `${coach.length > 1 ? `${coach.length} habitudes` : '1 habitude'} à tenir aujourd'hui : ${coach.slice(0, 3).join(', ')}. Ne casse pas ta série.`, 'coach', 'coach');
+  for (const m of MODES_LISTE) {
+    const noms = resumes[m];
+    if (!noms?.length) continue;
+    const corps = `${noms.length > 1 ? `${noms.length} habitudes` : '1 habitude'} à tenir aujourd'hui : ${noms.slice(0, 3).join(', ')}.`;
+    if (m === 'coach') add(soir, 'Coach me', `${corps} Ne casse pas ta série.`, 'coach', 'coach');
+    else add(soir, 'Tes habitudes du jour', corps, m, `resume-${m}`);
+  }
 
-  // Bilan hebdo : le dimanche soir, ce qui est suivi en mode « bilan hebdo » pour la semaine à venir.
-  if (parse(jour).getUTCDay() === 0) {
-    const hebdo = [
-      ...dates.filter((x) => x.mode === 'hebdo' && x.date >= jour && x.date <= addDays(jour, 7)).map((x) => x.titre),
-      ...(e.habitudes || []).filter((h) => h.mode === 'hebdo' && Array.from({ length: 7 }, (_, i) => addDays(jour, i + 1)).some((d) => habitDue(h, d))).map((h) => h.nom),
+  // Bilan de la semaine : le jour choisi pour le mode (le dimanche soir pour « bilan hebdo »), ce qui est suivi dans ce mode pour la semaine à venir.
+  for (const m of MODES_LISTE) {
+    const r = reglesDuMode(c, m);
+    if (!actif(m) || !r.bilan || parse(jour).getUTCDay() !== r.bilan.jour) continue;
+    const suivis = [
+      ...dates.filter((x) => x.mode === m && x.date >= jour && x.date <= addDays(jour, 7)).map((x) => x.titre),
+      ...(e.habitudes || []).filter((h) => h.mode === m && Array.from({ length: 7 }, (_, i) => addDays(jour, i + 1)).some((d) => habitDue(h, d))).map((h) => h.nom),
     ];
-    if (hebdo.length && actif('hebdo')) add(soir, 'Ton bilan de la semaine', `${hebdo.length} élément(s) à suivre : ${hebdo.slice(0, 4).join(', ')}.`, 'hebdo', 'hebdo');
+    if (suivis.length) add(heure(r.bilan.heure), 'Ton bilan de la semaine', `${suivis.length} élément(s) à suivre : ${suivis.slice(0, 4).join(', ')}.`, m, m === 'hebdo' ? 'hebdo' : `bilan-${m}`);
   }
   return out;
 }
