@@ -16,3 +16,25 @@ describe('prévisions de dépenses', () => {
     assert.notEqual(p?.etat, 'depasse');
   });
 });
+
+describe('budgets qui suivent des catégories', () => {
+  const avecCat = [
+    { id: 'g', nom: 'Total', emoji: '💰', montant: 1000, periode: 'jour' as const, global: true },
+    { id: 'resto', nom: 'Restos', emoji: '🍽️', montant: 20, periode: 'jour' as const, categories: ['sortie'] },
+  ];
+  const jour = '2026-10-26';
+  it('range une dépense dans le budget qui suit sa catégorie', () => {
+    const p = prevision({ budgets: avecCat, depenses: [{ id: 'a', montant: 30, budget: null, categories: ['sortie'], date: jour }] }, 'jour', jour);
+    assert.equal(p?.budgets.find((b) => b.nom.includes('Restos'))?.depense, 30);
+    assert.equal(p?.budgets.find((b) => b.nom.includes('Restos'))?.etat, 'depasse');
+  });
+  it('garde le budget choisi à la main, même si une catégorie en suit un autre', () => {
+    const deux = [...avecCat, { id: 'autre', nom: 'Autre', emoji: '📦', montant: 50, periode: 'jour' as const }];
+    const p = prevision({ budgets: deux, depenses: [{ id: 'a', montant: 30, budget: 'autre', categories: ['sortie'], date: jour }] }, 'jour', jour);
+    assert.equal(p?.budgets.find((b) => b.nom.includes('Restos'))?.depense ?? 0, 0);
+  });
+  it('ne range pas une dépense sans catégorie ni budget', () => {
+    const p = prevision({ budgets: avecCat, depenses: [{ id: 'a', montant: 30, budget: null, date: jour }] }, 'jour', jour);
+    assert.equal(p?.budgets.find((b) => b.nom.includes('Restos'))?.depense ?? 0, 0);
+  });
+});
