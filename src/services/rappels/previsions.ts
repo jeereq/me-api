@@ -7,7 +7,7 @@
 type Periode = 'jour' | 'semaine' | 'mois' | 'trimestre' | 'annee';
 export type Horizon = Periode;
 type Budget = { id: string; nom: string; emoji: string; montant: number; periode: Periode; global?: boolean };
-type Depense = { id: string; montant: number; budget: string | null; date: string };
+type Depense = { id: string; montant: number; budget: string | null; date: string; /** Moitié d'un virement entre deux comptes de l'utilisateur : ce n'est pas une dépense. */ lien?: string };
 export type AlertesFinances = { horizons?: Partial<Record<Horizon, boolean>>; seuil?: number; heure?: string; matin?: boolean; push?: boolean; email?: boolean };
 export type FinancesRappels = { devise?: string; budgets?: Budget[]; depenses?: Depense[]; alertes?: AlertesFinances };
 type Etat = 'ok' | 'risque' | 'depasse';
@@ -63,7 +63,7 @@ export type Prevision = {
 
 export function prevision(f: FinancesRappels, horizon: Horizon, d: string, seuil = 1): Prevision | null {
   const budgets = f.budgets || [];
-  const dep = f.depenses || [];
+  const dep = (f.depenses || []).filter((x) => !x.lien);
   if (!budgets.length) return null;
   if (horizon === 'jour') {
     const auj = somme(dep, d, d);
