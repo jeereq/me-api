@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 
 import { IntegrationService } from '../services/IntegrationService.js';
+import { avecVerrou } from '../utils/verrou.js';
 
 /** Synchronise tous les comptes connectés toutes les 15 minutes. */
 export function initSynchronisationCron() {
@@ -9,7 +10,8 @@ export function initSynchronisationCron() {
     if (enCours) return;
     enCours = true;
     try {
-      await IntegrationService.synchroniserTout();
+      // Bail de 14 min (< période) : une seule instance synchronise à la fois.
+      await avecVerrou('synchronisation', 840, () => IntegrationService.synchroniserTout());
     } catch (e) {
       console.error('Synchro planifiée', e);
     } finally {

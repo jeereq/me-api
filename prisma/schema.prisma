@@ -48,6 +48,17 @@ model Espace {
   user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   data   Json
   majLe  DateTime @default(now())
+  /// Numéro de version, +1 à chaque écriture : un appareil qui écrit sur une version périmée est refusé (409) au lieu d'écraser.
+  revision Int    @default(0)
+}
+
+/// Verrou de tâche planifiée : une seule instance du serveur exécute un passage à la fois.
+model VerrouCron {
+  nom     String   @id
+  /// Identifiant de l'instance qui tient le verrou : elle seule peut le relâcher.
+  porteur String
+  /// Fin du bail ; passé ce délai, une autre instance peut reprendre (instance tombée en route).
+  jusqua  DateTime
 }
 
 /// Configuration système (ligne unique id = 1) : lisible par tous les comptes, modifiable par les admins.

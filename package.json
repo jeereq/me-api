@@ -17,7 +17,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio --port 7777",
-    "promote:admin": "tsx scripts/promoteAdmin.ts"
+    "promote:admin": "tsx scripts/promoteAdmin.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

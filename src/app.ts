@@ -78,6 +78,11 @@ await assurerAdmin();
 
 app.listen(port, () => {
   console.log(`me-api écoute sur le port ${port}`);
+  // RUN_CRONS=false : cette instance ne fait que répondre aux requêtes (les tâches planifiées tournent sur une autre).
+  if (process.env.RUN_CRONS?.trim().toLowerCase() === 'false') {
+    console.log('Tâches planifiées désactivées sur cette instance (RUN_CRONS=false).');
+    return;
+  }
   initSynchronisationCron();
   initRappelsCron();
 });
