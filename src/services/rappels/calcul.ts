@@ -1,4 +1,5 @@
 import { type ConfigModes, heureDe, type Mode, reglesDuMode, MODES_LISTE } from './modes.js';
+import { estTacheDeProjet, resumes, tachesActives, type TacheProjet } from './projets.js';
 import { alertesFinances, type FinancesRappels } from './previsions.js';
 
 export type { Mode } from './modes.js';
@@ -11,9 +12,9 @@ export type { Mode } from './modes.js';
 type Frequence = 'quotidien' | 'hebdo' | 'mensuel';
 type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[] };
 type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string };
-type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null };
+type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null } & Partial<TacheProjet>;
 type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
-export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels };
+export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; projets?: { id: string }[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels };
 export type ConfigRappels = ConfigModes & { routineHeure?: string; rappelSoir?: string };
 /** canaux : pour couper le push ou l'email d'un rappel précis (alertes de budget) ; absent = selon les réglages du compte. */
 export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string; canaux?: { push: boolean; email: boolean } };
@@ -62,8 +63,18 @@ export function missionDuJour(e: EspaceRappels, jour: string) {
   const out: { titre: string; fait: boolean; points: number }[] = [];
   for (const r of e.relances || [])
     if ((r.statut === 'a_faire' && r.date <= jour) || (r.statut === 'repondu' && r.reponduLe === jour)) out.push({ titre: `Relancer ${r.contact}`, fait: r.statut === 'repondu', points: POINTS.relance });
+  // Tâches de projet : seulement celles à faire bientôt et pas bloquées ; jamais les résumés (voir projets.ts).
+  const urgentes = new Set(
+    tachesActives(e)
+      .filter((t) => {
+        const proche = !!t.echeance && t.echeance <= bientot;
+        return estTacheDeProjet(t, e.projets) ? proche : t.priorite === 'haute' || proche;
+      })
+      .map((t) => t.id),
+  );
+  const parents = resumes(e.taches || []);
   for (const t of e.taches || [])
-    if ((t.statut !== 'fait' && (t.priorite === 'haute' || (t.echeance && t.echeance <= bientot))) || (t.statut === 'fait' && t.faitLe === jour))
+    if (!parents.has(t.id) && (urgentes.has(t.id) || (t.statut === 'fait' && t.faitLe === jour)))
       out.push({ titre: t.titre, fait: t.statut === 'fait', points: (t.priorite === 'haute' ? POINTS.tacheHaute : POINTS.tache) + (t.echeance && jour <= t.echeance ? POINTS.ponctuel : 0) });
   for (const h of e.habitudes || []) if (habitToday(h, jour) || (h.coches || []).includes(jour)) out.push({ titre: h.nom, fait: doneIn(h, jour), points: POINTS.habitude });
   return out;
@@ -120,7 +131,8 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
 
   const dates = [
     ...(e.relances || []).filter((r) => r.statut === 'a_faire' && r.date).map((r) => ({ id: r.id, titre: `Relancer ${r.contact}`, detail: r.sujet, date: r.date, mode: r.mode })),
-    ...(e.taches || []).filter((t) => t.statut !== 'fait' && t.echeance).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
+    // Tâches de projet : pas les résumés ni les tâches bloquées, et pas de rappel quotidien pour un vieux retard.
+    ...tachesActives(e).filter((t) => t.echeance && (!estTacheDeProjet(t, e.projets) || t.echeance >= addDays(jour, -3))).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
   ];
   const heure = (t: string) => heureDe(t, matin, soir);
   for (const x of dates) {

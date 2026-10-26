@@ -164,3 +164,49 @@ describe('alertes de budget', () => {
     assert.deepEqual(a.map((x) => x.cle), b.map((x) => x.cle));
   });
 });
+
+describe('plans importés : tâches de projet', () => {
+  const projets = [{ id: 'p' }];
+  const sous = (id: string, o: Record<string, unknown> = {}) => tache({ id, titre: `Tâche ${id}`, projet: 'p', ...o });
+  const rappelsTitres = (e: Record<string, unknown>, jour = LUNDI) => titres(rappelsDuJour(espace(e), cfg, jour));
+
+  it('ne rappelle pas un résumé, seulement ses sous-tâches', () => {
+    const e = { projets, taches: [sous('r', { titre: 'Conception', echeance: LUNDI }), sous('a', { titre: 'Maquettes', parent: 'r', echeance: LUNDI })] };
+    const t = rappelsTitres(e);
+    assert.ok(t.includes('Maquettes'));
+    assert.ok(!t.includes('Conception'));
+    assert.deepEqual(titres(missionDuJour(espace(e), LUNDI)), ['Maquettes']);
+  });
+
+  it('ne rappelle pas une tâche bloquée par une tâche pas finie, puis la rappelle une fois la précédente faite', () => {
+    const avant = sous('a', { titre: 'Cadrage', echeance: addDays(LUNDI, 30) });
+    const bloquee = sous('b', { titre: 'Maquettes', apres: ['a'], echeance: LUNDI });
+    assert.ok(!rappelsTitres({ projets, taches: [avant, bloquee] }).includes('Maquettes'));
+    assert.deepEqual(titres(missionDuJour(espace({ projets, taches: [avant, bloquee] }), LUNDI)), []);
+    const faite = { ...avant, statut: 'fait', faitLe: LUNDI };
+    assert.ok(rappelsTitres({ projets, taches: [faite, bloquee] }).includes('Maquettes'));
+  });
+
+  it('suit les liens d’un résumé : ses sous-tâches attendent la tâche précédente', () => {
+    const taches = [sous('a', { titre: 'Cadrage', echeance: addDays(LUNDI, 30) }), sous('r', { titre: 'Dév', apres: ['a'] }), sous('c', { titre: 'API', parent: 'r', echeance: LUNDI })];
+    assert.ok(!rappelsTitres({ projets, taches }).includes('API'));
+  });
+
+  it('une boucle de liens ne bloque personne', () => {
+    const taches = [sous('a', { titre: 'A', apres: ['b'], echeance: LUNDI }), sous('b', { titre: 'B', apres: ['a'], echeance: LUNDI })];
+    const t = rappelsTitres({ projets, taches });
+    assert.ok(t.includes('A') && t.includes('B'));
+  });
+
+  it('une tâche de projet n’est pas « urgente » par sa seule priorité, une tâche simple l’est', () => {
+    const e = { projets, taches: [sous('a', { titre: 'Dans le plan', priorite: 'haute' }), tache({ id: 's', titre: 'Hors plan', priorite: 'haute' })] };
+    assert.deepEqual(titres(missionDuJour(espace(e), LUNDI)), ['Hors plan']);
+  });
+
+  it('ne relance pas chaque jour un très vieux retard d’une tâche de projet', () => {
+    const e = { projets, taches: [sous('a', { titre: 'Vieille', mode: 'agressif', echeance: addDays(LUNDI, -10) })] };
+    assert.ok(!rappelsTitres(e).some((x) => x.includes('Vieille')));
+    const simple = { taches: [tache({ id: 's', titre: 'Vieille simple', mode: 'agressif', echeance: addDays(LUNDI, -10) })] };
+    assert.ok(rappelsTitres(simple).some((x) => x.includes('Vieille simple')));
+  });
+});

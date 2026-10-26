@@ -6,8 +6,8 @@
 
 type Periode = 'jour' | 'semaine' | 'mois' | 'trimestre' | 'annee';
 export type Horizon = Periode;
-type Budget = { id: string; nom: string; emoji: string; montant: number; periode: Periode; global?: boolean };
-type Depense = { id: string; montant: number; budget: string | null; date: string; /** Moitié d'un virement entre deux comptes de l'utilisateur : ce n'est pas une dépense. */ lien?: string };
+type Budget = { id: string; nom: string; emoji: string; montant: number; periode: Periode; global?: boolean; /** Catégories suivies : une dépense de l'une d'elles va dans ce budget si elle n'en a pas choisi un. */ categories?: string[] };
+type Depense = { id: string; montant: number; budget: string | null; categories?: string[]; date: string; /** Moitié d'un virement entre deux comptes de l'utilisateur : ce n'est pas une dépense. */ lien?: string };
 export type AlertesFinances = { horizons?: Partial<Record<Horizon, boolean>>; seuil?: number; heure?: string; matin?: boolean; push?: boolean; email?: boolean };
 export type FinancesRappels = { devise?: string; budgets?: Budget[]; depenses?: Depense[]; alertes?: AlertesFinances };
 type Etat = 'ok' | 'risque' | 'depasse';
@@ -49,7 +49,19 @@ const budgetJournalier = (budgets: Budget[]) => {
   const g = budgets.find((b) => b.global);
   return g ? g.periode === 'jour' : budgets.length > 0 && budgets.every((b) => b.periode === 'jour');
 };
-const somme = (dep: Depense[], a: string, b: string, budget?: string) => arrondi(dep.filter((x) => x.date >= a && x.date <= b && (budget === undefined || x.budget === budget)).reduce((s, x) => s + x.montant, 0));
+/**
+ * Le budget d'une dépense : celui choisi à la main, sinon le premier budget (hors global) qui suit l'une de ses catégories.
+ * Même règle que l'app (me-mobile/src/lib/categories.ts, `idBudgetDe`).
+ */
+export function idBudgetDe(budgets: Budget[], d: { budget?: string | null; categories?: string[] }): string | null {
+  if (d.budget) {
+    const b = budgets.find((x) => x.id === d.budget && !x.global);
+    if (b) return b.id;
+  }
+  if (!d.categories?.length) return null;
+  return budgets.find((b) => !b.global && b.categories?.some((c) => d.categories!.includes(c)))?.id ?? null;
+}
+const somme = (dep: Depense[], a: string, b: string, budget?: string, budgets: Budget[] = []) => arrondi(dep.filter((x) => x.date >= a && x.date <= b && (budget === undefined || idBudgetDe(budgets, x) === budget)).reduce((s, x) => s + x.montant, 0));
 
 export type Prevision = {
   horizon: Horizon;
@@ -72,7 +84,7 @@ export function prevision(f: FinancesRappels, horizon: Horizon, d: string, seuil
     const lignes = budgets
       .filter((b) => !b.global && b.periode === 'jour')
       .map((b) => {
-        const y = somme(dep, d, d, b.id);
+        const y = somme(dep, d, d, b.id, budgets);
         return { nom: `${b.emoji} ${b.nom}`, plafond: b.montant, depense: y, projection: y, etat: etatJour(y, b.montant) };
       })
       .filter((b) => b.etat !== 'ok')
@@ -101,7 +113,7 @@ export function prevision(f: FinancesRappels, horizon: Horizon, d: string, seuil
     .filter((b) => !b.global)
     .map((b) => {
       const p = plafond(b, horizon);
-      const y = somme(dep, debut, d, b.id);
+      const y = somme(dep, debut, d, b.id, budgets);
       const pr = arrondi((y / ecoules) * total);
       return { nom: `${b.emoji} ${b.nom}`, plafond: p, depense: y, projection: pr, etat: etat(y, p, pr) };
     })
