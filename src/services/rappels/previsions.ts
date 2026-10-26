@@ -147,7 +147,8 @@ export type AlerteFinance = { heure: string; titre: string; corps: string; mode:
 export function alertesFinances(f: FinancesRappels | undefined, jour: string, heureParDefaut: string): { alertes: AlerteFinance[]; budgetDuJour: string | null } {
   if (!f?.budgets?.length) return { alertes: [], budgetDuJour: null };
   const a = f.alertes || {};
-  const devise = f.devise || '€';
+  // Le franc congolais est enregistré « CDF » mais s'écrit « FC », comme dans l'app.
+  const devise = f.devise === 'CDF' ? 'FC' : f.devise || '€';
   const seuil = a.seuil && a.seuil > 0 ? a.seuil : 1;
   const heure = /^\d{2}:\d{2}$/.test(a.heure || '') ? a.heure! : heureParDefaut;
   const canaux = { push: a.push !== false, email: a.email !== false };
