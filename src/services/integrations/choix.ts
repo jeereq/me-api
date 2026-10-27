@@ -67,7 +67,28 @@ export type MailImporte = {
   pj?: boolean;
   /** Boîte partagée d'où vient le mail ; absente = la boîte du compte. */
   boite?: string;
+  /** Dossier d'où vient le mail quand il a été lu dans un dossier (absent = boîte de réception). */
+  dossier?: string;
 };
+
+/** Le réglage de chargement ramené dans des bornes raisonnables : 1 à 90 jours, 10 à 100 fils. */
+export const chargementValide = (c: { jours?: unknown; max?: unknown } | undefined, defaut = { jours: 7, max: 25 }) => {
+  const borne = (v: unknown, min: number, max: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : d);
+  return { jours: borne(c?.jours, 1, 90, defaut.jours), max: borne(c?.max, 10, 100, defaut.max) };
+};
+
+/** Des dossiers à plat rangés comme Outlook : réception, envoyés, brouillons… puis les autres par nom, chaque parent suivi de ses enfants. */
+export function rangerDossiers<T extends { id: string; nom: string; parent?: string; genre: string }>(l: T[]): T[] {
+  const ORDRE = ['reception', 'suivis', 'importants', 'brouillons', 'envoyes', 'archive', 'autre', 'indesirables', 'supprimes'];
+  const cmp = (a: T, b: T) => ORDRE.indexOf(a.genre) - ORDRE.indexOf(b.genre) || a.nom.localeCompare(b.nom, 'fr');
+  const ids = new Set(l.map((d) => d.id));
+  const enfants = (p?: string): T[] =>
+    l
+      .filter((d) => (p ? d.parent === p : !d.parent || !ids.has(d.parent)))
+      .sort(cmp)
+      .flatMap((d) => [d, ...enfants(d.id)]);
+  return enfants();
+}
 
 /** L'extrait d'un message, sur une ligne et en 160 caractères au plus. */
 export const extrait = (t = '') => {

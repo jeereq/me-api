@@ -5,7 +5,7 @@ import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { creerEvenementSchema, creerTacheSchema, envoyerMailSchema, etiqueterMailSchema, integrationParamsSchema, lireMailSchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailSchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Routes ouvertes : le navigateur y revient après l'autorisation, le `state` signé identifie le compte.
@@ -24,6 +24,12 @@ router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(Integ
 // Lire un mail en entier, à la demande.
 router.get('/:id/mails/:mail', validateRequest(lireMailSchema), asyncHandler(IntegrationController.lireMail));
 // Poser ou retirer des étiquettes (libellés Gmail, catégories Outlook).
+// L'environnement de la boîte : dossiers, mails d'un dossier page par page, ranger un mail, règles.
+router.get('/:id/dossiers', validateRequest(dossiersSchema), asyncHandler(IntegrationController.dossiers));
+router.get('/:id/dossiers/:dossier/mails', validateRequest(mailsDossierSchema), asyncHandler(IntegrationController.mailsDuDossier));
+router.post('/:id/mails/:mail/deplacer', validateRequest(deplacerMailSchema), asyncHandler(IntegrationController.deplacer));
+router.get('/:id/regles', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.regles));
+router.patch('/:id/regles/:regle', validateRequest(activerRegleSchema), asyncHandler(IntegrationController.activerRegle));
 router.post('/:id/mails/:mail/libelles', validateRequest(etiqueterMailSchema), asyncHandler(IntegrationController.etiqueter));
 // Écriture dans le compte connecté (répondre, écrire, tenir l'agenda et les tâches).
 router.post('/:id/repondre', validateRequest(repondreMailSchema), asyncHandler(IntegrationController.repondre));

@@ -2,15 +2,16 @@ import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo
 import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
-import { FIL_MAX, vide, type Connecteur, type Elements, type LibelleDispo } from './types.js';
+import { rangerDossiers } from './choix.js';
+import { FIL_MAX, vide, type ChargementMails, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0/me';
 /** La racine des appels pour une boîte : la sienne (`/me`), ou une boîte partagée (`/users/{adresse}`). */
 const racine = (boite?: string) => (boite ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(boite)}` : GRAPH);
 // Lecture ET écriture : lire et écrire des mails, tenir l'agenda et les tâches To Do depuis Me.
 // `*.Shared` : lire, étiqueter et répondre depuis les boîtes partagées auxquelles l'utilisateur a accès.
-// `MailboxSettings.Read` : les couleurs des catégories Outlook.
-const SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send Tasks.ReadWrite Mail.ReadWrite.Shared Mail.Send.Shared MailboxSettings.Read';
+// `MailboxSettings.ReadWrite` : les couleurs des catégories, et lire ou couper les règles de la boîte.
+const SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send Tasks.ReadWrite Mail.ReadWrite.Shared Mail.Send.Shared MailboxSettings.ReadWrite';
 
 /** Les couleurs des catégories Outlook (preset0 à preset24), au plus près de ce qu'affiche Outlook. */
 const PRESETS = ['#E74856', '#FF8C00', '#AB8B6B', '#FFD800', '#16C60C', '#00B7C3', '#8C9C3F', '#0078D4', '#8764B8', '#C239B3', '#A0AEB2', '#5A6A70', '#9B9B9B', '#606060', '#2B2B2B', '#A4262C', '#CA5010', '#8E562E', '#C19C00', '#107C10', '#038387', '#5C6E1E', '#004E8C', '#5C2E91', '#881798'];
@@ -46,32 +47,92 @@ const ecrireAdresse = (a: Adresse) => (a.emailAddress?.name && a.emailAddress.ad
 const versGraph = (l: string[]) => l.map((address) => ({ emailAddress: { address } }));
 const corpsTexte = (m: MailComplet) => (m.body?.contentType?.toLowerCase() === 'html' ? htmlEnTexte(m.body?.content || '') : nettoyerTexte(m.body?.content || ''));
 
-/** La réception des 7 derniers jours d'une boîte (la sienne ou une partagée), un message par fil. */
-async function mailsDeLaBoite(auth: ReturnType<typeof bearer>, fuseau: string, boite?: string): Promise<MailImporte[]> {
-  const mq = new URLSearchParams({ $filter: `receivedDateTime ge ${new Date(Date.now() - 7 * 86400000).toISOString()}`, $orderby: 'receivedDateTime desc', $top: '25', $select: 'subject,from,receivedDateTime,webLink,isRead,conversationId,categories,bodyPreview,hasAttachments' });
+const CHAMPS_LISTE = 'subject,from,toRecipients,receivedDateTime,sentDateTime,webLink,isRead,conversationId,categories,bodyPreview,hasAttachments';
+
+/** Un message de Graph tel que l'app le liste ; un message envoyé montre à qui il est parti. */
+function versMailImporte(m: Mail, fuseau: string, boite?: string, envoye = false, dossier?: string): MailImporte {
+  const quand = envoye ? m.sentDateTime : m.receivedDateTime;
+  const d = quand ? brut(quand) : { date: jour(0, fuseau), heure: undefined };
+  const qui = envoye ? m.toRecipients?.[0]?.emailAddress : m.from?.emailAddress;
+  return {
+    id: m.id,
+    fil: m.conversationId,
+    sujet: m.subject || '(sans objet)',
+    contact: qui?.name || qui?.address || '',
+    adresse: qui?.address,
+    date: d.date,
+    heure: d.heure,
+    sens: envoye ? 'envoye' : 'recu',
+    nonLu: !envoye && m.isRead === false,
+    lien: m.webLink,
+    source: 'outlook',
+    extrait: extrait(m.bodyPreview),
+    ...(m.categories?.length ? { libelles: m.categories } : {}),
+    ...(m.hasAttachments ? { pj: true } : {}),
+    ...(boite ? { boite } : {}),
+    ...(dossier ? { dossier } : {}),
+  };
+}
+
+/** La réception d'une boîte (la sienne ou une partagée) sur la période choisie, un message par fil. */
+async function mailsDeLaBoite(auth: ReturnType<typeof bearer>, fuseau: string, c: ChargementMails, boite?: string): Promise<MailImporte[]> {
+  // Deux fois plus de messages que de fils voulus : plusieurs messages d'un même fil se replient en une ligne.
+  const mq = new URLSearchParams({ $filter: `receivedDateTime ge ${new Date(Date.now() - c.jours * 86400000).toISOString()}`, $orderby: 'receivedDateTime desc', $top: String(Math.min(200, c.max * 2)), $select: CHAMPS_LISTE });
   const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${racine(boite)}/mailFolders/inbox/messages?${mq}`, auth);
   return rangerMails(
-    value.map((m): MailImporte => {
-      const d = m.receivedDateTime ? brut(m.receivedDateTime) : { date: jour(0, fuseau), heure: undefined };
-      return {
-        id: m.id,
-        fil: m.conversationId,
-        sujet: m.subject || '(sans objet)',
-        contact: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '',
-        adresse: m.from?.emailAddress?.address,
-        date: d.date,
-        heure: d.heure,
-        sens: 'recu',
-        nonLu: m.isRead === false,
-        lien: m.webLink,
-        source: 'outlook',
-        extrait: extrait(m.bodyPreview),
-        ...(m.categories?.length ? { libelles: m.categories } : {}),
-        ...(m.hasAttachments ? { pj: true } : {}),
-        ...(boite ? { boite } : {}),
-      };
-    }),
+    value.map((m) => versMailImporte(m, fuseau, boite)),
+    c.max,
   );
+}
+
+/** Les dossiers dont Outlook connaît le rôle, par leur nom réservé. */
+const CONNUS: [string, GenreDossier][] = [
+  ['inbox', 'reception'],
+  ['sentitems', 'envoyes'],
+  ['drafts', 'brouillons'],
+  ['archive', 'archive'],
+  ['deleteditems', 'supprimes'],
+  ['junkemail', 'indesirables'],
+];
+type Dossier = { id: string; displayName?: string; parentFolderId?: string; childFolderCount?: number; unreadItemCount?: number; totalItemCount?: number; isHidden?: boolean };
+
+/** Une condition ou une action de règle Outlook, dite en français. */
+const liste = (l?: string[]) => (l ?? []).map((x) => `« ${x} »`).join(' ou ');
+const adresses = (l?: Adresse[]) => (l ?? []).map((a) => a.emailAddress?.name || a.emailAddress?.address).filter(Boolean).join(', ');
+type Predicats = { fromAddresses?: Adresse[]; sentToAddresses?: Adresse[]; subjectContains?: string[]; bodyContains?: string[]; bodyOrSubjectContains?: string[]; senderContains?: string[]; headerContains?: string[]; sentToMe?: boolean; sentOnlyToMe?: boolean; sentCcMe?: boolean; hasAttachments?: boolean; importance?: string; isAutomaticReply?: boolean; categories?: string[] };
+type Actions = { moveToFolder?: string; copyToFolder?: string; delete?: boolean; permanentDelete?: boolean; markAsRead?: boolean; markImportance?: string; assignCategories?: string[]; forwardTo?: Adresse[]; redirectTo?: Adresse[]; stopProcessingRules?: boolean };
+const IMPORTANCE: Record<string, string> = { low: 'faible', normal: 'normale', high: 'haute' };
+
+export function decrireConditions(p: Predicats = {}): string[] {
+  return [
+    p.fromAddresses?.length ? `De ${adresses(p.fromAddresses)}` : '',
+    p.senderContains?.length ? `L'expéditeur contient ${liste(p.senderContains)}` : '',
+    p.sentToAddresses?.length ? `Envoyé à ${adresses(p.sentToAddresses)}` : '',
+    p.subjectContains?.length ? `L'objet contient ${liste(p.subjectContains)}` : '',
+    p.bodyContains?.length ? `Le message contient ${liste(p.bodyContains)}` : '',
+    p.bodyOrSubjectContains?.length ? `L'objet ou le message contient ${liste(p.bodyOrSubjectContains)}` : '',
+    p.headerContains?.length ? `L'en-tête contient ${liste(p.headerContains)}` : '',
+    p.sentOnlyToMe ? 'Envoyé à moi seul' : p.sentToMe ? 'Envoyé à moi' : '',
+    p.sentCcMe ? 'Moi en copie' : '',
+    p.hasAttachments ? 'Avec pièce jointe' : '',
+    p.importance ? `Importance ${IMPORTANCE[p.importance] ?? p.importance}` : '',
+    p.isAutomaticReply ? 'Réponse automatique' : '',
+    p.categories?.length ? `Catégorie ${liste(p.categories)}` : '',
+  ].filter(Boolean);
+}
+
+export function decrireActions(a: Actions = {}, nomDossier: (id: string) => string = (id) => id): string[] {
+  return [
+    a.moveToFolder ? `Déplacer dans ${nomDossier(a.moveToFolder)}` : '',
+    a.copyToFolder ? `Copier dans ${nomDossier(a.copyToFolder)}` : '',
+    a.assignCategories?.length ? `Catégorie ${liste(a.assignCategories)}` : '',
+    a.markAsRead ? 'Marquer comme lu' : '',
+    a.markImportance ? `Importance ${IMPORTANCE[a.markImportance] ?? a.markImportance}` : '',
+    a.forwardTo?.length ? `Transférer à ${adresses(a.forwardTo)}` : '',
+    a.redirectTo?.length ? `Rediriger vers ${adresses(a.redirectTo)}` : '',
+    a.permanentDelete ? 'Supprimer définitivement' : a.delete ? 'Supprimer' : '',
+    a.stopProcessingRules ? 'Ne pas appliquer les règles suivantes' : '',
+  ].filter(Boolean);
 }
 
 /** Une tâche au format To Do ; cocher ou rouvrir passe par `status`. */
@@ -119,7 +180,7 @@ export const microsoft: Connecteur = {
 
   agendas: ({ accessToken }) => listeAgendas(accessToken),
 
-  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis, boitesPartagees }) {
+  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis, boitesPartagees, chargement }) {
     const out: Elements = vide();
     const p = prefs('outlook');
     if (!p.actif) return out;
@@ -183,11 +244,11 @@ export const microsoft: Connecteur = {
 
     // Boîte mail : la réception des 7 derniers jours, un message par fil ; puis chaque boîte partagée demandée.
     if (p.imports.includes('mails')) {
-      out.mails = await mailsDeLaBoite(auth, fuseau);
+      out.mails = await mailsDeLaBoite(auth, fuseau, chargement);
       out.boites = [];
       for (const boite of boitesPartagees) {
         try {
-          out.mails.push(...(await mailsDeLaBoite(auth, fuseau, boite)));
+          out.mails.push(...(await mailsDeLaBoite(auth, fuseau, chargement, boite)));
           out.boites.push({ adresse: boite });
         } catch (e) {
           // Une boîte refusée ne bloque pas le reste : l'app dit laquelle et pourquoi.
@@ -258,6 +319,62 @@ export const microsoft: Connecteur = {
     const categories = appliquerLibelles(m.categories ?? [], e.ajouter, e.retirer);
     await json('Outlook', url, corpsJson(accessToken, 'PATCH', { categories }));
     return { libelles: categories };
+  },
+
+  async dossiers({ accessToken }, boite) {
+    const base = racine(boite);
+    const auth = bearer(accessToken);
+    const champs = '$select=id,displayName,parentFolderId,childFolderCount,unreadItemCount,totalItemCount,isHidden&$top=100';
+    // Les rôles d'abord (réception, envoyés…), puis l'arbre : trois niveaux, 150 dossiers au plus.
+    const roles = new Map<string, GenreDossier>();
+    await Promise.all(CONNUS.map(async ([nom, genre]) => {
+      const d = await json<{ id: string }>('Outlook', `${base}/mailFolders/${nom}?$select=id`, auth).catch(() => null);
+      if (d) roles.set(d.id, genre);
+    }));
+    const tous: Dossier[] = [];
+    let niveau = (await json<{ value?: Dossier[] }>('Outlook', `${base}/mailFolders?${champs}`, auth)).value ?? [];
+    for (let profondeur = 0; profondeur < 3 && niveau.length && tous.length < 150; profondeur++) {
+      tous.push(...niveau.filter((d) => !d.isHidden));
+      const parents = niveau.filter((d) => !d.isHidden && d.childFolderCount);
+      const enfants = await Promise.all(parents.slice(0, 30).map((d) => json<{ value?: Dossier[] }>('Outlook', `${base}/mailFolders/${encodeURIComponent(d.id)}/childFolders?${champs}`, auth).then((r) => r.value ?? []).catch(() => [])));
+      niveau = enfants.flat();
+    }
+    const ids = new Set(tous.map((d) => d.id));
+    return rangerDossiers(
+      tous.slice(0, 150).map((d): DossierMail => ({ id: d.id, nom: d.displayName || 'Dossier', ...(d.parentFolderId && ids.has(d.parentFolderId) ? { parent: d.parentFolderId } : {}), genre: roles.get(d.id) ?? 'autre', nonLus: d.unreadItemCount ?? 0, total: d.totalItemCount })),
+    );
+  },
+
+  async mailsDuDossier({ accessToken }, l) {
+    const base = racine(l.boite);
+    const auth = bearer(accessToken);
+    // Le dossier des envoyés montre à qui le mail est parti, comme dans Outlook.
+    const envoyes = await json<{ id: string }>('Outlook', `${base}/mailFolders/sentitems?$select=id`, auth).then((d) => d.id === l.dossier || l.dossier === 'sentitems').catch(() => l.dossier === 'sentitems');
+    const saut = Math.max(0, Number(l.suivant) || 0);
+    const q = new URLSearchParams({ $orderby: `${envoyes ? 'sentDateTime' : 'receivedDateTime'} desc`, $top: String(l.max), $skip: String(saut), $select: CHAMPS_LISTE });
+    const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${base}/mailFolders/${encodeURIComponent(l.dossier)}/messages?${q}`, auth);
+    return { mails: value.map((m) => versMailImporte(m, l.fuseau, l.boite, envoyes, l.dossier)), ...(value.length === l.max ? { suivant: String(saut + l.max) } : {}) };
+  },
+
+  async deplacer({ accessToken }, d) {
+    await json('Outlook', `${racine(d.boite)}/messages/${encodeURIComponent(d.mailId)}/move`, corpsJson(accessToken, 'POST', { destinationId: d.dossier }));
+  },
+
+  async regles({ accessToken }) {
+    const auth = bearer(accessToken);
+    type R = { id: string; displayName?: string; sequence?: number; isEnabled?: boolean; hasError?: boolean; conditions?: Predicats; actions?: Actions };
+    const [{ value = [] }, noms] = await Promise.all([
+      json<{ value?: R[] }>('Outlook', `${GRAPH}/mailFolders/inbox/messageRules`, auth),
+      // Les règles nomment les dossiers par identifiant : on les traduit en noms.
+      this.dossiers!({ accessToken }).then((l) => new Map(l.map((d) => [d.id, d.nom]))).catch(() => new Map<string, string>()),
+    ]);
+    return value
+      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+      .map((r) => ({ id: r.id, nom: r.displayName || 'Règle', active: r.isEnabled !== false, ordre: r.sequence ?? 0, conditions: decrireConditions(r.conditions), actions: decrireActions(r.actions, (id) => `« ${noms.get(id) ?? 'un dossier'} »`), ...(r.hasError ? { enErreur: true } : {}) }));
+  },
+
+  async activerRegle({ accessToken }, id, active) {
+    await json('Outlook', `${GRAPH}/mailFolders/inbox/messageRules/${encodeURIComponent(id)}`, corpsJson(accessToken, 'PATCH', { isEnabled: active }));
   },
 
   async envoyer({ accessToken }, n) {

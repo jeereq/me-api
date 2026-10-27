@@ -2,7 +2,8 @@ import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo
 import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { decoderEntites, texteDeGmail, type PartieGmail } from './lecture.js';
-import { FIL_MAX, vide, type Connecteur, type Elements, type LibelleDispo } from './types.js';
+import { rangerDossiers } from './choix.js';
+import { FIL_MAX, vide, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
 
 const CAL = 'https://www.googleapis.com/calendar/v3';
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -34,6 +35,50 @@ const libellesDuCompte = async (accessToken: string) => {
   return new Map(labels.filter((l) => l.type === 'user').map((l) => [l.id, l]));
 };
 const nomsLibelles = (ids: string[] | undefined, parId: Map<string, Libelle>) => (ids ?? []).map((x) => parId.get(x)?.name).filter((n): n is string => !!n);
+
+/** Les en-têtes de messages, 20 appels à la fois : Gmail limite le débit par utilisateur. */
+async function lireMeta(auth: ReturnType<typeof bearer>, ids: string[]): Promise<Message[]> {
+  const out: Message[] = [];
+  for (let i = 0; i < ids.length; i += 20)
+    out.push(...(await Promise.all(ids.slice(i, i + 20).map((m) => json<Message>('Gmail', `${GMAIL}/messages/${m}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Message-ID&metadataHeaders=References`, auth)))));
+  return out;
+}
+
+/** Un message Gmail tel que l'app le liste ; un message envoyé montre à qui il est parti. */
+function versMailImporte(m: Message, fuseau: string, parId: Map<string, Libelle>, envoye = false, dossier?: string): MailImporte {
+  const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : { date: jour(0, fuseau), heure: undefined };
+  const qui = envoye ? listeAdresses(entete(m, 'To'))[0] ?? '' : entete(m, 'From');
+  const libelles = nomsLibelles(m.labelIds, parId);
+  return {
+    id: m.id,
+    fil: m.threadId,
+    sujet: entete(m, 'Subject') || '(sans objet)',
+    contact: nomContact(qui),
+    adresse: qui,
+    messageId: entete(m, 'Message-ID') || undefined,
+    references: entete(m, 'References') || undefined,
+    date: d.date,
+    heure: d.heure,
+    sens: envoye ? 'envoye' : 'recu',
+    nonLu: m.labelIds?.includes('UNREAD'),
+    lien: lienMail(m.threadId),
+    source: 'gmail',
+    extrait: extrait(decoderEntites(m.snippet ?? '')),
+    ...(libelles.length ? { libelles } : {}),
+    ...(dossier ? { dossier } : {}),
+  };
+}
+
+/** Les libellés système que Me montre comme dossiers, dans l'ordre de Gmail. */
+const SYSTEME: [string, string, GenreDossier][] = [
+  ['INBOX', 'Boîte de réception', 'reception'],
+  ['STARRED', 'Suivis', 'suivis'],
+  ['IMPORTANT', 'Importants', 'importants'],
+  ['SENT', 'Envoyés', 'envoyes'],
+  ['DRAFT', 'Brouillons', 'brouillons'],
+  ['SPAM', 'Spam', 'indesirables'],
+  ['TRASH', 'Corbeille', 'supprimes'],
+];
 
 /** La liste des agendas du compte, nommée comme dans Google Agenda. */
 const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
@@ -90,7 +135,7 @@ export const google: Connecteur = {
 
   agendas: ({ accessToken }) => listeAgendas(accessToken),
 
-  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis }) {
+  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis, chargement }) {
     const out: Elements = vide();
     const auth = bearer(jetons.accessToken);
     const agenda = prefs('google_agenda');
@@ -117,8 +162,7 @@ export const google: Connecteur = {
     }
 
     const filtreGmail = gmail.filtre.length ? ` {${gmail.filtre.map((f) => `label:${f.replace(/\s+/g, '-')}`).join(' ')}}` : '';
-    const lire = async (ids: string[]) =>
-      Promise.all(ids.map((m) => json<Message>('Gmail', `${GMAIL}/messages/${m}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Message-ID&metadataHeaders=References`, auth)));
+    const lire = (ids: string[]) => lireMeta(auth, ids);
 
     // Tâches : mails suivis (étoile) des 30 derniers jours.
     if (gmail.actif && gmail.imports.includes('taches')) {
@@ -170,31 +214,12 @@ export const google: Connecteur = {
     if (gmail.actif && gmail.imports.includes('mails')) {
       const parId = await libellesDuCompte(jetons.accessToken).catch(() => new Map<string, Libelle>());
       out.libelles = [...parId.values()].map((l): LibelleDispo => ({ nom: l.name, ...(l.color?.backgroundColor ? { couleur: l.color.backgroundColor } : {}) })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-      const { messages = [] } = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/messages?${new URLSearchParams({ q: `in:inbox newer_than:7d${filtreGmail}`, maxResults: '25' })}`, auth);
-      const lus = await lire(messages.map((x) => x.id));
+      // Deux fois plus de messages que de fils voulus : plusieurs messages d'un même fil se replient en une ligne.
+      const q = new URLSearchParams({ q: `in:inbox newer_than:${chargement.jours}d${filtreGmail}`, maxResults: String(Math.min(150, chargement.max * 2)) });
+      const { messages = [] } = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/messages?${q}`, auth);
       out.mails = rangerMails(
-        lus.map((m): MailImporte => {
-          const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : { date: jour(0, fuseau), heure: undefined };
-          const de = entete(m, 'From');
-          const libelles = nomsLibelles(m.labelIds, parId);
-          return {
-            id: m.id,
-            fil: m.threadId,
-            sujet: entete(m, 'Subject') || '(sans objet)',
-            contact: nomContact(de),
-            adresse: de,
-            messageId: entete(m, 'Message-ID') || undefined,
-            references: entete(m, 'References') || undefined,
-            date: d.date,
-            heure: d.heure,
-            sens: 'recu',
-            nonLu: m.labelIds?.includes('UNREAD'),
-            lien: lienMail(m.threadId),
-            source: 'gmail',
-            extrait: extrait(decoderEntites(m.snippet ?? '')),
-            ...(libelles.length ? { libelles } : {}),
-          };
-        }),
+        (await lire(messages.map((x) => x.id))).map((m) => versMailImporte(m, fuseau, parId)),
+        chargement.max,
       );
     }
 
@@ -268,6 +293,40 @@ export const google: Connecteur = {
     }
     const m = await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(e.mailId)}/modify`, corpsJson(accessToken, 'POST', corps));
     return { libelles: m.labelIds ? nomsLibelles(m.labelIds, parId) : appliquerLibelles([], e.ajouter, []) };
+  },
+
+  async dossiers({ accessToken }) {
+    // Gmail n'a pas de dossiers : ses libellés en tiennent lieu (« Clients/Kin » est un sous-dossier de « Clients »).
+    const auth = bearer(accessToken);
+    const parId = await libellesDuCompte(accessToken);
+    const parNom = new Map([...parId.values()].map((l) => [l.name, l.id]));
+    const ids = [...SYSTEME.map(([id]) => id), ...[...parId.keys()].slice(0, 60)];
+    const comptes = new Map<string, { messagesUnread?: number; messagesTotal?: number; threadsUnread?: number }>();
+    for (let i = 0; i < ids.length; i += 20)
+      await Promise.all(ids.slice(i, i + 20).map(async (id) => comptes.set(id, await json<{ messagesUnread?: number; messagesTotal?: number; threadsUnread?: number }>('Gmail', `${GMAIL}/labels/${encodeURIComponent(id)}`, auth).catch(() => ({})))));
+    const systeme = SYSTEME.map(([id, nom, genre]): DossierMail => ({ id, nom, genre, nonLus: genre === 'envoyes' || genre === 'brouillons' ? 0 : comptes.get(id)?.threadsUnread ?? comptes.get(id)?.messagesUnread ?? 0, total: comptes.get(id)?.messagesTotal }));
+    const perso = [...parId.values()].slice(0, 60).map((l): DossierMail => {
+      const coupe = l.name.lastIndexOf('/');
+      const parent = coupe > 0 ? parNom.get(l.name.slice(0, coupe)) : undefined;
+      return { id: l.id, nom: coupe > 0 ? l.name.slice(coupe + 1) : l.name, ...(parent ? { parent } : {}), genre: 'autre', nonLus: comptes.get(l.id)?.threadsUnread ?? 0, total: comptes.get(l.id)?.messagesTotal };
+    });
+    return [...systeme, ...rangerDossiers(perso)];
+  },
+
+  async mailsDuDossier({ accessToken }, l) {
+    const auth = bearer(accessToken);
+    const q = new URLSearchParams({ labelIds: l.dossier, maxResults: String(l.max), ...(l.suivant ? { pageToken: l.suivant } : {}) });
+    const { messages = [], nextPageToken } = await json<{ messages?: { id: string }[]; nextPageToken?: string }>('Gmail', `${GMAIL}/messages?${q}`, auth);
+    const parId = await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>());
+    const envoye = l.dossier === 'SENT' || l.dossier === 'DRAFT';
+    return { mails: (await lireMeta(auth, messages.map((m) => m.id))).map((m) => versMailImporte(m, l.fuseau, parId, envoye, l.dossier)), ...(nextPageToken ? { suivant: nextPageToken } : {}) };
+  },
+
+  async deplacer({ accessToken }, d) {
+    // Ranger dans un libellé : on le pose, et on retire celui d'où vient le mail (sortir de la réception = archiver).
+    const corps = { addLabelIds: [d.dossier], removeLabelIds: d.depuis && d.depuis !== d.dossier ? [d.depuis] : [] };
+    const url = d.fil ? `${GMAIL}/threads/${encodeURIComponent(d.fil)}/modify` : `${GMAIL}/messages/${encodeURIComponent(d.mailId)}/modify`;
+    await json('Gmail', url, corpsJson(accessToken, 'POST', corps));
   },
 
   async envoyer({ accessToken }, n) {

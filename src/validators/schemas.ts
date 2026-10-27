@@ -53,8 +53,9 @@ export const patchIntegrationSchema = integrationParamsSchema.extend({
       ctx: z.enum(['perso', 'pro']).optional(),
       agendas: z.array(z.string().min(1).max(300)).max(50).optional(),
       boitesPartagees: z.array(z.string().trim().email('Adresse de boîte partagée invalide.').max(320)).max(10, 'Dix boîtes partagées au plus.').optional(),
+      chargement: z.object({ jours: z.number().int().min(1).max(90).optional(), max: z.number().int().min(10).max(100).optional() }).optional(),
     })
-    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas » ou « boitesPartagees ».' }),
+    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined || b.chargement !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas », « boitesPartagees » ou « chargement ».' }),
 });
 
 const DATE_TXT = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.');
@@ -72,6 +73,11 @@ const rendezvous = {
 export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000) }) });
 export const lireMailSchema = z.object({ params: z.object({ id: z.string().min(1), mail: z.string().min(1).max(500) }) });
 const libelle = z.string().trim().min(1).max(100, 'Une étiquette tient en 100 caractères.');
+const boiteQuery = z.string().trim().email().max(320).optional();
+export const dossiersSchema = integrationParamsSchema.extend({ query: z.object({ boite: boiteQuery }).passthrough() });
+export const mailsDossierSchema = z.object({ params: z.object({ id: z.string().min(1), dossier: z.string().min(1).max(500) }), query: z.object({ boite: boiteQuery, suivant: z.string().max(2000).optional() }).passthrough() });
+export const deplacerMailSchema = lireMailSchema.extend({ body: z.object({ dossier: z.string().min(1).max(500), depuis: z.string().min(1).max(500).optional() }) });
+export const activerRegleSchema = z.object({ params: z.object({ id: z.string().min(1), regle: z.string().min(1).max(500) }), body: z.object({ active: z.boolean() }) });
 export const etiqueterMailSchema = lireMailSchema.extend({
   body: z
     .object({ ajouter: z.array(libelle).max(10).optional(), retirer: z.array(libelle).max(10).optional() })
