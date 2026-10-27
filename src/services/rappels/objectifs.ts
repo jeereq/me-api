@@ -19,7 +19,7 @@ export type ObjectifRappel = {
   archive?: boolean;
 };
 export type AlerteObjectif = { heure: string; titre: string; corps: string; mode: 'agressif' | 'hebdo'; id: string; canaux: { push: boolean; email: boolean } };
-type Reglages = { devise?: string; alertes?: { heure?: string; push?: boolean; email?: boolean } };
+type Reglages = { devise?: string; alertes?: { heure?: string; push?: boolean; email?: boolean; /** Faux : aucun rappel d'objectif (vrai par défaut). */ objectifs?: boolean } };
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const parse = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -81,6 +81,7 @@ const lundi = (s: string) => addDays(s, -((parse(s).getUTCDay() + 6) % 7));
 export function alertesObjectifs(f: Reglages & { objectifs?: ObjectifRappel[] } | undefined, jour: string, heureParDefaut: string): AlerteObjectif[] {
   if (!f?.objectifs?.length) return [];
   const a = f.alertes || {};
+  if (a.objectifs === false) return [];
   const devise = f.devise === 'CDF' ? 'FC' : f.devise || '€';
   const heure = /^\d{2}:\d{2}$/.test(a.heure || '') ? a.heure! : heureParDefaut;
   const canaux = { push: a.push !== false, email: a.email !== false };

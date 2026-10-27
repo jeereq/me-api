@@ -76,6 +76,10 @@ describe('alertes d’objectifs', () => {
     assert.equal(a[0].heure, '08:30');
     assert.deepEqual(a[0].canaux, { push: false, email: true });
   });
+  it('se coupe avec l’interrupteur des objectifs', () => {
+    assert.deepEqual(alertesObjectifs(fin([obj()], { alertes: { objectifs: false } }), JOUR, '19:00'), []);
+    assert.equal(alertesObjectifs(fin([obj()], { alertes: { objectifs: true } }), JOUR, '19:00').length, 1);
+  });
   it('écrit le franc congolais « FC »', () => {
     assert.match(alertesObjectifs(fin([obj()], { devise: 'CDF' }), JOUR, '19:00')[0].corps, /FC/);
   });
