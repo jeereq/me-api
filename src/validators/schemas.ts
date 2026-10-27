@@ -49,8 +49,12 @@ export type AssistantBody = z.infer<typeof assistantSchema>['body'];
 export const integrationParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
 export const patchIntegrationSchema = integrationParamsSchema.extend({
   body: z
-    .object({ ctx: z.enum(['perso', 'pro']).optional(), agendas: z.array(z.string().min(1).max(300)).max(50).optional() })
-    .refine((b) => b.ctx !== undefined || b.agendas !== undefined, { message: 'Rien à modifier : donne « ctx » ou « agendas ».' }),
+    .object({
+      ctx: z.enum(['perso', 'pro']).optional(),
+      agendas: z.array(z.string().min(1).max(300)).max(50).optional(),
+      boitesPartagees: z.array(z.string().trim().email('Adresse de boîte partagée invalide.').max(320)).max(10, 'Dix boîtes partagées au plus.').optional(),
+    })
+    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas » ou « boitesPartagees ».' }),
 });
 
 const DATE_TXT = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.');
@@ -67,6 +71,12 @@ const rendezvous = {
 
 export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000) }) });
 export const lireMailSchema = z.object({ params: z.object({ id: z.string().min(1), mail: z.string().min(1).max(500) }) });
+const libelle = z.string().trim().min(1).max(100, 'Une étiquette tient en 100 caractères.');
+export const etiqueterMailSchema = lireMailSchema.extend({
+  body: z
+    .object({ ajouter: z.array(libelle).max(10).optional(), retirer: z.array(libelle).max(10).optional() })
+    .refine((b) => (b.ajouter?.length ?? 0) + (b.retirer?.length ?? 0) > 0, { message: 'Choisis une étiquette à poser ou à retirer.' }),
+});
 export const envoyerMailSchema = integrationParamsSchema.extend({
   body: z.object({ a: z.string().min(3, 'Indique à qui envoyer ce mail.').max(5000), cc: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), texte: z.string().min(1, 'Écris ton message avant de l’envoyer.').max(20_000) }),
 });

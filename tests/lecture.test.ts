@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { base64Url } from '../src/services/integrations/ecriture.js';
-import { depuisBase64Url, htmlEnTexte, nettoyerTexte, TEXTE_MAX, texteDeGmail } from '../src/services/integrations/lecture.js';
+import { decoderEntites, depuisBase64Url, htmlEnTexte, nettoyerTexte, TEXTE_MAX, texteDeGmail } from '../src/services/integrations/lecture.js';
 
 describe('texte d’un mail HTML', () => {
   it('garde les lignes et les liens, retire le reste', () => {
@@ -11,6 +11,12 @@ describe('texte d’un mail HTML', () => {
   });
   it('décode les entités numériques', () => {
     assert.equal(htmlEnTexte('l&#39;&#xE9;t&eacute;'), "l'été");
+  });
+});
+
+describe('extraits Gmail', () => {
+  it('décode les entités sans toucher au reste', () => {
+    assert.equal(decoderEntites('C&#39;est d&#39;accord &amp; merci &lt;3'), "C'est d'accord & merci <3");
   });
 });
 

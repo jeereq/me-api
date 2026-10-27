@@ -1,12 +1,20 @@
-import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
+import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
-import { bearer, form, jour, json, local, passe, urlRetour } from './http.js';
+import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
-import { vide, type Connecteur, type Elements } from './types.js';
+import { FIL_MAX, vide, type Connecteur, type Elements, type LibelleDispo } from './types.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0/me';
+/** La racine des appels pour une boîte : la sienne (`/me`), ou une boîte partagée (`/users/{adresse}`). */
+const racine = (boite?: string) => (boite ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(boite)}` : GRAPH);
 // Lecture ET écriture : lire et écrire des mails, tenir l'agenda et les tâches To Do depuis Me.
-const SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send Tasks.ReadWrite';
+// `*.Shared` : lire, étiqueter et répondre depuis les boîtes partagées auxquelles l'utilisateur a accès.
+// `MailboxSettings.Read` : les couleurs des catégories Outlook.
+const SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send Tasks.ReadWrite Mail.ReadWrite.Shared Mail.Send.Shared MailboxSettings.Read';
+
+/** Les couleurs des catégories Outlook (preset0 à preset24), au plus près de ce qu'affiche Outlook. */
+const PRESETS = ['#E74856', '#FF8C00', '#AB8B6B', '#FFD800', '#16C60C', '#00B7C3', '#8C9C3F', '#0078D4', '#8764B8', '#C239B3', '#A0AEB2', '#5A6A70', '#9B9B9B', '#606060', '#2B2B2B', '#A4262C', '#CA5010', '#8E562E', '#C19C00', '#107C10', '#038387', '#5C6E1E', '#004E8C', '#5C2E91', '#881798'];
+const couleurPreset = (c?: string) => (c && /^preset\d+$/.test(c) ? PRESETS[Number(c.slice(6))] : undefined);
 const id = () => process.env.MICROSOFT_CLIENT_ID || '';
 const secret = () => process.env.MICROSOFT_CLIENT_SECRET || '';
 // « common » accepte les comptes perso (outlook.com) et pro (Microsoft 365).
@@ -15,7 +23,7 @@ const tokenUrl = () => `https://login.microsoftonline.com/${tenant()}/oauth2/v2.
 
 type Token = { access_token: string; refresh_token?: string; expires_in: number };
 type Event = { id: string; subject?: string; isAllDay?: boolean; isCancelled?: boolean; webLink?: string; location?: { displayName?: string }; start: { dateTime: string }; end?: { dateTime: string } };
-type Mail = { id: string; subject?: string; webLink?: string; conversationId?: string; sentDateTime?: string; receivedDateTime?: string; from?: { emailAddress?: { name?: string; address?: string } }; toRecipients?: { emailAddress?: { name?: string; address?: string } }[]; flag?: { dueDateTime?: { dateTime: string } } };
+type Mail = { id: string; subject?: string; webLink?: string; conversationId?: string; sentDateTime?: string; receivedDateTime?: string; from?: { emailAddress?: { name?: string; address?: string } }; toRecipients?: { emailAddress?: { name?: string; address?: string } }[]; flag?: { dueDateTime?: { dateTime: string } }; isRead?: boolean; categories?: string[]; bodyPreview?: string; hasAttachments?: boolean };
 
 // Graph renvoie des dates sans fuseau quand on lui en impose un : on les lit telles quelles.
 const brut = (dt: string) => ({ date: dt.slice(0, 10), heure: dt.slice(11, 16) });
@@ -33,9 +41,38 @@ function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: 
 }
 
 type Adresse = { emailAddress?: { name?: string; address?: string } };
-type MailComplet = { id: string; subject?: string; webLink?: string; isRead?: boolean; hasAttachments?: boolean; receivedDateTime?: string; from?: Adresse; toRecipients?: Adresse[]; ccRecipients?: Adresse[]; body?: { contentType?: string; content?: string } };
+type MailComplet = { id: string; subject?: string; webLink?: string; isRead?: boolean; hasAttachments?: boolean; receivedDateTime?: string; from?: Adresse; toRecipients?: Adresse[]; ccRecipients?: Adresse[]; body?: { contentType?: string; content?: string }; categories?: string[]; conversationId?: string; isDraft?: boolean };
 const ecrireAdresse = (a: Adresse) => (a.emailAddress?.name && a.emailAddress.address ? `${a.emailAddress.name} <${a.emailAddress.address}>` : a.emailAddress?.address || a.emailAddress?.name || '');
 const versGraph = (l: string[]) => l.map((address) => ({ emailAddress: { address } }));
+const corpsTexte = (m: MailComplet) => (m.body?.contentType?.toLowerCase() === 'html' ? htmlEnTexte(m.body?.content || '') : nettoyerTexte(m.body?.content || ''));
+
+/** La réception des 7 derniers jours d'une boîte (la sienne ou une partagée), un message par fil. */
+async function mailsDeLaBoite(auth: ReturnType<typeof bearer>, fuseau: string, boite?: string): Promise<MailImporte[]> {
+  const mq = new URLSearchParams({ $filter: `receivedDateTime ge ${new Date(Date.now() - 7 * 86400000).toISOString()}`, $orderby: 'receivedDateTime desc', $top: '25', $select: 'subject,from,receivedDateTime,webLink,isRead,conversationId,categories,bodyPreview,hasAttachments' });
+  const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${racine(boite)}/mailFolders/inbox/messages?${mq}`, auth);
+  return rangerMails(
+    value.map((m): MailImporte => {
+      const d = m.receivedDateTime ? brut(m.receivedDateTime) : { date: jour(0, fuseau), heure: undefined };
+      return {
+        id: m.id,
+        fil: m.conversationId,
+        sujet: m.subject || '(sans objet)',
+        contact: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '',
+        adresse: m.from?.emailAddress?.address,
+        date: d.date,
+        heure: d.heure,
+        sens: 'recu',
+        nonLu: m.isRead === false,
+        lien: m.webLink,
+        source: 'outlook',
+        extrait: extrait(m.bodyPreview),
+        ...(m.categories?.length ? { libelles: m.categories } : {}),
+        ...(m.hasAttachments ? { pj: true } : {}),
+        ...(boite ? { boite } : {}),
+      };
+    }),
+  );
+}
 
 /** Une tâche au format To Do ; cocher ou rouvrir passe par `status`. */
 const corpsTache = (v: { titre: string; echeance?: string | null; fait?: boolean }) => ({
@@ -55,6 +92,7 @@ export const microsoft: Connecteur = {
   nom: 'Microsoft',
   sources: ['outlook'],
   ctx: 'pro',
+  boitesPartagees: true,
   configure: () => !!(id() && secret() && process.env.PUBLIC_URL),
 
   urlAutorisation: (state) =>
@@ -81,7 +119,7 @@ export const microsoft: Connecteur = {
 
   agendas: ({ accessToken }) => listeAgendas(accessToken),
 
-  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis }) {
+  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis, boitesPartagees }) {
     const out: Elements = vide();
     const p = prefs('outlook');
     if (!p.actif) return out;
@@ -143,16 +181,25 @@ export const microsoft: Connecteur = {
       }
     }
 
-    // Boîte mail : la réception des 7 derniers jours, un message par fil.
+    // Boîte mail : la réception des 7 derniers jours, un message par fil ; puis chaque boîte partagée demandée.
     if (p.imports.includes('mails')) {
-      const mq = new URLSearchParams({ $filter: `receivedDateTime ge ${new Date(Date.now() - 7 * 86400000).toISOString()}`, $orderby: 'receivedDateTime desc', $top: '25', $select: 'subject,from,receivedDateTime,webLink,isRead,conversationId' });
-      const { value = [] } = await json<{ value?: (Mail & { isRead?: boolean })[] }>('Outlook', `${GRAPH}/mailFolders/inbox/messages?${mq}`, auth);
-      out.mails = rangerMails(
-        value.map((m): MailImporte => {
-          const d = m.receivedDateTime ? brut(m.receivedDateTime) : { date: jour(0, fuseau), heure: undefined };
-          return { id: m.id, fil: m.conversationId, sujet: m.subject || '(sans objet)', contact: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '', adresse: m.from?.emailAddress?.address, date: d.date, heure: d.heure, sens: 'recu', nonLu: m.isRead === false, lien: m.webLink, source: 'outlook' };
-        }),
-      );
+      out.mails = await mailsDeLaBoite(auth, fuseau);
+      out.boites = [];
+      for (const boite of boitesPartagees) {
+        try {
+          out.mails.push(...(await mailsDeLaBoite(auth, fuseau, boite)));
+          out.boites.push({ adresse: boite });
+        } catch (e) {
+          // Une boîte refusée ne bloque pas le reste : l'app dit laquelle et pourquoi.
+          out.boites.push({ adresse: boite, erreur: e instanceof ErreurExterne && e.auth ? 'Accès refusé : reconnecte le compte Microsoft, et vérifie que ton administrateur t’a donné accès à cette boîte.' : e instanceof Error ? e.message : 'Boîte illisible pour l’instant.' });
+        }
+      }
+      // Les catégories du compte, avec leur couleur ; sans ce droit, celles vues sur les mails suffisent.
+      const { value: cats = [] } = await json<{ value?: { displayName: string; color?: string }[] }>('Outlook', `${GRAPH}/outlook/masterCategories`, auth).catch(() => ({ value: [] }));
+      const vues = new Set(out.mails.flatMap((m) => m.libelles ?? []));
+      const libelles: LibelleDispo[] = cats.map((c) => ({ nom: c.displayName, ...(couleurPreset(c.color) ? { couleur: couleurPreset(c.color) } : {}) }));
+      for (const v of vues) if (!libelles.some((l) => l.nom.toLowerCase() === v.toLowerCase())) libelles.push({ nom: v });
+      out.libelles = libelles.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
     }
 
     return out;
@@ -163,19 +210,30 @@ export const microsoft: Connecteur = {
   async repondre({ accessToken }, r) {
     if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
     // Graph répond dans le fil tout seul : il reprend l'objet, les destinataires et les en-têtes du message.
-    await json('Outlook', `${GRAPH}/messages/${encodeURIComponent(r.mailId)}/reply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    await json('Outlook', `${racine(r.boite)}/messages/${encodeURIComponent(r.mailId)}/reply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
     return {};
   },
 
-  async lireMail({ accessToken }, mailId, fuseau) {
-    const url = `${GRAPH}/messages/${encodeURIComponent(mailId)}`;
+  async lireMail({ accessToken }, mailId, fuseau, ou) {
+    const base = racine(ou?.boite);
+    const url = `${base}/messages/${encodeURIComponent(mailId)}`;
+    const texte = bearer(accessToken, { Prefer: 'outlook.body-content-type="text"' });
+    const champs = 'subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,isRead,webLink,categories,conversationId,isDraft';
     // Graph sait rendre le corps en texte ; s'il renvoie quand même du HTML, on le convertit.
-    const m = await json<MailComplet>('Outlook', `${url}?$select=subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,isRead,webLink`, bearer(accessToken, { Prefer: 'outlook.body-content-type="text"' }));
+    const m = await json<MailComplet>('Outlook', `${url}?$select=${champs}`, texte);
     const pieces = m.hasAttachments ? ((await json<{ value?: { name?: string }[] }>('Outlook', `${url}/attachments?$select=name`, bearer(accessToken)).catch(() => ({ value: [] }))).value ?? []) : [];
     if (m.isRead === false) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
-    const corps = m.body?.content || '';
+    // Les messages plus anciens de la conversation (sans tri côté Graph, qui refuse filtre et tri sur ces champs ensemble).
+    const conv = m.conversationId
+      ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '25', $select: champs })}`, texte).catch(() => ({ value: [] }))).value ?? [])
+      : [];
+    const avant = conv
+      .filter((x) => x.id !== m.id && !x.isDraft && (x.receivedDateTime ?? '') <= (m.receivedDateTime ?? ''))
+      .sort((a, b) => (a.receivedDateTime ?? '').localeCompare(b.receivedDateTime ?? ''))
+      .slice(-FIL_MAX);
     // receivedDateTime est en UTC (« …Z ») : on le ramène au fuseau de l'utilisateur.
-    const d = m.receivedDateTime ? local(m.receivedDateTime, fuseau) : undefined;
+    const quand = (x: MailComplet) => (x.receivedDateTime ? local(x.receivedDateTime, fuseau) : undefined);
+    const d = quand(m);
     return {
       id: m.id,
       sujet: m.subject || '(sans objet)',
@@ -185,10 +243,21 @@ export const microsoft: Connecteur = {
       cc: (m.ccRecipients ?? []).map(ecrireAdresse).filter(Boolean),
       date: d?.date,
       heure: d?.heure,
-      texte: m.body?.contentType?.toLowerCase() === 'html' ? htmlEnTexte(corps) : nettoyerTexte(corps),
+      texte: corpsTexte(m),
       piecesJointes: pieces.map((p) => p.name).filter((n): n is string => !!n),
       lien: m.webLink,
+      libelles: m.categories ?? [],
+      fil: avant.map((x) => ({ id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, texte: corpsTexte(x), piecesJointes: [] })),
     };
+  },
+
+  async etiqueter({ accessToken }, e) {
+    // Les catégories Outlook sont des noms libres : on part de celles du message et on renvoie la liste entière.
+    const url = `${racine(e.boite)}/messages/${encodeURIComponent(e.mailId)}`;
+    const m = await json<{ categories?: string[] }>('Outlook', `${url}?$select=categories`, bearer(accessToken));
+    const categories = appliquerLibelles(m.categories ?? [], e.ajouter, e.retirer);
+    await json('Outlook', url, corpsJson(accessToken, 'PATCH', { categories }));
+    return { libelles: categories };
   },
 
   async envoyer({ accessToken }, n) {

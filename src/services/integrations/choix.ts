@@ -59,7 +59,32 @@ export type MailImporte = {
   references?: string;
   lien?: string;
   source: 'gmail' | 'outlook';
+  /** Les premiers mots du message, pour la liste (Gmail : snippet, Outlook : bodyPreview). */
+  extrait?: string;
+  /** Étiquettes posées sur le fil (libellés Gmail créés par l'utilisateur, catégories Outlook). */
+  libelles?: string[];
+  /** Le message porte des pièces jointes (Outlook le dit dès la liste). */
+  pj?: boolean;
+  /** Boîte partagée d'où vient le mail ; absente = la boîte du compte. */
+  boite?: string;
 };
+
+/** L'extrait d'un message, sur une ligne et en 160 caractères au plus. */
+export const extrait = (t = '') => {
+  const l = t.replace(/\s+/g, ' ').trim();
+  return l.length > 160 ? `${l.slice(0, 159).trimEnd()}…` : l || undefined;
+};
+
+/** Les étiquettes ajoutées et retirées, appliquées à la liste courante : sans doublon, dans l'ordre d'origine. */
+export function appliquerLibelles(actuels: string[], ajouter: string[], retirer: string[]): string[] {
+  const sans = new Set(retirer.map((x) => x.toLowerCase()));
+  const out = actuels.filter((x) => !sans.has(x.toLowerCase()));
+  for (const a of ajouter) if (!out.some((x) => x.toLowerCase() === a.toLowerCase())) out.push(a);
+  return out;
+}
+
+/** Une liste d'adresses de boîtes partagées propre : en minuscules, sans doublon, 10 au plus. */
+export const boitesValides = (l: string[] = []) => [...new Set(l.map((x) => x.trim().toLowerCase()).filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)))].slice(0, 10);
 
 /**
  * Un seul message par fil (le plus récent), les plus récents d'abord.
@@ -69,11 +94,14 @@ export function rangerMails(mails: MailImporte[], max = 25): MailImporte[] {
   const quand = (m: MailImporte) => `${m.date || '0000-00-00'} ${m.heure || '00:00'}`;
   const parFil = new Map<string, MailImporte>();
   for (const m of mails) {
-    const cle = m.fil || m.id;
+    const cle = `${m.boite ?? ''}|${m.fil || m.id}`;
     const deja = parFil.get(cle);
     // Un fil où il reste un message non lu se signale même si le dernier message est lu.
     if (!deja) parFil.set(cle, m);
-    else parFil.set(cle, { ...(quand(m) > quand(deja) ? m : deja), nonLu: deja.nonLu || m.nonLu });
+    else {
+      const libelles = [...new Set([...(deja.libelles ?? []), ...(m.libelles ?? [])])];
+      parFil.set(cle, { ...(quand(m) > quand(deja) ? m : deja), nonLu: deja.nonLu || m.nonLu, ...(libelles.length ? { libelles } : {}) });
+    }
   }
   return [...parFil.values()].sort((a, b) => quand(b).localeCompare(quand(a))).slice(0, max);
 }
