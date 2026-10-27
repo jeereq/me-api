@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { EquipeController } from '../controllers/EquipeController.js';
+import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
@@ -20,7 +21,8 @@ const router = Router();
 router.use(authenticateJWT);
 
 router.get('/', asyncHandler(EquipeController.list));
-router.post('/', validateRequest(creerEquipeSchema), asyncHandler(EquipeController.creer));
+// Créer une équipe et inviter demandent Pro ; rejoindre une équipe reste ouvert à tous.
+router.post('/', requirePro('equipes'), validateRequest(creerEquipeSchema), asyncHandler(EquipeController.creer));
 
 // Les invitations se consultent et s'acceptent avec le jeton reçu par email, sans être encore membre.
 router.post('/invitation/apercu', validateRequest(jetonInvitationSchema), asyncHandler(EquipeController.apercuInvitation));
@@ -29,7 +31,7 @@ router.post('/invitation/rejoindre', validateRequest(jetonInvitationSchema), asy
 router.patch('/:id', validateRequest(patchEquipeSchema), asyncHandler(EquipeController.renommer));
 router.delete('/:id', validateRequest(equipeParamsSchema), asyncHandler(EquipeController.supprimer));
 
-router.post('/:id/invitations', validateRequest(inviterEquipeSchema), asyncHandler(EquipeController.inviter));
+router.post('/:id/invitations', requirePro('equipes'), validateRequest(inviterEquipeSchema), asyncHandler(EquipeController.inviter));
 router.delete('/:id/invitations/:invitationId', validateRequest(invitationParamsSchema), asyncHandler(EquipeController.annulerInvitation));
 
 router.patch('/:id/membres/:membreId', validateRequest(roleMembreSchema), asyncHandler(EquipeController.changerRole));

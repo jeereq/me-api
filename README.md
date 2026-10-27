@@ -8,7 +8,8 @@ Le backend de « Me », ton assistant personnel. Il sert l'app mobile [me-mobile
 - **gestion des comptes** pour les admins ;
 - **assistant IA** : relais vers OpenAI, la clé API reste sur le serveur ;
 - **rappels** : calculés par le serveur selon le mode de chaque élément, visibles dans l'app et envoyés par email avec SendGrid ;
-- **comptes connectés** : Google Agenda et Gmail, Outlook et Microsoft To Do, Trello, Slack, synchronisés toutes les 15 minutes.
+- **comptes connectés** : Google Agenda et Gmail, Outlook et Microsoft To Do, Trello, Slack, synchronisés toutes les 15 minutes ;
+- **abonnements** : essai Pro de 14 jours, offre gratuite et Pro prépayé par mobile money avec FlexPaie.
 
 Stack : Node 20+, Express, TypeScript, Prisma et PostgreSQL, JWT, zod, helmet, express-rate-limit.
 
@@ -97,7 +98,12 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/notifications/push` | compte | Abonne ce navigateur aux notifications push |
 | DELETE | `/api/notifications/push` | compte | Désabonne ce navigateur |
 | POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
-| POST | `/api/assistant` | compte | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
+| POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
+| GET | `/api/abonnement/offres` | public | Prix, durée de l'essai, ce que Pro débloque, `paiement` : FlexPaie configuré |
+| GET | `/api/abonnement` | compte | `{ abonnement, paiements }` : offre en cours et 10 derniers paiements |
+| POST | `/api/abonnement/paiement` | compte | `{ periode: "mensuel" \| "annuel", telephone, accepteCgv: true, accesImmediat: true }` → `{ paiement }` en attente de validation sur le téléphone |
+| GET | `/api/abonnement/paiements/:reference` | compte | Revérifie le paiement chez FlexPaie → `{ paiement, abonnement, paiements }` |
+| POST | `/api/abonnement/flexpaie/retour` | public | Retour de FlexPaie ; la commande est toujours revérifiée chez FlexPaie |
 
 Les erreurs ont la forme `{ "error": "message lisible" }`.
 
@@ -233,3 +239,20 @@ src/utils/crypto.ts      chiffrement des jetons
 ## Prochaines étapes
 
 D'autres services (Notion, Asana, Todoist, iCloud), et, si les données grossissent, sortir de l'espace JSON unique les listes qui s'allongent (dépenses, relances, journal) vers des tables SQL.
+
+## Abonnements
+
+Activés par `ABONNEMENTS=true` ; sans cette variable, tout reste ouvert comme avant. Le code est dans `src/services/abonnements/` (`offres.ts`, module pur testé dans `tests/abonnements.test.ts`).
+
+| Offre | Ce qu'elle donne |
+| --- | --- |
+| **Essai** | Tout Pro pendant 14 jours, sans paiement, à la création du compte. Les comptes existants au moment de la migration commencent leur essai ce jour-là. |
+| **Gratuit** | Tout l'espace personnel : tâches, relances, habitudes, projets, finances, statistiques, récompenses, rappels dans l'app. Rejoindre une équipe sur invitation. |
+| **Pro** | En plus : copilote IA, comptes connectés (connexion, lecture, écriture, synchro), création d'équipes et invitations, rappels par email et push. 4,99 $ par mois ou 49,99 $ par an. |
+
+- Une route Pro sans abonnement répond **402** `ABONNEMENT_REQUIS` (avec `fonction`). Les admins ont toujours tout. Sans Pro, on peut encore voir et déconnecter ses comptes connectés ; la synchro planifiée les ignore, et les rappels restent dans l'app.
+- **Paiement prépayé, sans renouvellement automatique** : un paiement FlexPaie (mobile money) ouvre un mois ou un an. Payer avant la fin ajoute la période à la fin en cours. Rien n'est prélevé automatiquement : Me prévient 7 jours puis la veille de la fin (dans l'app et par email), et 3 jours avant la fin de l'essai.
+- **Sécurité du paiement** : le retour de FlexPaie sert seulement à retrouver la commande, qui est toujours revérifiée auprès de FlexPaie (montant et devise compris) ; un paiement ne prolonge Pro qu'une fois, même si le retour arrive deux fois. Les paiements dont le retour s'est perdu sont revérifiés toutes les 5 minutes pendant 24 h.
+- **Suppression du compte** : les paiements restent pour la comptabilité, détachés du compte et sans numéro de téléphone.
+- **CGV** : payer exige `accepteCgv` et `accesImmediat` (demande d'accès immédiat, qui encadre le droit de rétractation). La date et la version des CGV acceptées sont gardées sur le compte (`VERSION_CGV` dans `offres.ts`, à changer avec `cgv.html` de me-mobile).
+- Les prix de `offres.ts` doivent rester identiques à ceux de `me-mobile/public/cgv.html`.

@@ -21,6 +21,8 @@ export const MembreService = {
   async remove(id: string, parId: string) {
     if (id === parId) throw new HttpError(400, 'Tu ne peux pas supprimer ton propre compte ici.');
     await assertPasDernierAdmin(id);
+    // Les paiements restent pour la comptabilité, sans le numéro de téléphone.
+    await prisma.paiement.updateMany({ where: { userId: id }, data: { telephone: '' } });
     await prisma.user.delete({ where: { id } });
   },
 };
