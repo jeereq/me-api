@@ -1,4 +1,5 @@
 import { HttpError } from '../../utils/http.js';
+import { diagnostiquer } from './erreurs.js';
 
 /** Erreur d'un service externe ; `auth` signale un accès révoqué (il faut reconnecter le compte). */
 export class ErreurExterne extends Error {
@@ -20,7 +21,8 @@ export async function json<T>(service: string, url: string, init: RequestInit = 
   const data = (await res.json().catch(() => ({}))) as T & { error?: unknown; ok?: boolean };
   if (!res.ok) {
     console.error(service, res.status, url.split('?')[0], JSON.stringify(data).slice(0, 300));
-    throw new ErreurExterne(`${service} a répondu ${res.status}.`, res.status === 401 || res.status === 403);
+    const d = diagnostiquer(service, res.status, data);
+    throw new ErreurExterne(d.message, d.auth);
   }
   return data;
 }

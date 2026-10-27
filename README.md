@@ -108,6 +108,14 @@ Règles :
 - **Continuer avec Google** : utilise le même client OAuth que les sources Google (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL`), avec seulement `openid email profile`. Ajoute l'URI de redirection `{PUBLIC_URL}/api/auth/google/callback` dans la console Google. Un compte existant avec la même adresse est relié (s'il n'avait jamais été confirmé, son mot de passe est retiré, par sécurité).
 - Les liens des emails et le retour de Google pointent vers `APP_URL` (sinon la première adresse https d'`APP_REDIRECT_URLS`). Seule l'empreinte des jetons est gardée en base.
 
+## Sources Google : messages d'erreur
+
+L'écran « Agendas & outils » affiche la raison du refus de Google :
+
+- **« l'API correspondante n'est pas activée dans Google Cloud »** : active *Google Calendar API* et *Gmail API* (API et services → Bibliothèque) dans le projet du client OAuth. Reconnecter ne sert à rien tant que ce n'est pas fait.
+- **« Autorisations insuffisantes »** : ajoute les scopes `calendar.readonly` et `gmail.readonly` à l'écran de consentement, puis reconnecte le compte en acceptant toutes les cases.
+- **« L'autorisation a expiré ou a été retirée »** : en mode *Test*, Google révoque les jetons après 7 jours ; reconnecte le compte (ou passe l'application en production).
+
 ## Rappels (app et email)
 
 Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son fuseau horaire, avec les mêmes règles que l'app : briefing du matin, mode normal le jour J à 9 h, agressif à J-3, J-1, matin et soir puis chaque jour de retard, coach le soir, bilan hebdo le dimanche soir. Le mode passif n'envoie rien.

@@ -128,7 +128,7 @@ export const IntegrationService = {
       });
       await prisma.integration.update({ where: { id }, data: { donnees: donnees as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
     } catch (e) {
-      const message = e instanceof ErreurExterne ? (e.auth ? 'Accès refusé : reconnecte ce compte.' : e.message) : 'Synchronisation impossible pour l’instant.';
+      const message = e instanceof ErreurExterne ? e.message : 'Synchronisation impossible pour l’instant.';
       if (!(e instanceof ErreurExterne)) console.error('Synchro', i.fournisseur, e);
       await prisma.integration.update({ where: { id }, data: { erreur: message } });
     }
