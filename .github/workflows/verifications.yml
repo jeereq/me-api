@@ -1,0 +1,30 @@
+# Vérifications automatiques : sur chaque PR et sur main, les types, les tests et la construction doivent passer.
+name: Vérifications
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: verifications-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # `postinstall` génère le client Prisma : aucune base n'est nécessaire.
+      - run: npm ci
+      - name: Types
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Construction
+        run: npm run build
