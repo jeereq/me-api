@@ -176,7 +176,7 @@ Pour ne faire tourner les tâches que sur une instance, mets `RUN_CRONS=false` s
 ## Tests
 
 ```bash
-npm test    # lanceur natif de Node via tsx : rappels, chiffrement des jetons, JWT, validation
+npm test    # lanceur natif de Node via tsx : rappels (dont plans de projet), prévisions et budgets par catégories, modes, équipes, chiffrement des jetons, JWT, validation
 ```
 
 ## Organisation
@@ -190,6 +190,7 @@ src/services/            logique métier et accès à la base
 src/services/integrations/  un connecteur par service externe
 src/services/espaces/    le contrat de révision, partagé par l'espace privé et celui d'une équipe
 src/services/equipes/    les droits de chaque rôle
+src/services/rappels/    calcul des rappels, copié de l'app : modes.ts, previsions.ts (budgets, catégories, dates), projets.ts (tâches de projet)
 src/cron/                synchronisation (15 min) et rappels (5 min)
 src/middlewares/         JWT, rôle admin, validation zod, limites de débit
 src/validators/          schémas zod
