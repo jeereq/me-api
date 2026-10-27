@@ -1,9 +1,9 @@
 import { HttpError } from '../utils/http.js';
 import type { AssistantBody } from '../validators/schemas.js';
+import { MODELE_DEFAUT, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
 import { ConfigService } from './ConfigService.js';
 
 const MAX_DONNEES = 60_000;
-const MODELE_DEFAUT = 'gpt-4o-mini';
 const DELAI_MS = 60_000;
 const OPENAI_URL = () => (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
 
@@ -73,14 +73,22 @@ export const AssistantService = {
 
   async demander(body: AssistantBody): Promise<string> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
-    const modele = await this.modele();
-    const res = await openai('/chat/completions', {
-      method: 'POST',
-      body: JSON.stringify(corpsRequete(modele, prompt(body))),
-    });
-    const data = (await res.json().catch(() => ({}))) as { choices?: { finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }[]; error?: { message?: string } };
-    if (!res.ok) {
-      console.error('OpenAI', res.status, modele, data?.error?.message);
+    // Un modèle retiré par OpenAI ne doit pas couper l'assistant : on essaie le suivant (serveur, puis modèle par défaut).
+    const choisi = ((await ConfigService.get()).assistant as { modele?: unknown } | undefined)?.modele;
+    const candidats = modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL);
+    type Reponse = { choices?: { finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }[]; error?: { message?: string; code?: string | null } };
+    let data: Reponse = {};
+    let modele = candidats[0];
+    for (const [i, m] of candidats.entries()) {
+      modele = m;
+      const res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, prompt(body))) });
+      data = (await res.json().catch(() => ({}))) as Reponse;
+      if (res.ok) break;
+      console.error('OpenAI', res.status, m, data?.error?.message);
+      if (modeleIndisponible(res.status, data)) {
+        if (i < candidats.length - 1) continue;
+        throw new HttpError(502, `Le modèle « ${candidats[0]} » n'est plus disponible chez OpenAI. Choisis-en un autre dans Configuration.`);
+      }
       throw new HttpError(502, "L'IA n'a pas pu répondre, réessaie dans un instant.");
     }
     const choix = data.choices?.[0];

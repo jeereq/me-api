@@ -96,7 +96,7 @@ Règles :
 
 - **Compte admin principal** : `ADMIN_EMAIL` et `ADMIN_PASSWORD` créent ce compte au démarrage, toujours admin. Changer `ADMIN_PASSWORD` puis redémarrer remplace son mot de passe. Sans ces variables, le premier compte inscrit devient admin.
 - `SIGNUP_OPEN=false` ferme les inscriptions une fois le premier compte créé ; l'admin crée alors les comptes à la main ou les rouvre.
-- Le modèle OpenAI se choisit dans l'app (Configuration, réservé à l'admin) ; sans choix, c'est `OPENAI_MODEL`, puis `gpt-4o-mini`.
+- Le modèle OpenAI se choisit dans l'app (Configuration, réservé à l'admin) ; sans choix, c'est `OPENAI_MODEL`, puis `gpt-4o-mini`. Si OpenAI retire le modèle choisi (404, « deprecated »), le serveur essaie les suivants de cette liste et le dit dans les logs ; si aucun n'existe, l'app demande d'en choisir un autre.
 - Le dernier admin ne peut être ni rétrogradé ni supprimé.
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.
