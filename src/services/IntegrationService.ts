@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
-import { choixValides, type MailImporte } from './integrations/choix.js';
+import { boitesValides, choixValides, type MailImporte } from './integrations/choix.js';
 import { adresses, ErreurSaisie } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
@@ -22,10 +22,12 @@ export const connecteur = (nom: string) => {
   return c;
 };
 
+const textes = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 const prefsCompte = (i: Integration): PrefsCompte => {
-  const p = i.prefs as { agendas?: unknown } | null;
-  return { agendas: Array.isArray(p?.agendas) ? p.agendas.filter((x): x is string => typeof x === 'string') : undefined };
+  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown } | null;
+  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees) };
 };
+const donneesDe = (i: Integration) => (i.donnees ?? vide()) as unknown as Elements;
 
 const publique = (i: Integration) => ({
   id: i.id,
@@ -36,6 +38,15 @@ const publique = (i: Integration) => ({
   erreur: i.erreur,
   /** Agendas cochés pour ce compte ; vide = ceux que le service affiche par défaut. */
   agendas: prefsCompte(i).agendas ?? [],
+  /** Le service sait lire des boîtes partagées avec ce compte (Microsoft 365). */
+  partageables: !!parFournisseur(i.fournisseur).boitesPartagees,
+  /** Boîtes partagées demandées, avec l'erreur de la dernière lecture s'il y en a eu une. */
+  boites: (prefsCompte(i).boitesPartagees ?? []).map((adresse) => {
+    const erreur = donneesDe(i).boites?.find((b) => b.adresse === adresse)?.erreur;
+    return erreur ? { adresse, erreur } : { adresse };
+  }),
+  /** Étiquettes qu'on peut poser sur un mail de ce compte. */
+  libelles: donneesDe(i).libelles ?? [],
 });
 
 /** Le paramètre `state` d'OAuth : signé, lié au compte me, valable 10 minutes. */
@@ -113,16 +124,21 @@ export const IntegrationService = {
     return publique(i);
   },
 
-  /** Change le contexte (perso/pro) et/ou les agendas synchronisés, puis relit le compte. */
-  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[] }) {
+  /** Change le contexte (perso/pro), les agendas synchronisés et/ou les boîtes partagées lues, puis relit le compte. */
+  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[] }) {
     const i = await prisma.integration.findFirst({ where: { id, userId } });
     if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
+    if (patch.boitesPartagees?.length && !parFournisseur(i.fournisseur).boitesPartagees)
+      throw new HttpError(400, 'Gmail ne donne pas accès aux boîtes partagées : connecte cette boîte comme un compte Google de plus, elle apparaîtra avec les autres.');
     const data: Prisma.IntegrationUpdateInput = {};
     if (patch.ctx) data.ctx = patch.ctx;
-    if (patch.agendas) data.prefs = { ...(prefsCompte(i) as object), agendas: [...new Set(patch.agendas)].slice(0, 50) } as Prisma.InputJsonObject;
+    const prefs = { ...prefsCompte(i) };
+    if (patch.agendas) prefs.agendas = [...new Set(patch.agendas)].slice(0, 50);
+    if (patch.boitesPartagees) prefs.boitesPartagees = boitesValides(patch.boitesPartagees).filter((b) => b !== i.compte.toLowerCase());
+    if (patch.agendas || patch.boitesPartagees) data.prefs = prefs as Prisma.InputJsonObject;
     await prisma.integration.update({ where: { id }, data });
-    // Les agendas choisis ne changent rien tant que le compte n'a pas été relu.
-    if (patch.agendas) await this.synchroniserUne(id).catch(() => {});
+    // Les agendas et les boîtes choisis ne changent rien tant que le compte n'a pas été relu.
+    if (patch.agendas || patch.boitesPartagees) await this.synchroniserUne(id).catch(() => {});
     return publique(await prisma.integration.findUniqueOrThrow({ where: { id } }));
   },
 
@@ -157,6 +173,7 @@ export const IntegrationService = {
         delaiRelance: Math.max(1, Number(cfg?.delaiRelanceJours) || 3),
         prefs: lirePrefs(i.user.espace?.data),
         agendas: prefsCompte(i).agendas ?? [],
+        boitesPartagees: prefsCompte(i).boitesPartagees ?? [],
       });
       await prisma.integration.update({ where: { id }, data: { donnees: donnees as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
     } catch (e) {
@@ -202,25 +219,50 @@ export const IntegrationService = {
     }
   },
 
+  /** Un mail gardé dans les messages relus du compte (objet, contact, fil, boîte). */
+  _mailGarde(i: Integration, mailId: string) {
+    return (donneesDe(i).mails ?? []).find((x) => x.id === mailId) as MailImporte | undefined;
+  },
+
   /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */
   async repondre(userId: string, id: string, mailId: string, texte: string) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'repondre');
-    const m = (((i.donnees ?? vide()) as unknown as Elements).mails ?? []).find((x) => x.id === mailId) as MailImporte | undefined;
+    const m = this._mailGarde(i, mailId);
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
     // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.
-    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references }), i, false);
+    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite }), i, false);
   },
 
   /** Lit un mail en entier, sans le garder : seul l'état « lu » est noté dans les messages relus. */
   async lireMail(userId: string, id: string, mailId: string) {
     const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'lireMail');
-    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau), i, false);
+    const garde = this._mailGarde(i, mailId);
+    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite }), i, false);
+    if (garde?.nonLu) await this._majMail(i, mailId, { nonLu: false });
+    return { mail: { ...contenu, ...(garde?.boite ? { boite: garde.boite } : {}) } };
+  },
+
+  /** Pose ou retire des étiquettes sur un mail ; la liste du compte et le mail gardé suivent tout de suite. */
+  async etiqueter(userId: string, id: string, mailId: string, e: { ajouter?: string[]; retirer?: string[] }) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'etiqueter');
+    const garde = this._mailGarde(i, mailId);
+    const propre = (l: string[] = []) => [...new Set(l.map((x) => x.trim()).filter(Boolean))];
+    const ajouter = propre(e.ajouter);
+    const retirer = propre(e.retirer);
+    if (!ajouter.length && !retirer.length) throw new HttpError(400, 'Choisis une étiquette à poser ou à retirer.');
+    const r = await this._ecrire(() => c.etiqueter!(jetons, { mailId, fil: garde?.fil, boite: garde?.boite, ajouter, retirer }), i, false);
+    await this._majMail(i, mailId, { libelles: r.libelles }, ajouter);
+    return r;
+  },
+
+  /** Corrige un mail gardé sans relire tout le compte ; `nouvelles` rejoint la liste des étiquettes du compte. */
+  async _majMail(i: Integration, mailId: string, patch: Partial<MailImporte>, nouvelles: string[] = []) {
     const d = (i.donnees ?? null) as unknown as Elements | null;
-    if (d?.mails?.some((m) => m.id === mailId && m.nonLu)) {
-      const mails = d.mails.map((m) => (m.id === mailId ? { ...m, nonLu: false } : m));
-      await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, mails } as unknown as Prisma.InputJsonObject } }).catch(() => {});
-    }
-    return { mail: contenu };
+    if (!d?.mails) return;
+    const mails = d.mails.map((m) => (m.id === mailId ? { ...m, ...patch } : m));
+    const connues = d.libelles ?? [];
+    const libelles = [...connues, ...nouvelles.filter((n) => !connues.some((l) => l.nom.toLowerCase() === n.toLowerCase())).map((nom) => ({ nom }))];
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, mails, libelles } as unknown as Prisma.InputJsonObject } }).catch(() => {});
   },
 
   /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */

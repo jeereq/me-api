@@ -4,7 +4,7 @@ import { IntegrationController } from '../controllers/IntegrationController.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { creerEvenementSchema, creerTacheSchema, envoyerMailSchema, integrationParamsSchema, lireMailSchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { creerEvenementSchema, creerTacheSchema, envoyerMailSchema, etiqueterMailSchema, integrationParamsSchema, lireMailSchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Routes ouvertes : le navigateur y revient après l'autorisation, le `state` signé identifie le compte.
@@ -19,6 +19,8 @@ router.get('/:id/agendas', validateRequest(integrationParamsSchema), asyncHandle
 router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(IntegrationController.modifier));
 // Lire un mail en entier, à la demande.
 router.get('/:id/mails/:mail', validateRequest(lireMailSchema), asyncHandler(IntegrationController.lireMail));
+// Poser ou retirer des étiquettes (libellés Gmail, catégories Outlook).
+router.post('/:id/mails/:mail/libelles', validateRequest(etiqueterMailSchema), asyncHandler(IntegrationController.etiqueter));
 // Écriture dans le compte connecté (répondre, écrire, tenir l'agenda et les tâches).
 router.post('/:id/repondre', validateRequest(repondreMailSchema), asyncHandler(IntegrationController.repondre));
 router.post('/:id/envoyer', validateRequest(envoyerMailSchema), asyncHandler(IntegrationController.envoyer));

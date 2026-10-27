@@ -1,8 +1,8 @@
-import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
+import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
-import { texteDeGmail, type PartieGmail } from './lecture.js';
-import { vide, type Connecteur, type Elements } from './types.js';
+import { decoderEntites, texteDeGmail, type PartieGmail } from './lecture.js';
+import { FIL_MAX, vide, type Connecteur, type Elements, type LibelleDispo } from './types.js';
 
 const CAL = 'https://www.googleapis.com/calendar/v3';
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -25,7 +25,15 @@ type Token = { access_token: string; refresh_token?: string; expires_in: number 
 type Event = { id: string; summary?: string; location?: string; htmlLink?: string; status?: string; start: { date?: string; dateTime?: string }; end?: { date?: string; dateTime?: string } };
 type Cal = { id: string; summary?: string; summaryOverride?: string; selected?: boolean; primary?: boolean; backgroundColor?: string };
 type Header = { name: string; value: string };
-type Message = { id: string; threadId: string; labelIds?: string[]; internalDate?: string; payload?: PartieGmail & { headers?: Header[] } };
+type Message = { id: string; threadId: string; labelIds?: string[]; internalDate?: string; snippet?: string; payload?: PartieGmail & { headers?: Header[] } };
+type Libelle = { id: string; name: string; type?: 'system' | 'user'; color?: { backgroundColor?: string } };
+
+/** Les libellés créés par l'utilisateur (pas INBOX, UNREAD…), par identifiant : ce sont eux que Me montre comme étiquettes. */
+const libellesDuCompte = async (accessToken: string) => {
+  const { labels = [] } = await json<{ labels?: Libelle[] }>('Gmail', `${GMAIL}/labels`, bearer(accessToken));
+  return new Map(labels.filter((l) => l.type === 'user').map((l) => [l.id, l]));
+};
+const nomsLibelles = (ids: string[] | undefined, parId: Map<string, Libelle>) => (ids ?? []).map((x) => parId.get(x)?.name).filter((n): n is string => !!n);
 
 /** La liste des agendas du compte, nommée comme dans Google Agenda. */
 const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
@@ -158,15 +166,34 @@ export const google: Connecteur = {
       }
     }
 
-    // Boîte mail : les fils récents, pour lire et répondre depuis Me (seulement objet, contact et date).
+    // Boîte mail : les fils récents, pour lire et répondre depuis Me (objet, contact, date, extrait et libellés).
     if (gmail.actif && gmail.imports.includes('mails')) {
+      const parId = await libellesDuCompte(jetons.accessToken).catch(() => new Map<string, Libelle>());
+      out.libelles = [...parId.values()].map((l): LibelleDispo => ({ nom: l.name, ...(l.color?.backgroundColor ? { couleur: l.color.backgroundColor } : {}) })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
       const { messages = [] } = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/messages?${new URLSearchParams({ q: `in:inbox newer_than:7d${filtreGmail}`, maxResults: '25' })}`, auth);
       const lus = await lire(messages.map((x) => x.id));
       out.mails = rangerMails(
         lus.map((m): MailImporte => {
           const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : { date: jour(0, fuseau), heure: undefined };
           const de = entete(m, 'From');
-          return { id: m.id, fil: m.threadId, sujet: entete(m, 'Subject') || '(sans objet)', contact: nomContact(de), adresse: de, messageId: entete(m, 'Message-ID') || undefined, references: entete(m, 'References') || undefined, date: d.date, heure: d.heure, sens: 'recu', nonLu: m.labelIds?.includes('UNREAD'), lien: lienMail(m.threadId), source: 'gmail' };
+          const libelles = nomsLibelles(m.labelIds, parId);
+          return {
+            id: m.id,
+            fil: m.threadId,
+            sujet: entete(m, 'Subject') || '(sans objet)',
+            contact: nomContact(de),
+            adresse: de,
+            messageId: entete(m, 'Message-ID') || undefined,
+            references: entete(m, 'References') || undefined,
+            date: d.date,
+            heure: d.heure,
+            sens: 'recu',
+            nonLu: m.labelIds?.includes('UNREAD'),
+            lien: lienMail(m.threadId),
+            source: 'gmail',
+            extrait: extrait(decoderEntites(m.snippet ?? '')),
+            ...(libelles.length ? { libelles } : {}),
+          };
         }),
       );
     }
@@ -187,14 +214,60 @@ export const google: Connecteur = {
     return { lien: lienMail(env.threadId || r.fil || env.id) };
   },
 
-  async lireMail({ accessToken }, mailId, fuseau) {
-    const m = await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, bearer(accessToken));
+  async lireMail({ accessToken }, mailId, fuseau, ou) {
+    const auth = bearer(accessToken);
+    // Avec le fil, un seul appel rend le mail et les messages plus anciens de l'échange.
+    const fil = ou?.fil ? await json<{ messages?: Message[] }>('Gmail', `${GMAIL}/threads/${encodeURIComponent(ou.fil)}?format=full`, auth).catch(() => null) : null;
+    const tous = fil?.messages ?? [];
+    const m = tous.find((x) => x.id === mailId) ?? (await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, auth));
     const { texte, piecesJointes } = texteDeGmail(m.payload);
     // Ouvert dans Me = lu. Un compte connecté sans ce droit reste « non lu » chez Gmail, sans bloquer la lecture.
     if (m.labelIds?.includes('UNREAD')) await json('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}/modify`, corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] })).catch(() => {});
-    const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : undefined;
+    const quand = (x: Message) => (x.internalDate ? local(new Date(Number(x.internalDate)), fuseau) : undefined);
+    const d = quand(m);
     const de = entete(m, 'From');
-    return { id: m.id, sujet: entete(m, 'Subject') || '(sans objet)', de: nomContact(de), adresse: de, a: listeAdresses(entete(m, 'To')), cc: listeAdresses(entete(m, 'Cc')), date: d?.date, heure: d?.heure, texte, piecesJointes, lien: lienMail(m.threadId) };
+    const parId = m.labelIds?.some((x) => x.startsWith('Label_')) ? await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>()) : new Map<string, Libelle>();
+    const avant = tous.filter((x) => x.id !== m.id && Number(x.internalDate ?? 0) <= Number(m.internalDate ?? 0) && !x.labelIds?.includes('DRAFT')).slice(-FIL_MAX);
+    return {
+      id: m.id,
+      sujet: entete(m, 'Subject') || '(sans objet)',
+      de: nomContact(de),
+      adresse: de,
+      a: listeAdresses(entete(m, 'To')),
+      cc: listeAdresses(entete(m, 'Cc')),
+      date: d?.date,
+      heure: d?.heure,
+      texte,
+      piecesJointes,
+      lien: lienMail(m.threadId),
+      libelles: nomsLibelles(m.labelIds, parId),
+      fil: avant.map((x) => {
+        const c = texteDeGmail(x.payload);
+        const q = quand(x);
+        const exp = entete(x, 'From');
+        return { id: x.id, de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, piecesJointes: c.piecesJointes };
+      }),
+    };
+  },
+
+  async etiqueter({ accessToken }, e) {
+    const parId = await libellesDuCompte(accessToken);
+    const parNom = new Map([...parId.values()].map((l) => [l.name.toLowerCase(), l.id]));
+    // Une étiquette nouvelle devient un libellé Gmail, visible aussi dans Gmail.
+    for (const nom of e.ajouter.filter((n) => !parNom.has(n.toLowerCase()))) {
+      const cree = await json<Libelle>('Gmail', `${GMAIL}/labels`, corpsJson(accessToken, 'POST', { name: nom, labelListVisibility: 'labelShow', messageListVisibility: 'show' }));
+      parId.set(cree.id, { ...cree, type: 'user' });
+      parNom.set(cree.name.toLowerCase(), cree.id);
+    }
+    const ids = (l: string[]) => l.map((n) => parNom.get(n.toLowerCase())).filter((x): x is string => !!x);
+    const corps = { addLabelIds: ids(e.ajouter), removeLabelIds: ids(e.retirer) };
+    // Tout le fil, comme dans Gmail où les libellés se voient par conversation.
+    if (e.fil) {
+      const t = await json<{ messages?: Message[] }>('Gmail', `${GMAIL}/threads/${encodeURIComponent(e.fil)}/modify`, corpsJson(accessToken, 'POST', corps));
+      return { libelles: [...new Set((t.messages ?? []).flatMap((x) => nomsLibelles(x.labelIds, parId)))] };
+    }
+    const m = await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(e.mailId)}/modify`, corpsJson(accessToken, 'POST', corps));
+    return { libelles: m.labelIds ? nomsLibelles(m.labelIds, parId) : appliquerLibelles([], e.ajouter, []) };
   },
 
   async envoyer({ accessToken }, n) {

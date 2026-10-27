@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { agendasALire, choixValides, passeNom, rangerMails, type AgendaDispo, type MailImporte } from '../src/services/integrations/choix.js';
+import { agendasALire, appliquerLibelles, boitesValides, choixValides, extrait, passeNom, rangerMails, type AgendaDispo, type MailImporte } from '../src/services/integrations/choix.js';
 
 const cals: AgendaDispo[] = [
   { id: 'moi@gmail.com', nom: 'Perso', principal: true, visible: true },
@@ -56,6 +56,14 @@ describe('mails rangés', () => {
     const r = rangerMails([m('sansdate', '', ''), m('a', '2026-10-26', '10:00')]);
     assert.deepEqual(r.map((x) => x.id), ['a', 'sansdate']);
   });
+  it('réunit les étiquettes de tous les messages du fil', () => {
+    const r = rangerMails([m('a1', '2026-10-20', '09:00', { fil: 'f1', libelles: ['Facture'] }), m('a2', '2026-10-26', '18:30', { fil: 'f1', libelles: ['Client'] })]);
+    assert.deepEqual(r[0].libelles, ['Facture', 'Client']);
+  });
+  it('un même fil dans deux boîtes (la sienne et une partagée) reste deux lignes', () => {
+    const r = rangerMails([m('a', '2026-10-26', '10:00', { fil: 'f1' }), m('b', '2026-10-26', '11:00', { fil: 'f1', boite: 'ventes@x.fr' })]);
+    assert.equal(r.length, 2);
+  });
   it('ne dépasse pas la limite', () => {
     assert.equal(rangerMails([m('a', '2026-10-26', '10:00'), m('b', '2026-10-25', '10:00'), m('c', '2026-10-24', '10:00')], 2).length, 2);
   });
@@ -65,5 +73,21 @@ describe('choix encore valides', () => {
   it('retire les agendas qui n’existent plus', () => {
     assert.deepEqual(choixValides(cals, ['boulot', 'parti', 'sport']), ['boulot', 'sport']);
     assert.deepEqual(choixValides(cals, undefined), []);
+  });
+});
+
+describe('étiquettes et boîtes partagées', () => {
+  it('ajoute sans doublon (sans casse) et retire', () => {
+    assert.deepEqual(appliquerLibelles(['Client', 'Facture'], ['facture', 'Urgent'], ['client']), ['Facture', 'Urgent']);
+    assert.deepEqual(appliquerLibelles([], [], ['X']), []);
+  });
+  it('garde des adresses valides, en minuscules, sans doublon', () => {
+    assert.deepEqual(boitesValides([' Ventes@Exemple.fr ', 'ventes@exemple.fr', 'pas une adresse', 'support@exemple.fr']), ['ventes@exemple.fr', 'support@exemple.fr']);
+    assert.equal(boitesValides(Array.from({ length: 15 }, (_x, i) => `b${i}@x.fr`)).length, 10);
+  });
+  it('un extrait tient sur une ligne et en 160 caractères', () => {
+    assert.equal(extrait('Bonjour,\n\n  voici   le devis'), 'Bonjour, voici le devis');
+    assert.equal(extrait('a'.repeat(300))!.length, 160);
+    assert.equal(extrait('   '), undefined);
   });
 });

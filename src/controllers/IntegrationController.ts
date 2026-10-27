@@ -71,6 +71,9 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
   lireMail: async (req: Request, res: Response) => {
     res.json(await IntegrationService.lireMail(req.user!.id, req.params.id, req.params.mail));
   },
+  etiqueter: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.etiqueter(req.user!.id, req.params.id, req.params.mail, req.body));
+  },
   envoyer: async (req: Request, res: Response) => {
     res.json(await IntegrationService.envoyer(req.user!.id, req.params.id, req.body));
   },

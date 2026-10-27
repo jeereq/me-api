@@ -11,23 +11,29 @@ export const depuisBase64Url = (s: string) => Buffer.from(s.replace(/-/g, '+').r
 
 const ENTITES: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", eacute: 'é', egrave: 'è', ecirc: 'ê', agrave: 'à', acirc: 'â', ccedil: 'ç', ocirc: 'ô', ucirc: 'û', ugrave: 'ù', icirc: 'î', euro: '€', rsquo: '’', lsquo: '‘', laquo: '«', raquo: '»', hellip: '…', ndash: '–', mdash: '—' };
 
+/** Les entités HTML d'un texte (« &amp; », « &#39; ») remplacées par leur caractère : les extraits de Gmail en sont pleins. */
+export const decoderEntites = (t: string) =>
+  t
+    .replace(/&#(\d+);/g, (_t, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_t, n: string) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&([a-z]+);/gi, (t, n: string) => ENTITES[n.toLowerCase()] ?? t);
+
 /** Du HTML au texte lisible : les blocs deviennent des lignes, les liens gardent leur adresse, le reste est retiré. */
 export function htmlEnTexte(html: string): string {
   return nettoyerTexte(
-    html
-      .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, '')
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_t, href: string, txt: string) => {
-        const t = txt.replace(/<[^>]+>/g, '').trim();
-        return !t || t === href || href.startsWith('mailto:') ? t || href : `${t} (${href})`;
-      })
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<li[^>]*>/gi, '\n• ')
-      .replace(/<\/(p|div|tr|h[1-6]|blockquote|table|ul|ol)>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&#(\d+);/g, (_t, n: string) => String.fromCodePoint(Number(n)))
-      .replace(/&#x([0-9a-f]+);/gi, (_t, n: string) => String.fromCodePoint(parseInt(n, 16)))
-      .replace(/&([a-z]+);/gi, (t, n: string) => ENTITES[n.toLowerCase()] ?? t),
+    decoderEntites(
+      html
+        .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_t, href: string, txt: string) => {
+          const t = txt.replace(/<[^>]+>/g, '').trim();
+          return !t || t === href || href.startsWith('mailto:') ? t || href : `${t} (${href})`;
+        })
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<li[^>]*>/gi, '\n• ')
+        .replace(/<\/(p|div|tr|h[1-6]|blockquote|table|ul|ol)>/gi, '\n')
+        .replace(/<[^>]+>/g, ''),
+    ),
   );
 }
 

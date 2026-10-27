@@ -14,7 +14,20 @@ export type EvenementImporte = { id: string; date: string; debut: string; fin?: 
 export type MailOrigine = { fil: string; sujet: string; contact?: string; adresse?: string };
 export type TacheImportee = { id: string; titre: string; echeance: string | null; source: SourceKey; lien?: string; /** Liste d'origine (Google Tasks, Microsoft To Do) : de quoi cocher la tâche à la source depuis Me. */ liste?: string; mail?: MailOrigine };
 export type RelanceImportee = { id: string; contact: string; sujet: string; date: string; source: SourceKey; lien?: string; mail?: MailOrigine };
-export type Elements = { agenda: EvenementImporte[]; taches: TacheImportee[]; relances: RelanceImportee[]; mails: MailImporte[] };
+/** Une étiquette du compte (libellé Gmail, catégorie Outlook), avec sa couleur quand le service en donne une. */
+export type LibelleDispo = { nom: string; couleur?: string };
+/** Une boîte partagée lue avec le compte (Microsoft 365) ; `erreur` dit pourquoi elle n'a pas pu l'être. */
+export type BoitePartagee = { adresse: string; erreur?: string };
+export type Elements = {
+  agenda: EvenementImporte[];
+  taches: TacheImportee[];
+  relances: RelanceImportee[];
+  mails: MailImporte[];
+  /** Les étiquettes qu'on peut poser sur un mail de ce compte. */
+  libelles?: LibelleDispo[];
+  /** Les boîtes partagées demandées pour ce compte, et leur état à la dernière lecture. */
+  boites?: BoitePartagee[];
+};
 
 export type Jetons = { accessToken: string; refreshToken?: string | null; expiresAt?: Date | null };
 
@@ -22,7 +35,7 @@ export type Jetons = { accessToken: string; refreshToken?: string | null; expire
 export type Prefs = { actif: boolean; imports: ImportKind[]; filtre: string[] };
 
 /** Réglages propres à un compte connecté (écran Agendas & outils, bouton « Agendas à synchroniser »). */
-export type PrefsCompte = { agendas?: string[] };
+export type PrefsCompte = { agendas?: string[]; /** Adresses des boîtes partagées à lire avec ce compte (Microsoft 365). */ boitesPartagees?: string[] };
 
 export type Contexte = {
   jetons: Jetons;
@@ -32,6 +45,8 @@ export type Contexte = {
   /** Jours sans réponse avant de proposer une relance (configuration système). */
   delaiRelance: number;
   prefs: (k: SourceKey) => Prefs;
+  /** Boîtes partagées à lire en plus de la boîte du compte. */
+  boitesPartagees: string[];
 };
 
 export interface Connecteur {
@@ -53,8 +68,12 @@ export interface Connecteur {
 
   /** Envoie une réponse dans le fil d'un message. */
   repondre?(jetons: Jetons, r: ReponseMail): Promise<{ lien?: string }>;
-  /** Lit un mail en entier, à la demande, et le marque comme lu dans la boîte. Me ne garde pas ce contenu. */
-  lireMail?(jetons: Jetons, mailId: string, fuseau: string): Promise<ContenuMail>;
+  /** Lit un mail en entier (et les messages plus anciens du fil), à la demande, et le marque comme lu dans la boîte. Me ne garde pas ce contenu. */
+  lireMail?(jetons: Jetons, mailId: string, fuseau: string, ou?: OuMail): Promise<ContenuMail>;
+  /** Pose ou retire des étiquettes sur un mail (tout le fil chez Gmail) ; rend les étiquettes qu'il porte ensuite. */
+  etiqueter?(jetons: Jetons, e: Etiquetage): Promise<{ libelles: string[] }>;
+  /** Accepte des boîtes partagées à lire avec le compte. */
+  boitesPartagees?: boolean;
   /** Écrit un nouveau mail (pas une réponse). */
   envoyer?(jetons: Jetons, m: NouveauMail): Promise<{ lien?: string }>;
   /** Crée un rendez-vous dans un agenda du compte ; rend son identifiant. */
@@ -68,9 +87,30 @@ export interface Connecteur {
 }
 
 /** Une réponse à envoyer : le message d'origine, et le texte écrit dans Me. */
-export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string };
+export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string };
+/** Où se trouve un mail : son fil, et la boîte partagée qui le contient (absente = la boîte du compte). */
+export type OuMail = { fil?: string; boite?: string };
+export type Etiquetage = OuMail & { mailId: string; ajouter: string[]; retirer: string[] };
+/** Un message plus ancien du même fil, lu avec le mail ouvert. */
+export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; piecesJointes: string[] };
 /** Un mail lu en entier : le texte brut (sans mise en forme) et le nom des pièces jointes. */
-export type ContenuMail = { id: string; sujet: string; de: string; adresse?: string; a: string[]; cc: string[]; date?: string; heure?: string; texte: string; piecesJointes: string[]; lien?: string };
+export type ContenuMail = {
+  id: string;
+  sujet: string;
+  de: string;
+  adresse?: string;
+  a: string[];
+  cc: string[];
+  date?: string;
+  heure?: string;
+  texte: string;
+  piecesJointes: string[];
+  lien?: string;
+  /** Étiquettes posées sur le mail (libellés Gmail, catégories Outlook). */
+  libelles?: string[];
+  /** Les messages plus anciens du fil, du plus ancien au plus récent (10 au plus). */
+  fil?: MessageFil[];
+};
 /** Un nouveau mail écrit dans Me : adresses déjà vérifiées. */
 export type NouveauMail = { a: string[]; cc: string[]; sujet: string; texte: string };
 export type EcritureEvenement = { agendaId: string; titre: string; date: string; debut?: string; fin?: string; lieu?: string; journee?: boolean; fuseau: string };
@@ -78,3 +118,6 @@ export type ListeTaches = { id: string; nom: string; principale?: boolean };
 export type EcritureTache = { listeId: string; titre: string; echeance?: string | null; fait?: boolean };
 
 export const vide = (): Elements => ({ agenda: [], taches: [], relances: [], mails: [] });
+
+/** Les messages du fil affichés avec le mail ouvert : les plus récents, sans le mail lui-même. */
+export const FIL_MAX = 10;
