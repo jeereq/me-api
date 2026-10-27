@@ -107,7 +107,7 @@ export const microsoft: Connecteur = {
       for (const l of listes.filter((x) => passe(p.filtre, x.displayName)).slice(0, 5)) {
         const tq = new URLSearchParams({ $filter: "status ne 'completed'", $top: '30' });
         const { value: taches = [] } = await json<{ value?: { id: string; title: string; dueDateTime?: { dateTime: string } }[] }>('Microsoft To Do', `${GRAPH}/todo/lists/${l.id}/tasks?${tq}`, auth);
-        for (const t of taches) out.taches.push({ id: `todo:${t.id}`, titre: t.title, echeance: t.dueDateTime ? brut(t.dueDateTime.dateTime).date : null, source: 'outlook' });
+        for (const t of taches) out.taches.push({ id: `todo:${l.id}:${t.id}`, titre: t.title, echeance: t.dueDateTime ? brut(t.dueDateTime.dateTime).date : null, source: 'outlook', liste: l.id });
       }
     }
 

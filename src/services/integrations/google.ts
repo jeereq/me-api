@@ -48,7 +48,7 @@ function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: 
 export const google: Connecteur = {
   fournisseur: 'GOOGLE',
   nom: 'Google',
-  sources: ['google_agenda', 'gmail'],
+  sources: ['google_agenda', 'google_taches', 'gmail'],
   ctx: 'perso',
   configure: () => !!(id() && secret() && process.env.PUBLIC_URL),
 
@@ -131,6 +131,20 @@ export const google: Connecteur = {
           source: 'gmail',
           lien: lienMail(t.id),
         });
+      }
+    }
+
+    // Google Tasks : les tâches ouvertes des listes du compte, pour les cocher depuis Me.
+    const gtaches = prefs('google_taches');
+    if (gtaches.actif && gtaches.imports.includes('taches')) {
+      const { items: listes = [] } = await json<{ items?: { id: string; title?: string }[] }>('Google Tasks', `${TASKS}/users/@me/lists?maxResults=50`, auth);
+      for (const l of listes.filter((x) => passe(gtaches.filtre, x.title)).slice(0, 5)) {
+        const q = new URLSearchParams({ showCompleted: 'false', showHidden: 'false', maxResults: '50' });
+        const { items: tc = [] } = await json<{ items?: { id: string; title?: string; due?: string; status?: string }[] }>('Google Tasks', `${TASKS}/lists/${encodeURIComponent(l.id)}/tasks?${q}`, auth);
+        for (const t of tc) {
+          if (!t.title?.trim()) continue;
+          out.taches.push({ id: `gtask:${l.id}:${t.id}`, titre: t.title, echeance: t.due ? t.due.slice(0, 10) : null, source: 'google_taches', liste: l.id });
+        }
       }
     }
 

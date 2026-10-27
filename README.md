@@ -145,7 +145,7 @@ Chaque compte me peut connecter plusieurs comptes externes (par exemple Gmail pe
 
 | Service | Agenda | Tâches | Relances | Mails |
 | --- | --- | --- | --- | --- |
-| Google | Rendez-vous des 14 prochains jours (agendas cochés pour le compte, sinon ceux affichés ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours | Fils où ton dernier message attend une réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
+| Google | Rendez-vous des 14 prochains jours (agendas cochés pour le compte, sinon ceux affichés ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours, et les tâches ouvertes de Google Tasks | Fils où ton dernier message attend une réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
 | Microsoft | Rendez-vous des 14 prochains jours (mêmes règles) | Mails avec drapeau, tâches To Do ouvertes | Mails envoyés sans réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
 | Trello | Échéances des 14 prochains jours | Cartes où tu es membre, non terminées | | |
 | Slack | | Messages des derniers jours qui te mentionnent ou t'écrivent en direct | Tes questions restées sans réponse dans leur fil | |
@@ -162,6 +162,7 @@ Me peut répondre à un mail, tenir l'agenda et les tâches depuis l'app. Ce que
 
 - **Autorisations demandées** : Google `calendar.events`, `gmail.readonly`, `gmail.send`, `tasks` ; Microsoft `Calendars.ReadWrite`, `Mail.ReadWrite`, `Mail.Send`, `Tasks.ReadWrite`. Ajoute-les à l'écran de consentement Google et aux autorisations d'API de l'application Azure, **puis reconnecte chaque compte** : un compte relié avant ces autorisations ne peut pas écrire, et Me répond alors « Autorisations insuffisantes : reconnecte ce compte ».
 - **Réponse à un mail** : le destinataire, l'objet et les en-têtes du fil viennent du message gardé lors de la dernière relecture (`donnees.mails`), pas de l'app. Gmail reçoit un message RFC 2822 complet (`In-Reply-To`, `References`), Outlook passe par `POST /messages/{id}/reply`. La mise en forme du message est dans `src/services/integrations/ecriture.ts` (module pur testé).
+- **Tâches dans les deux sens** : une tâche importée de Google Tasks ou de Microsoft To Do garde sa liste d'origine (`liste`, et un identifiant `gtask:<liste>:<tâche>` ou `todo:<liste>:<tâche>`) ; la cocher dans Me la coche à la source.
 - **Rendez-vous et tâches** : le compte est relu juste après l'écriture, pour que l'app voie le résultat sans attendre les 15 minutes. Un envoi de mail ne relit rien : la réponse part dans les messages envoyés, pas dans la réception.
 - **Vérification Google** : `gmail.send` est un niveau d'accès restreint. Tant que l'application OAuth est en mode « Test », il fonctionne pour les utilisateurs test ; pour la publier, Google demande une validation.
 

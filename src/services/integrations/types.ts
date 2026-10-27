@@ -6,11 +6,11 @@ export type { AgendaDispo, MailImporte };
 
 export type Ctx = 'perso' | 'pro';
 /** Clés de source côté app (écran Agendas & outils). */
-export type SourceKey = 'google_agenda' | 'gmail' | 'outlook' | 'trello' | 'slack';
+export type SourceKey = 'google_agenda' | 'google_taches' | 'gmail' | 'outlook' | 'trello' | 'slack';
 export type ImportKind = 'agenda' | 'taches' | 'relances' | 'mails';
 
 export type EvenementImporte = { id: string; date: string; debut: string; fin?: string; titre: string; lieu?: string; source: SourceKey; lien?: string; /** Nom de l'agenda d'origine (« Travail », « Famille »). */ agenda?: string };
-export type TacheImportee = { id: string; titre: string; echeance: string | null; source: SourceKey; lien?: string };
+export type TacheImportee = { id: string; titre: string; echeance: string | null; source: SourceKey; lien?: string; /** Liste d'origine (Google Tasks, Microsoft To Do) : de quoi cocher la tâche à la source depuis Me. */ liste?: string };
 export type RelanceImportee = { id: string; contact: string; sujet: string; date: string; source: SourceKey; lien?: string };
 export type Elements = { agenda: EvenementImporte[]; taches: TacheImportee[]; relances: RelanceImportee[]; mails: MailImporte[] };
 
