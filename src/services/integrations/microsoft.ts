@@ -103,10 +103,12 @@ export const microsoft: Connecteur = {
 
     if (p.imports.includes('taches')) {
       // Mails avec un drapeau de suivi
-      const q = new URLSearchParams({ $filter: "flag/flagStatus eq 'flagged'", $top: '20', $select: 'subject,from,flag,webLink' });
+      const q = new URLSearchParams({ $filter: "flag/flagStatus eq 'flagged'", $top: '20', $select: 'subject,from,flag,webLink,conversationId' });
       const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${GRAPH}/messages?${q}`, auth);
       for (const m of value) {
-        out.taches.push({ id: m.id, titre: `${m.subject || '(sans objet)'} · ${m.from?.emailAddress?.name || ''}`.replace(/ · $/, ''), echeance: m.flag?.dueDateTime ? brut(m.flag.dueDateTime.dateTime).date : null, source: 'outlook', lien: m.webLink });
+        const de = m.from?.emailAddress;
+        const mail = m.conversationId ? { fil: m.conversationId, sujet: m.subject || '(sans objet)', contact: de?.name || de?.address, adresse: de?.address } : undefined;
+        out.taches.push({ id: m.id, titre: `${m.subject || '(sans objet)'} · ${de?.name || ''}`.replace(/ · $/, ''), echeance: m.flag?.dueDateTime ? brut(m.flag.dueDateTime.dateTime).date : null, source: 'outlook', lien: m.webLink, mail });
       }
       // Microsoft To Do
       const { value: listes = [] } = await json<{ value?: { id: string; displayName: string }[] }>('Microsoft To Do', `${GRAPH}/todo/lists`, auth);
@@ -135,7 +137,9 @@ export const microsoft: Connecteur = {
         vus.add(m.conversationId);
         if ((reponse.get(m.conversationId) || '') > (m.sentDateTime || '')) continue;
         const dest = m.toRecipients?.[0]?.emailAddress;
-        out.relances.push({ id: m.conversationId, contact: dest?.name || dest?.address || 'Destinataire', sujet: m.subject || '(sans objet)', date: jour(0, fuseau), source: 'outlook', lien: m.webLink });
+        const contact = dest?.name || dest?.address || 'Destinataire';
+        const sujet = m.subject || '(sans objet)';
+        out.relances.push({ id: m.conversationId, contact, sujet, date: jour(0, fuseau), source: 'outlook', lien: m.webLink, mail: { fil: m.conversationId, sujet, contact, adresse: dest?.address } });
       }
     }
 

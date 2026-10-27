@@ -10,8 +10,10 @@ export type SourceKey = 'google_agenda' | 'google_taches' | 'gmail' | 'outlook' 
 export type ImportKind = 'agenda' | 'taches' | 'relances' | 'mails';
 
 export type EvenementImporte = { id: string; date: string; debut: string; fin?: string; titre: string; lieu?: string; source: SourceKey; lien?: string; /** Nom de l'agenda d'origine (« Travail », « Famille »). */ agenda?: string };
-export type TacheImportee = { id: string; titre: string; echeance: string | null; source: SourceKey; lien?: string; /** Liste d'origine (Google Tasks, Microsoft To Do) : de quoi cocher la tâche à la source depuis Me. */ liste?: string };
-export type RelanceImportee = { id: string; contact: string; sujet: string; date: string; source: SourceKey; lien?: string };
+/** Le mail d'où vient une tâche ou une relance : son fil (même identifiant que `MailImporte.fil`), son objet et l'adresse du contact. L'app s'en sert pour rattacher l'élément au mail. */
+export type MailOrigine = { fil: string; sujet: string; contact?: string; adresse?: string };
+export type TacheImportee = { id: string; titre: string; echeance: string | null; source: SourceKey; lien?: string; /** Liste d'origine (Google Tasks, Microsoft To Do) : de quoi cocher la tâche à la source depuis Me. */ liste?: string; mail?: MailOrigine };
+export type RelanceImportee = { id: string; contact: string; sujet: string; date: string; source: SourceKey; lien?: string; mail?: MailOrigine };
 export type Elements = { agenda: EvenementImporte[]; taches: TacheImportee[]; relances: RelanceImportee[]; mails: MailImporte[] };
 
 export type Jetons = { accessToken: string; refreshToken?: string | null; expiresAt?: Date | null };
