@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { adresseSeule, base64Url, enteteEncode, ErreurSaisie, lendemain, messageRfc822, plusMinutes, sujetReponse, verifierRendezvous, verifierTache } from '../src/services/integrations/ecriture.js';
+import { adresses, adresseSeule, base64Url, enteteEncode, ErreurSaisie, lendemain, messageNouveau, messageRfc822, plusMinutes, sujetReponse, verifierNouveau, verifierRendezvous, verifierTache } from '../src/services/integrations/ecriture.js';
 
 describe('objet d’une réponse', () => {
   it('ajoute « Re: » une seule fois', () => {
@@ -33,7 +33,7 @@ describe('message complet', () => {
     assert.match(m, /^To: marie@exemple\.fr\r\n/);
     assert.match(m, /Subject: Re: Devis toiture/);
     assert.match(m, /Content-Type: text\/plain; charset="UTF-8"/);
-    assert.ok(m.endsWith('Bonjour Marie,\n\nC’est noté.'));
+    assert.ok(m.endsWith('\r\n\r\nBonjour Marie,\n\nC’est noté.'));
   });
   it('raccroche la réponse au fil quand le Message-ID est connu', () => {
     const m = messageRfc822({ ...base, messageId: '<abc@mail.gmail.com>', references: '<debut@mail.com>' });
@@ -97,5 +97,28 @@ describe('tâche', () => {
   it('refuse un titre vide ou une échéance mal écrite', () => {
     assert.throws(() => verifierTache({ titre: '' }), ErreurSaisie);
     assert.throws(() => verifierTache({ titre: 'X', echeance: '2 novembre' }), ErreurSaisie);
+  });
+});
+
+describe('nouveau mail', () => {
+  it('lit les adresses séparées par des virgules ou des points-virgules', () => {
+    assert.deepEqual(adresses('Paul <PAUL@exemple.fr>, marie@exemple.fr; paul@exemple.fr'), ['paul@exemple.fr', 'marie@exemple.fr']);
+    assert.deepEqual(adresses(''), []);
+    assert.deepEqual(adresses(undefined), []);
+  });
+  it('refuse une adresse qui n’en est pas une', () => {
+    assert.throws(() => adresses('Paul'), ErreurSaisie);
+    assert.throws(() => adresses('paul@exemple'), ErreurSaisie);
+  });
+  it('met en forme un message complet, Cc compris', () => {
+    const m = messageNouveau({ a: ['paul@exemple.fr'], cc: ['marie@exemple.fr'], sujet: 'Réunion', texte: ' Bonjour Paul ' });
+    assert.match(m, /^To: paul@exemple\.fr\r\nCc: marie@exemple\.fr\r\n/);
+    assert.match(m, /Subject: =\?UTF-8\?B\?/);
+    assert.ok(m.endsWith('\r\n\r\nBonjour Paul'));
+  });
+  it('met « (sans objet) » et refuse un mail vide ou sans destinataire', () => {
+    assert.match(messageNouveau({ a: ['paul@exemple.fr'], sujet: ' ', texte: 'Salut' }), /Subject: \(sans objet\)/);
+    assert.throws(() => verifierNouveau({ a: [], sujet: 'x', texte: 'y' }), ErreurSaisie);
+    assert.throws(() => verifierNouveau({ a: ['paul@exemple.fr'], sujet: 'x', texte: '  ' }), ErreurSaisie);
   });
 });

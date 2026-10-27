@@ -1,10 +1,11 @@
 import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { ErreurSaisie, lendemain as lendemainMS, verifierRendezvous, verifierTache } from './ecriture.js';
+import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, passe, urlRetour } from './http.js';
+import { htmlEnTexte, nettoyerTexte } from './lecture.js';
 import { vide, type Connecteur, type Elements } from './types.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0/me';
-// Lecture ET écriture : répondre à un mail, tenir l'agenda et les tâches To Do depuis Me.
+// Lecture ET écriture : lire et écrire des mails, tenir l'agenda et les tâches To Do depuis Me.
 const SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send Tasks.ReadWrite';
 const id = () => process.env.MICROSOFT_CLIENT_ID || '';
 const secret = () => process.env.MICROSOFT_CLIENT_SECRET || '';
@@ -30,6 +31,11 @@ function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: 
     : { isAllDay: false, start: { dateTime: `${v.date}T${v.debut}:00`, timeZone: e.fuseau }, end: { dateTime: `${v.date}T${v.fin}:00`, timeZone: e.fuseau } };
   return { subject: v.titre, ...(v.lieu ? { location: { displayName: v.lieu } } : {}), ...quand };
 }
+
+type Adresse = { emailAddress?: { name?: string; address?: string } };
+type MailComplet = { id: string; subject?: string; webLink?: string; isRead?: boolean; hasAttachments?: boolean; receivedDateTime?: string; from?: Adresse; toRecipients?: Adresse[]; ccRecipients?: Adresse[]; body?: { contentType?: string; content?: string } };
+const ecrireAdresse = (a: Adresse) => (a.emailAddress?.name && a.emailAddress.address ? `${a.emailAddress.name} <${a.emailAddress.address}>` : a.emailAddress?.address || a.emailAddress?.name || '');
+const versGraph = (l: string[]) => l.map((address) => ({ emailAddress: { address } }));
 
 /** Une tâche au format To Do ; cocher ou rouvrir passe par `status`. */
 const corpsTache = (v: { titre: string; echeance?: string | null; fait?: boolean }) => ({
@@ -154,6 +160,36 @@ export const microsoft: Connecteur = {
     if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
     // Graph répond dans le fil tout seul : il reprend l'objet, les destinataires et les en-têtes du message.
     await json('Outlook', `${GRAPH}/messages/${encodeURIComponent(r.mailId)}/reply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    return {};
+  },
+
+  async lireMail({ accessToken }, mailId, fuseau) {
+    const url = `${GRAPH}/messages/${encodeURIComponent(mailId)}`;
+    // Graph sait rendre le corps en texte ; s'il renvoie quand même du HTML, on le convertit.
+    const m = await json<MailComplet>('Outlook', `${url}?$select=subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,isRead,webLink`, bearer(accessToken, { Prefer: 'outlook.body-content-type="text"' }));
+    const pieces = m.hasAttachments ? ((await json<{ value?: { name?: string }[] }>('Outlook', `${url}/attachments?$select=name`, bearer(accessToken)).catch(() => ({ value: [] }))).value ?? []) : [];
+    if (m.isRead === false) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
+    const corps = m.body?.content || '';
+    // receivedDateTime est en UTC (« …Z ») : on le ramène au fuseau de l'utilisateur.
+    const d = m.receivedDateTime ? local(m.receivedDateTime, fuseau) : undefined;
+    return {
+      id: m.id,
+      sujet: m.subject || '(sans objet)',
+      de: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '',
+      adresse: m.from?.emailAddress?.address,
+      a: (m.toRecipients ?? []).map(ecrireAdresse).filter(Boolean),
+      cc: (m.ccRecipients ?? []).map(ecrireAdresse).filter(Boolean),
+      date: d?.date,
+      heure: d?.heure,
+      texte: m.body?.contentType?.toLowerCase() === 'html' ? htmlEnTexte(corps) : nettoyerTexte(corps),
+      piecesJointes: pieces.map((p) => p.name).filter((n): n is string => !!n),
+      lien: m.webLink,
+    };
+  },
+
+  async envoyer({ accessToken }, n) {
+    const v = verifierNouveau(n);
+    await json('Outlook', `${GRAPH}/sendMail`, corpsJson(accessToken, 'POST', { message: { subject: v.sujet, body: { contentType: 'Text', content: v.texte }, toRecipients: versGraph(v.a), ccRecipients: versGraph(v.cc) }, saveToSentItems: true }));
     return {};
   },
 

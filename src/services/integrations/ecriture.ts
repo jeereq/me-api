@@ -42,7 +42,7 @@ export function messageRfc822(r: Reponse): string {
   const a = adresseSeule(r.a);
   if (!a.includes('@')) throw new ErreurSaisie("L'adresse du destinataire est introuvable dans ce message.");
   if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
-  const lignes = [
+  const entetes = [
     `To: ${a}`,
     r.de ? `From: ${adresseSeule(r.de)}` : '',
     `Subject: ${enteteEncode(sujetReponse(r.sujet))}`,
@@ -51,10 +51,41 @@ export function messageRfc822(r: Reponse): string {
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
-    '',
-    r.texte.trim(),
   ].filter((l) => l !== '');
-  return lignes.join('\r\n');
+  // La ligne vide sépare les en-têtes du texte : sans elle, le texte serait lu comme un en-tête.
+  return [...entetes, '', r.texte.trim()].join('\r\n');
+}
+
+/* ---------- Nouveau mail ---------- */
+
+const EMAIL = /^[^\s@<>(),;:]+@[^\s@<>(),;:]+\.[^\s@<>(),;:]+$/;
+
+/** Les adresses d'un champ « À » : séparées par des virgules ou des points-virgules, « Nom <adresse> » accepté. */
+export function adresses(v: string | undefined): string[] {
+  const liste = (v || '')
+    .split(/[,;]/)
+    .map((x) => adresseSeule(x))
+    .filter(Boolean);
+  const fausse = liste.find((x) => !EMAIL.test(x));
+  if (fausse) throw new ErreurSaisie(`« ${fausse} » n'est pas une adresse email.`);
+  return [...new Set(liste.map((x) => x.toLowerCase()))];
+}
+
+export type Nouveau = { a: string[]; cc?: string[]; sujet: string; texte: string };
+
+/** Vérifie un nouveau mail avant l'envoi : au moins un destinataire, un texte, et un objet (« (sans objet) » sinon). */
+export function verifierNouveau(m: Nouveau): Required<Nouveau> {
+  if (!m.a.length) throw new ErreurSaisie('Indique à qui envoyer ce mail.');
+  if (m.a.length + (m.cc?.length ?? 0) > 50) throw new ErreurSaisie('Cinquante destinataires au plus.');
+  if (!m.texte.trim()) throw new ErreurSaisie('Écris ton message avant de l’envoyer.');
+  return { a: m.a, cc: m.cc ?? [], sujet: m.sujet.trim() || '(sans objet)', texte: m.texte.trim() };
+}
+
+/** Un nouveau mail au format RFC 2822, prêt à être envoyé par Gmail. */
+export function messageNouveau(m: Nouveau): string {
+  const v = verifierNouveau(m);
+  const entetes = [`To: ${v.a.join(', ')}`, ...(v.cc.length ? [`Cc: ${v.cc.join(', ')}`] : []), `Subject: ${enteteEncode(v.sujet)}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit'];
+  return [...entetes, '', v.texte].join('\r\n');
 }
 
 /** Gmail attend le message en base64 « URL safe ». */

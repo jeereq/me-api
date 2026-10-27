@@ -51,6 +51,10 @@ export interface Connecteur {
 
   /** Envoie une réponse dans le fil d'un message. */
   repondre?(jetons: Jetons, r: ReponseMail): Promise<{ lien?: string }>;
+  /** Lit un mail en entier, à la demande, et le marque comme lu dans la boîte. Me ne garde pas ce contenu. */
+  lireMail?(jetons: Jetons, mailId: string, fuseau: string): Promise<ContenuMail>;
+  /** Écrit un nouveau mail (pas une réponse). */
+  envoyer?(jetons: Jetons, m: NouveauMail): Promise<{ lien?: string }>;
   /** Crée un rendez-vous dans un agenda du compte ; rend son identifiant. */
   creerEvenement?(jetons: Jetons, e: EcritureEvenement): Promise<{ id: string; lien?: string }>;
   modifierEvenement?(jetons: Jetons, e: EcritureEvenement & { id: string }): Promise<{ lien?: string }>;
@@ -63,6 +67,10 @@ export interface Connecteur {
 
 /** Une réponse à envoyer : le message d'origine, et le texte écrit dans Me. */
 export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string };
+/** Un mail lu en entier : le texte brut (sans mise en forme) et le nom des pièces jointes. */
+export type ContenuMail = { id: string; sujet: string; de: string; adresse?: string; a: string[]; cc: string[]; date?: string; heure?: string; texte: string; piecesJointes: string[]; lien?: string };
+/** Un nouveau mail écrit dans Me : adresses déjà vérifiées. */
+export type NouveauMail = { a: string[]; cc: string[]; sujet: string; texte: string };
 export type EcritureEvenement = { agendaId: string; titre: string; date: string; debut?: string; fin?: string; lieu?: string; journee?: boolean; fuseau: string };
 export type ListeTaches = { id: string; nom: string; principale?: boolean };
 export type EcritureTache = { listeId: string; titre: string; echeance?: string | null; fait?: boolean };
