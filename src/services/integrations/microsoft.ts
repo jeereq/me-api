@@ -1,9 +1,11 @@
 import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
+import { ErreurSaisie, lendemain as lendemainMS, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, passe, urlRetour } from './http.js';
 import { vide, type Connecteur, type Elements } from './types.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0/me';
-const SCOPES = 'offline_access openid email User.Read Calendars.Read Mail.Read Tasks.Read';
+// Lecture ET écriture : répondre à un mail, tenir l'agenda et les tâches To Do depuis Me.
+const SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send Tasks.ReadWrite';
 const id = () => process.env.MICROSOFT_CLIENT_ID || '';
 const secret = () => process.env.MICROSOFT_CLIENT_SECRET || '';
 // « common » accepte les comptes perso (outlook.com) et pro (Microsoft 365).
@@ -16,6 +18,25 @@ type Mail = { id: string; subject?: string; webLink?: string; conversationId?: s
 
 // Graph renvoie des dates sans fuseau quand on lui en impose un : on les lit telles quelles.
 const brut = (dt: string) => ({ date: dt.slice(0, 10), heure: dt.slice(11, 16) });
+
+/** Un appel JSON avec corps : même en-tête d'autorisation, plus le type de contenu. */
+const corpsJson = (accessToken: string, method: string, corps: unknown) => ({ method, headers: { ...bearer(accessToken).headers, 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+
+/** Un rendez-vous au format de Graph : les heures sont écrites dans le fuseau de l'utilisateur. */
+function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: string; lieu?: string; journee?: boolean; fuseau: string }) {
+  const v = verifierRendezvous(e);
+  const quand = v.journee
+    ? { isAllDay: true, start: { dateTime: `${v.date}T00:00:00`, timeZone: e.fuseau }, end: { dateTime: `${lendemainMS(v.date)}T00:00:00`, timeZone: e.fuseau } }
+    : { isAllDay: false, start: { dateTime: `${v.date}T${v.debut}:00`, timeZone: e.fuseau }, end: { dateTime: `${v.date}T${v.fin}:00`, timeZone: e.fuseau } };
+  return { subject: v.titre, ...(v.lieu ? { location: { displayName: v.lieu } } : {}), ...quand };
+}
+
+/** Une tâche au format To Do ; cocher ou rouvrir passe par `status`. */
+const corpsTache = (v: { titre: string; echeance?: string | null; fait?: boolean }) => ({
+  title: v.titre,
+  status: v.fait ? 'completed' : 'notStarted',
+  ...(v.echeance ? { dueDateTime: { dateTime: `${v.echeance}T00:00:00`, timeZone: 'UTC' } } : {}),
+});
 
 /** Les agendas du compte, nommés comme dans Outlook. */
 const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
@@ -119,11 +140,50 @@ export const microsoft: Connecteur = {
       out.mails = rangerMails(
         value.map((m): MailImporte => {
           const d = m.receivedDateTime ? brut(m.receivedDateTime) : { date: jour(0, fuseau), heure: undefined };
-          return { id: m.id, fil: m.conversationId, sujet: m.subject || '(sans objet)', contact: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '', date: d.date, heure: d.heure, sens: 'recu', nonLu: m.isRead === false, lien: m.webLink, source: 'outlook' };
+          return { id: m.id, fil: m.conversationId, sujet: m.subject || '(sans objet)', contact: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '', adresse: m.from?.emailAddress?.address, date: d.date, heure: d.heure, sens: 'recu', nonLu: m.isRead === false, lien: m.webLink, source: 'outlook' };
         }),
       );
     }
 
     return out;
+  },
+
+  /* ---------- Écriture ---------- */
+
+  async repondre({ accessToken }, r) {
+    if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
+    // Graph répond dans le fil tout seul : il reprend l'objet, les destinataires et les en-têtes du message.
+    await json('Outlook', `${GRAPH}/messages/${encodeURIComponent(r.mailId)}/reply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    return {};
+  },
+
+  async creerEvenement({ accessToken }, e) {
+    const env = await json<{ id: string; webLink?: string }>('Outlook', `${GRAPH}/calendars/${encodeURIComponent(e.agendaId)}/events`, corpsJson(accessToken, 'POST', corpsEvenement(e)));
+    return { id: env.id, lien: env.webLink };
+  },
+
+  async modifierEvenement({ accessToken }, e) {
+    const env = await json<{ webLink?: string }>('Outlook', `${GRAPH}/events/${encodeURIComponent(e.id)}`, corpsJson(accessToken, 'PATCH', corpsEvenement(e)));
+    return { lien: env.webLink };
+  },
+
+  async supprimerEvenement({ accessToken }, e) {
+    await json('Outlook', `${GRAPH}/events/${encodeURIComponent(e.id)}`, { method: 'DELETE', ...bearer(accessToken) });
+  },
+
+  async listesTaches({ accessToken }) {
+    const { value = [] } = await json<{ value?: { id: string; displayName?: string; wellknownListName?: string }[] }>('Microsoft To Do', `${GRAPH}/todo/lists`, bearer(accessToken));
+    return value.map((l) => ({ id: l.id, nom: l.displayName || 'Tâches', principale: l.wellknownListName === 'defaultList' }));
+  },
+
+  async creerTache({ accessToken }, t) {
+    const v = verifierTache(t);
+    const env = await json<{ id: string }>('Microsoft To Do', `${GRAPH}/todo/lists/${encodeURIComponent(t.listeId)}/tasks`, corpsJson(accessToken, 'POST', corpsTache(v)));
+    return { id: env.id };
+  },
+
+  async majTache({ accessToken }, t) {
+    const v = verifierTache(t);
+    await json('Microsoft To Do', `${GRAPH}/todo/lists/${encodeURIComponent(t.listeId)}/tasks/${encodeURIComponent(t.id)}`, corpsJson(accessToken, 'PATCH', corpsTache(v)));
   },
 };

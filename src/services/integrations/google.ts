@@ -1,10 +1,20 @@
 import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
+import { base64Url, lendemain, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { vide, type Connecteur, type Elements } from './types.js';
 
 const CAL = 'https://www.googleapis.com/calendar/v3';
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const SCOPES = ['openid', 'email', 'https://www.googleapis.com/auth/calendar.readonly', 'https://www.googleapis.com/auth/gmail.readonly'];
+const TASKS = 'https://tasks.googleapis.com/tasks/v1';
+// Lecture ET écriture : répondre à un mail, tenir l'agenda et les tâches depuis Me.
+const SCOPES = [
+  'openid',
+  'email',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/tasks',
+];
 const id = () => process.env.GOOGLE_CLIENT_ID || '';
 const secret = () => process.env.GOOGLE_CLIENT_SECRET || '';
 
@@ -22,6 +32,18 @@ const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
 
 const entete = (m: Message, nom: string) => m.payload?.headers?.find((h) => h.name.toLowerCase() === nom.toLowerCase())?.value || '';
 const lienMail = (threadId: string) => `https://mail.google.com/mail/u/0/#all/${threadId}`;
+
+/** Un appel JSON avec corps : même en-tête d'autorisation, plus le type de contenu. */
+const corpsJson = (accessToken: string, method: string, corps: unknown) => ({ method, headers: { ...bearer(accessToken).headers, 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+
+/** Un rendez-vous au format de Google Agenda ; une journée entière se note par des dates, fin exclue. */
+function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: string; lieu?: string; journee?: boolean; fuseau: string }) {
+  const v = verifierRendezvous(e);
+  const quand = v.journee
+    ? { start: { date: v.date }, end: { date: lendemain(v.date) } }
+    : { start: { dateTime: `${v.date}T${v.debut}:00`, timeZone: e.fuseau }, end: { dateTime: `${v.date}T${v.fin}:00`, timeZone: e.fuseau } };
+  return { summary: v.titre, ...(v.lieu ? { location: v.lieu } : {}), ...quand };
+}
 
 export const google: Connecteur = {
   fournisseur: 'GOOGLE',
@@ -83,7 +105,7 @@ export const google: Connecteur = {
 
     const filtreGmail = gmail.filtre.length ? ` {${gmail.filtre.map((f) => `label:${f.replace(/\s+/g, '-')}`).join(' ')}}` : '';
     const lire = async (ids: string[]) =>
-      Promise.all(ids.map((m) => json<Message>('Gmail', `${GMAIL}/messages/${m}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To`, auth)));
+      Promise.all(ids.map((m) => json<Message>('Gmail', `${GMAIL}/messages/${m}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Message-ID&metadataHeaders=References`, auth)));
 
     // Tâches : mails suivis (étoile) des 30 derniers jours.
     if (gmail.actif && gmail.imports.includes('taches')) {
@@ -119,11 +141,56 @@ export const google: Connecteur = {
       out.mails = rangerMails(
         lus.map((m): MailImporte => {
           const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : { date: jour(0, fuseau), heure: undefined };
-          return { id: m.id, fil: m.threadId, sujet: entete(m, 'Subject') || '(sans objet)', contact: nomContact(entete(m, 'From')), date: d.date, heure: d.heure, sens: 'recu', nonLu: m.labelIds?.includes('UNREAD'), lien: lienMail(m.threadId), source: 'gmail' };
+          const de = entete(m, 'From');
+          return { id: m.id, fil: m.threadId, sujet: entete(m, 'Subject') || '(sans objet)', contact: nomContact(de), adresse: de, messageId: entete(m, 'Message-ID') || undefined, references: entete(m, 'References') || undefined, date: d.date, heure: d.heure, sens: 'recu', nonLu: m.labelIds?.includes('UNREAD'), lien: lienMail(m.threadId), source: 'gmail' };
         }),
       );
     }
 
     return out;
+  },
+
+  /* ---------- Écriture ---------- */
+
+  async repondre({ accessToken }, r) {
+    const brut = base64Url(messageRfc822({ a: r.a, sujet: r.sujet, texte: r.texte, messageId: r.messageId, references: r.references }));
+    const env = await json<{ id: string; threadId: string }>('Gmail', `${GMAIL}/messages/send`, {
+      method: 'POST',
+      ...bearer(accessToken),
+      headers: { ...bearer(accessToken).headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw: brut, threadId: r.fil }),
+    });
+    return { lien: lienMail(env.threadId || r.fil || env.id) };
+  },
+
+  async creerEvenement({ accessToken }, e) {
+    const env = await json<{ id: string; htmlLink?: string }>('Google Agenda', `${CAL}/calendars/${encodeURIComponent(e.agendaId)}/events`, corpsJson(accessToken, 'POST', corpsEvenement(e)));
+    return { id: env.id, lien: env.htmlLink };
+  },
+
+  async modifierEvenement({ accessToken }, e) {
+    const env = await json<{ htmlLink?: string }>('Google Agenda', `${CAL}/calendars/${encodeURIComponent(e.agendaId)}/events/${encodeURIComponent(e.id)}`, corpsJson(accessToken, 'PATCH', corpsEvenement(e)));
+    return { lien: env.htmlLink };
+  },
+
+  async supprimerEvenement({ accessToken }, e) {
+    await json('Google Agenda', `${CAL}/calendars/${encodeURIComponent(e.agendaId)}/events/${encodeURIComponent(e.id)}`, { method: 'DELETE', ...bearer(accessToken) });
+  },
+
+  async listesTaches({ accessToken }) {
+    const { items = [] } = await json<{ items?: { id: string; title?: string }[] }>('Google Tasks', `${TASKS}/users/@me/lists?maxResults=50`, bearer(accessToken));
+    return items.map((l, i) => ({ id: l.id, nom: l.title || 'Mes tâches', principale: i === 0 }));
+  },
+
+  async creerTache({ accessToken }, t) {
+    const v = verifierTache(t);
+    const env = await json<{ id: string }>('Google Tasks', `${TASKS}/lists/${encodeURIComponent(t.listeId)}/tasks`, corpsJson(accessToken, 'POST', { title: v.titre, ...(v.echeance ? { due: `${v.echeance}T00:00:00.000Z` } : {}), status: v.fait ? 'completed' : 'needsAction' }));
+    return { id: env.id };
+  },
+
+  async majTache({ accessToken }, t) {
+    const v = verifierTache(t);
+    // Google refuse « completed » posé à la main : c'est le statut qui fait foi, et il efface la date quand on rouvre.
+    await json('Google Tasks', `${TASKS}/lists/${encodeURIComponent(t.listeId)}/tasks/${encodeURIComponent(t.id)}`, corpsJson(accessToken, 'PATCH', { title: v.titre, status: v.fait ? 'completed' : 'needsAction', ...(v.fait ? {} : { completed: null }), ...(v.echeance ? { due: `${v.echeance}T00:00:00.000Z` } : {}) }));
   },
 };

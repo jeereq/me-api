@@ -65,6 +65,30 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
     res.json({ integration: await IntegrationService.modifier(req.user!.id, req.params.id, req.body) });
   },
 
+  repondre: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, req.body.mail, req.body.texte));
+  },
+  creerEvenement: async (req: Request, res: Response) => {
+    res.status(201).json(await IntegrationService.creerEvenement(req.user!.id, req.params.id, req.body));
+  },
+  modifierEvenement: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.modifierEvenement(req.user!.id, req.params.id, req.body));
+  },
+  supprimerEvenement: async (req: Request, res: Response) => {
+    await IntegrationService.supprimerEvenement(req.user!.id, req.params.id, req.body);
+    res.status(204).end();
+  },
+  listesTaches: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.listesTaches(req.user!.id, req.params.id));
+  },
+  creerTache: async (req: Request, res: Response) => {
+    res.status(201).json(await IntegrationService.creerTache(req.user!.id, req.params.id, req.body));
+  },
+  majTache: async (req: Request, res: Response) => {
+    await IntegrationService.majTache(req.user!.id, req.params.id, req.body);
+    res.status(204).end();
+  },
+
   supprimer: async (req: Request, res: Response) => {
     await IntegrationService.supprimer(req.user!.id, req.params.id);
     res.status(204).end();

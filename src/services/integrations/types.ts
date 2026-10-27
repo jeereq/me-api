@@ -46,6 +46,25 @@ export interface Connecteur {
   /** Agendas du compte, pour que l'utilisateur choisisse ceux à synchroniser. */
   agendas?(jetons: Jetons): Promise<AgendaDispo[]>;
   importer(c: Contexte): Promise<Elements>;
+
+  /* Écriture : un service qui ne sait pas faire laisse la méthode absente, et l'app n'affiche pas le bouton. */
+
+  /** Envoie une réponse dans le fil d'un message. */
+  repondre?(jetons: Jetons, r: ReponseMail): Promise<{ lien?: string }>;
+  /** Crée un rendez-vous dans un agenda du compte ; rend son identifiant. */
+  creerEvenement?(jetons: Jetons, e: EcritureEvenement): Promise<{ id: string; lien?: string }>;
+  modifierEvenement?(jetons: Jetons, e: EcritureEvenement & { id: string }): Promise<{ lien?: string }>;
+  supprimerEvenement?(jetons: Jetons, e: { agendaId: string; id: string }): Promise<void>;
+  /** Listes de tâches du compte (Google Tasks, Microsoft To Do). */
+  listesTaches?(jetons: Jetons): Promise<ListeTaches[]>;
+  creerTache?(jetons: Jetons, t: EcritureTache): Promise<{ id: string }>;
+  majTache?(jetons: Jetons, t: EcritureTache & { id: string }): Promise<void>;
 }
+
+/** Une réponse à envoyer : le message d'origine, et le texte écrit dans Me. */
+export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string };
+export type EcritureEvenement = { agendaId: string; titre: string; date: string; debut?: string; fin?: string; lieu?: string; journee?: boolean; fuseau: string };
+export type ListeTaches = { id: string; nom: string; principale?: boolean };
+export type EcritureTache = { listeId: string; titre: string; echeance?: string | null; fait?: boolean };
 
 export const vide = (): Elements => ({ agenda: [], taches: [], relances: [], mails: [] });
