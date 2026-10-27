@@ -1,3 +1,4 @@
+import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { bearer, form, jour, json, local, passe, urlRetour } from './http.js';
 import { vide, type Connecteur, type Elements } from './types.js';
 
@@ -15,6 +16,12 @@ type Mail = { id: string; subject?: string; webLink?: string; conversationId?: s
 
 // Graph renvoie des dates sans fuseau quand on lui en impose un : on les lit telles quelles.
 const brut = (dt: string) => ({ date: dt.slice(0, 10), heure: dt.slice(11, 16) });
+
+/** Les agendas du compte, nommés comme dans Outlook. */
+const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
+  const { value = [] } = await json<{ value?: { id: string; name?: string; isDefaultCalendar?: boolean; hexColor?: string }[] }>('Outlook', `${GRAPH}/calendars?$select=id,name,isDefaultCalendar,hexColor&$top=50`, bearer(accessToken));
+  return value.map((c) => ({ id: c.id, nom: c.name || 'Agenda', principal: c.isDefaultCalendar, visible: c.isDefaultCalendar !== false, couleur: c.hexColor && c.hexColor !== 'auto' ? c.hexColor : undefined }));
+};
 
 export const microsoft: Connecteur = {
   fournisseur: 'MICROSOFT',
@@ -45,23 +52,24 @@ export const microsoft: Connecteur = {
     return { accessToken: t.access_token, refreshToken: t.refresh_token ?? refreshToken, expiresAt: new Date(Date.now() + t.expires_in * 1000) };
   },
 
-  async importer({ jetons, fuseau, delaiRelance, prefs }) {
+  agendas: ({ accessToken }) => listeAgendas(accessToken),
+
+  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis }) {
     const out: Elements = vide();
     const p = prefs('outlook');
     if (!p.actif) return out;
     const auth = bearer(jetons.accessToken, { Prefer: `outlook.timezone="${fuseau}"` });
 
     if (p.imports.includes('agenda')) {
-      const { value: cals = [] } = await json<{ value?: { id: string; name: string }[] }>('Outlook', `${GRAPH}/calendars?$select=id,name&$top=20`, auth);
-      const choisis = p.filtre.length ? cals.filter((c) => passe(p.filtre, c.name)) : cals.slice(0, 1);
+      const cals = agendasALire(await listeAgendas(jetons.accessToken), choisis, p.filtre);
       const q = new URLSearchParams({ startDateTime: `${jour(0, fuseau)}T00:00:00`, endDateTime: `${jour(14, fuseau)}T23:59:59`, $top: '100', $orderby: 'start/dateTime', $select: 'subject,start,end,location,isAllDay,isCancelled,webLink' });
-      for (const cal of choisis) {
-        const url = p.filtre.length ? `${GRAPH}/calendars/${cal.id}/calendarView?${q}` : `${GRAPH}/calendarView?${q}`;
+      for (const cal of cals) {
+        const url = `${GRAPH}/calendars/${cal.id}/calendarView?${q}`;
         const { value = [] } = await json<{ value?: Event[] }>('Outlook', url, auth);
         for (const e of value) {
           if (e.isCancelled) continue;
           const d = brut(e.start.dateTime);
-          out.agenda.push({ id: e.id, date: d.date, debut: e.isAllDay ? 'Journée' : d.heure, fin: e.isAllDay || !e.end ? undefined : brut(e.end.dateTime).heure, titre: e.subject || '(sans titre)', lieu: e.location?.displayName || undefined, source: 'outlook', lien: e.webLink });
+          out.agenda.push({ id: e.id, date: d.date, debut: e.isAllDay ? 'Journée' : d.heure, fin: e.isAllDay || !e.end ? undefined : brut(e.end.dateTime).heure, titre: e.subject || '(sans titre)', lieu: e.location?.displayName || undefined, source: 'outlook', agenda: cal.nom, lien: e.webLink });
         }
       }
     }
@@ -103,6 +111,19 @@ export const microsoft: Connecteur = {
         out.relances.push({ id: m.conversationId, contact: dest?.name || dest?.address || 'Destinataire', sujet: m.subject || '(sans objet)', date: jour(0, fuseau), source: 'outlook', lien: m.webLink });
       }
     }
+
+    // Boîte mail : la réception des 7 derniers jours, un message par fil.
+    if (p.imports.includes('mails')) {
+      const mq = new URLSearchParams({ $filter: `receivedDateTime ge ${new Date(Date.now() - 7 * 86400000).toISOString()}`, $orderby: 'receivedDateTime desc', $top: '25', $select: 'subject,from,receivedDateTime,webLink,isRead,conversationId' });
+      const { value = [] } = await json<{ value?: (Mail & { isRead?: boolean })[] }>('Outlook', `${GRAPH}/mailFolders/inbox/messages?${mq}`, auth);
+      out.mails = rangerMails(
+        value.map((m): MailImporte => {
+          const d = m.receivedDateTime ? brut(m.receivedDateTime) : { date: jour(0, fuseau), heure: undefined };
+          return { id: m.id, fil: m.conversationId, sujet: m.subject || '(sans objet)', contact: m.from?.emailAddress?.name || m.from?.emailAddress?.address || '', date: d.date, heure: d.heure, sens: 'recu', nonLu: m.isRead === false, lien: m.webLink, source: 'outlook' };
+        }),
+      );
+    }
+
     return out;
   },
 };

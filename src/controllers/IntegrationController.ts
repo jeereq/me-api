@@ -58,9 +58,11 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
     }
   },
 
+  agendas: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.agendas(req.user!.id, req.params.id));
+  },
   modifier: async (req: Request, res: Response) => {
-    await IntegrationService.modifier(req.user!.id, req.params.id, req.body.ctx);
-    res.status(204).end();
+    res.json({ integration: await IntegrationService.modifier(req.user!.id, req.params.id, req.body) });
   },
 
   supprimer: async (req: Request, res: Response) => {

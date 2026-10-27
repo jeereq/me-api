@@ -4,12 +4,13 @@ import jwt from 'jsonwebtoken';
 import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
+import { choixValides } from './integrations/choix.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
 import { slackConnecteur } from './integrations/slack.js';
 import { trello } from './integrations/trello.js';
-import { vide, type Connecteur, type Ctx, type Elements, type Prefs, type SourceKey } from './integrations/types.js';
+import { vide, type Connecteur, type Ctx, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
 
 export const CONNECTEURS: Record<string, Connecteur> = { google, microsoft, trello, slack: slackConnecteur };
 const parFournisseur = (f: Fournisseur) => Object.values(CONNECTEURS).find((c) => c.fournisseur === f)!;
@@ -20,6 +21,11 @@ export const connecteur = (nom: string) => {
   return c;
 };
 
+const prefsCompte = (i: Integration): PrefsCompte => {
+  const p = i.prefs as { agendas?: unknown } | null;
+  return { agendas: Array.isArray(p?.agendas) ? p.agendas.filter((x): x is string => typeof x === 'string') : undefined };
+};
+
 const publique = (i: Integration) => ({
   id: i.id,
   fournisseur: Object.entries(CONNECTEURS).find(([, c]) => c.fournisseur === i.fournisseur)![0],
@@ -27,6 +33,8 @@ const publique = (i: Integration) => ({
   ctx: i.ctx as Ctx,
   derniereSync: i.derniereSync?.toISOString() ?? null,
   erreur: i.erreur,
+  /** Agendas cochés pour ce compte ; vide = ceux que le service affiche par défaut. */
+  agendas: prefsCompte(i).agendas ?? [],
 });
 
 /** Le paramètre `state` d'OAuth : signé, lié au compte me, valable 10 minutes. */
@@ -104,9 +112,31 @@ export const IntegrationService = {
     return publique(i);
   },
 
-  async modifier(userId: string, id: string, ctx: Ctx) {
-    const { count } = await prisma.integration.updateMany({ where: { id, userId }, data: { ctx } });
-    if (!count) throw new HttpError(404, 'Compte connecté introuvable.');
+  /** Change le contexte (perso/pro) et/ou les agendas synchronisés, puis relit le compte. */
+  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[] }) {
+    const i = await prisma.integration.findFirst({ where: { id, userId } });
+    if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
+    const data: Prisma.IntegrationUpdateInput = {};
+    if (patch.ctx) data.ctx = patch.ctx;
+    if (patch.agendas) data.prefs = { ...(prefsCompte(i) as object), agendas: [...new Set(patch.agendas)].slice(0, 50) } as Prisma.InputJsonObject;
+    await prisma.integration.update({ where: { id }, data });
+    // Les agendas choisis ne changent rien tant que le compte n'a pas été relu.
+    if (patch.agendas) await this.synchroniserUne(id).catch(() => {});
+    return publique(await prisma.integration.findUniqueOrThrow({ where: { id } }));
+  },
+
+  /** Les agendas du compte, avec ceux qui sont cochés : de quoi régler la synchronisation dans l'app. */
+  async agendas(userId: string, id: string) {
+    const i = await prisma.integration.findFirst({ where: { id, userId } });
+    if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
+    const c = parFournisseur(i.fournisseur);
+    if (!c.agendas) throw new HttpError(400, `${c.nom} n'a pas d'agenda à choisir.`);
+    try {
+      const dispo = await c.agendas(await jetonsValides(i));
+      return { agendas: dispo, choisis: choixValides(dispo, prefsCompte(i).agendas) };
+    } catch (e) {
+      throw new HttpError(502, e instanceof ErreurExterne ? e.message : `${c.nom} n'a pas renvoyé la liste des agendas.`);
+    }
   },
 
   async supprimer(userId: string, id: string) {
@@ -125,6 +155,7 @@ export const IntegrationService = {
         fuseau: i.user.fuseau,
         delaiRelance: Math.max(1, Number(cfg?.delaiRelanceJours) || 3),
         prefs: lirePrefs(i.user.espace?.data),
+        agendas: prefsCompte(i).agendas ?? [],
       });
       await prisma.integration.update({ where: { id }, data: { donnees: donnees as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
     } catch (e) {
@@ -154,6 +185,7 @@ export const IntegrationService = {
       out.agenda.push(...d.agenda.map((x) => ({ ...x, id: ext(x), ctx: r.ctx })));
       out.taches.push(...d.taches.map((x) => ({ ...x, id: ext(x), ctx: r.ctx })));
       out.relances.push(...d.relances.map((x) => ({ ...x, id: ext(x), ctx: r.ctx })));
+      out.mails.push(...(d.mails ?? []).map((x) => ({ ...x, id: ext(x), ctx: r.ctx, compte: r.compte })));
     }
     return out;
   },

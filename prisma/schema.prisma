@@ -91,7 +91,9 @@ model Integration {
   accessToken   String
   refreshToken  String?
   expiresAt     DateTime?
-  /// Derniers éléments importés : { agenda, taches, relances }
+  /// Réglages du compte : { agendas: [ids des agendas à synchroniser] }
+  prefs         Json?
+  /// Derniers éléments importés : { agenda, taches, relances, mails }
   donnees       Json?
   derniereSync  DateTime?
   erreur        String?

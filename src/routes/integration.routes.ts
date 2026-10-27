@@ -15,6 +15,7 @@ router.get('/:nom/callback', asyncHandler(IntegrationController.callback));
 router.use(authenticateJWT);
 router.get('/', asyncHandler(IntegrationController.liste));
 router.get('/:nom/connecter', asyncHandler(IntegrationController.connecter));
+router.get('/:id/agendas', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.agendas));
 router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(IntegrationController.modifier));
 router.delete('/:id', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.supprimer));
 export default router;

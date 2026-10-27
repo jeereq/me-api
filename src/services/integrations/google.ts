@@ -1,3 +1,4 @@
+import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { vide, type Connecteur, type Elements } from './types.js';
 
@@ -9,8 +10,15 @@ const secret = () => process.env.GOOGLE_CLIENT_SECRET || '';
 
 type Token = { access_token: string; refresh_token?: string; expires_in: number };
 type Event = { id: string; summary?: string; location?: string; htmlLink?: string; status?: string; start: { date?: string; dateTime?: string }; end?: { date?: string; dateTime?: string } };
+type Cal = { id: string; summary?: string; summaryOverride?: string; selected?: boolean; primary?: boolean; backgroundColor?: string };
 type Header = { name: string; value: string };
 type Message = { id: string; threadId: string; labelIds?: string[]; internalDate?: string; payload?: { headers?: Header[] } };
+
+/** La liste des agendas du compte, nommée comme dans Google Agenda. */
+const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
+  const { items = [] } = await json<{ items?: Cal[] }>('Google Agenda', `${CAL}/users/me/calendarList?minAccessRole=reader`, bearer(accessToken));
+  return items.map((c) => ({ id: c.id, nom: c.summaryOverride || c.summary || c.id, principal: c.primary, visible: c.selected !== false, couleur: c.backgroundColor }));
+};
 
 const entete = (m: Message, nom: string) => m.payload?.headers?.find((h) => h.name.toLowerCase() === nom.toLowerCase())?.value || '';
 const lienMail = (threadId: string) => `https://mail.google.com/mail/u/0/#all/${threadId}`;
@@ -45,7 +53,9 @@ export const google: Connecteur = {
     return { accessToken: t.access_token, refreshToken: t.refresh_token ?? refreshToken, expiresAt: new Date(Date.now() + t.expires_in * 1000) };
   },
 
-  async importer({ jetons, fuseau, delaiRelance, prefs }) {
+  agendas: ({ accessToken }) => listeAgendas(accessToken),
+
+  async importer({ jetons, fuseau, delaiRelance, prefs, agendas: choisis }) {
     const out: Elements = vide();
     const auth = bearer(jetons.accessToken);
     const agenda = prefs('google_agenda');
@@ -53,8 +63,7 @@ export const google: Connecteur = {
 
     // Agenda : 14 jours, tous les agendas affichés dans Google Agenda (ou ceux du filtre).
     if (agenda.actif && agenda.imports.includes('agenda')) {
-      const { items = [] } = await json<{ items?: { id: string; summary?: string; summaryOverride?: string; selected?: boolean }[] }>('Google Agenda', `${CAL}/users/me/calendarList?minAccessRole=reader`, auth);
-      const cals = items.filter((c) => (agenda.filtre.length ? passe(agenda.filtre, c.summary, c.summaryOverride) : c.selected !== false)).slice(0, 10);
+      const cals = agendasALire(await listeAgendas(jetons.accessToken), choisis, agenda.filtre);
       const timeMin = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
       const timeMax = new Date(Date.now() + 14 * 86400000).toISOString();
       for (const cal of cals) {
@@ -62,7 +71,7 @@ export const google: Connecteur = {
         const { items: evs = [] } = await json<{ items?: Event[] }>('Google Agenda', `${CAL}/calendars/${encodeURIComponent(cal.id)}/events?${q}`, auth);
         for (const e of evs) {
           if (e.status === 'cancelled') continue;
-          const base = { id: `${cal.id}:${e.id}`, titre: e.summary || '(sans titre)', lieu: e.location, source: 'google_agenda' as const, lien: e.htmlLink };
+          const base = { id: `${cal.id}:${e.id}`, titre: e.summary || '(sans titre)', lieu: e.location, source: 'google_agenda' as const, lien: e.htmlLink, agenda: cal.nom };
           if (e.start.date) out.agenda.push({ ...base, date: e.start.date, debut: 'Journée' });
           else if (e.start.dateTime) {
             const d = local(e.start.dateTime, fuseau);
@@ -102,6 +111,19 @@ export const google: Connecteur = {
         });
       }
     }
+
+    // Boîte mail : les fils récents, pour lire et répondre depuis Me (seulement objet, contact et date).
+    if (gmail.actif && gmail.imports.includes('mails')) {
+      const { messages = [] } = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/messages?${new URLSearchParams({ q: `in:inbox newer_than:7d${filtreGmail}`, maxResults: '25' })}`, auth);
+      const lus = await lire(messages.map((x) => x.id));
+      out.mails = rangerMails(
+        lus.map((m): MailImporte => {
+          const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : { date: jour(0, fuseau), heure: undefined };
+          return { id: m.id, fil: m.threadId, sujet: entete(m, 'Subject') || '(sans objet)', contact: nomContact(entete(m, 'From')), date: d.date, heure: d.heure, sens: 'recu', nonLu: m.labelIds?.includes('UNREAD'), lien: lienMail(m.threadId), source: 'gmail' };
+        }),
+      );
+    }
+
     return out;
   },
 };
