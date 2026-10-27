@@ -1,17 +1,20 @@
 import { agendasALire, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { base64Url, lendemain, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
+import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
+import { texteDeGmail, type PartieGmail } from './lecture.js';
 import { vide, type Connecteur, type Elements } from './types.js';
 
 const CAL = 'https://www.googleapis.com/calendar/v3';
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const TASKS = 'https://tasks.googleapis.com/tasks/v1';
-// Lecture ET écriture : répondre à un mail, tenir l'agenda et les tâches depuis Me.
+// Lecture ET écriture : lire et écrire des mails, tenir l'agenda et les tâches depuis Me.
+// `gmail.modify` sert seulement à marquer comme lu un mail ouvert dans Me (un compte connecté avant s'en passe).
 const SCOPES = [
   'openid',
   'email',
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/tasks',
 ];
@@ -22,7 +25,7 @@ type Token = { access_token: string; refresh_token?: string; expires_in: number 
 type Event = { id: string; summary?: string; location?: string; htmlLink?: string; status?: string; start: { date?: string; dateTime?: string }; end?: { date?: string; dateTime?: string } };
 type Cal = { id: string; summary?: string; summaryOverride?: string; selected?: boolean; primary?: boolean; backgroundColor?: string };
 type Header = { name: string; value: string };
-type Message = { id: string; threadId: string; labelIds?: string[]; internalDate?: string; payload?: { headers?: Header[] } };
+type Message = { id: string; threadId: string; labelIds?: string[]; internalDate?: string; payload?: PartieGmail & { headers?: Header[] } };
 
 /** La liste des agendas du compte, nommée comme dans Google Agenda. */
 const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
@@ -32,6 +35,8 @@ const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
 
 const entete = (m: Message, nom: string) => m.payload?.headers?.find((h) => h.name.toLowerCase() === nom.toLowerCase())?.value || '';
 const lienMail = (threadId: string) => `https://mail.google.com/mail/u/0/#all/${threadId}`;
+/** Les adresses d'un en-tête « To » ou « Cc » : « Marie <marie@x.fr>, paul@y.fr ». */
+const listeAdresses = (h: string) => h.split(',').map((x) => x.trim()).filter(Boolean);
 
 /** Un appel JSON avec corps : même en-tête d'autorisation, plus le type de contenu. */
 const corpsJson = (accessToken: string, method: string, corps: unknown) => ({ method, headers: { ...bearer(accessToken).headers, 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
@@ -175,6 +180,21 @@ export const google: Connecteur = {
       body: JSON.stringify({ raw: brut, threadId: r.fil }),
     });
     return { lien: lienMail(env.threadId || r.fil || env.id) };
+  },
+
+  async lireMail({ accessToken }, mailId, fuseau) {
+    const m = await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, bearer(accessToken));
+    const { texte, piecesJointes } = texteDeGmail(m.payload);
+    // Ouvert dans Me = lu. Un compte connecté sans ce droit reste « non lu » chez Gmail, sans bloquer la lecture.
+    if (m.labelIds?.includes('UNREAD')) await json('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}/modify`, corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] })).catch(() => {});
+    const d = m.internalDate ? local(new Date(Number(m.internalDate)), fuseau) : undefined;
+    const de = entete(m, 'From');
+    return { id: m.id, sujet: entete(m, 'Subject') || '(sans objet)', de: nomContact(de), adresse: de, a: listeAdresses(entete(m, 'To')), cc: listeAdresses(entete(m, 'Cc')), date: d?.date, heure: d?.heure, texte, piecesJointes, lien: lienMail(m.threadId) };
+  },
+
+  async envoyer({ accessToken }, n) {
+    const env = await json<{ id: string; threadId: string }>('Gmail', `${GMAIL}/messages/send`, corpsJson(accessToken, 'POST', { raw: base64Url(messageNouveau(n)) }));
+    return { lien: lienMail(env.threadId || env.id) };
   },
 
   async creerEvenement({ accessToken }, e) {

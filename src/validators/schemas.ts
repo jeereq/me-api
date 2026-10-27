@@ -66,6 +66,10 @@ const rendezvous = {
 };
 
 export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000) }) });
+export const lireMailSchema = z.object({ params: z.object({ id: z.string().min(1), mail: z.string().min(1).max(500) }) });
+export const envoyerMailSchema = integrationParamsSchema.extend({
+  body: z.object({ a: z.string().min(3, 'Indique à qui envoyer ce mail.').max(5000), cc: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), texte: z.string().min(1, 'Écris ton message avant de l’envoyer.').max(20_000) }),
+});
 export const creerEvenementSchema = integrationParamsSchema.extend({ body: z.object(rendezvous) });
 export const modifierEvenementSchema = integrationParamsSchema.extend({ body: z.object({ ...rendezvous, id: z.string().min(1).max(500) }) });
 export const supprimerEvenementSchema = integrationParamsSchema.extend({ body: z.object({ agendaId: z.string().min(1).max(300), id: z.string().min(1).max(500) }) });

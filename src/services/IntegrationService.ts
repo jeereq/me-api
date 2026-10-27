@@ -5,7 +5,7 @@ import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { choixValides, type MailImporte } from './integrations/choix.js';
-import { ErreurSaisie } from './integrations/ecriture.js';
+import { adresses, ErreurSaisie } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
@@ -209,6 +209,24 @@ export const IntegrationService = {
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
     // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.
     return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references }), i, false);
+  },
+
+  /** Lit un mail en entier, sans le garder : seul l'état « lu » est noté dans les messages relus. */
+  async lireMail(userId: string, id: string, mailId: string) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'lireMail');
+    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau), i, false);
+    const d = (i.donnees ?? null) as unknown as Elements | null;
+    if (d?.mails?.some((m) => m.id === mailId && m.nonLu)) {
+      const mails = d.mails.map((m) => (m.id === mailId ? { ...m, nonLu: false } : m));
+      await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, mails } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    }
+    return { mail: contenu };
+  },
+
+  /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */
+  async envoyer(userId: string, id: string, m: { a: string; cc?: string; sujet?: string; texte: string }) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'envoyer');
+    return this._ecrire(() => c.envoyer!(jetons, { a: adresses(m.a), cc: adresses(m.cc), sujet: m.sujet ?? '', texte: m.texte }), i, false);
   },
 
   async creerEvenement(userId: string, id: string, e: Omit<EcritureEvenement, 'fuseau'>) {
