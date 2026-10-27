@@ -229,10 +229,11 @@ model EspaceEquipe {
 }
 
 /// Un paiement d'abonnement Pro par FlexPaie (mobile money). Il prolonge abonnementFinLe une fois confirmé.
+/// À la suppression du compte, il reste pour la comptabilité, détaché du compte et sans numéro de téléphone.
 model Paiement {
   id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   /// Référence envoyée à FlexPaie, unique : un paiement n'est jamais compté deux fois.
   reference String    @unique
   /// mensuel ou annuel

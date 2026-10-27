@@ -10,7 +10,7 @@ UPDATE "User" SET "essaiJusqua" = NOW() + INTERVAL '14 days';
 
 CREATE TABLE "Paiement" (
     "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
+    "userId" TEXT,
     "reference" TEXT NOT NULL,
     "periode" TEXT NOT NULL,
     "montant" INTEGER NOT NULL,
@@ -28,4 +28,4 @@ CREATE TABLE "Paiement" (
 CREATE UNIQUE INDEX "Paiement_reference_key" ON "Paiement"("reference");
 CREATE INDEX "Paiement_userId_createdAt_idx" ON "Paiement"("userId", "createdAt");
 
-ALTER TABLE "Paiement" ADD CONSTRAINT "Paiement_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Paiement" ADD CONSTRAINT "Paiement_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

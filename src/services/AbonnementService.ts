@@ -26,6 +26,8 @@ async function conclure(id: string, etat: EtatCommande, message = '') {
     const fait = await tx.paiement.updateMany({ where: { id, statut: 'en_attente' }, data: { statut: etat, message: message || null, ...(etat === 'paye' ? { payeLe: new Date() } : {}) } });
     if (!fait.count || etat !== 'paye') return;
     const p = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { userId: true, periode: true } });
+    // Compte supprimé entre-temps : le paiement reste noté, il n'y a plus d'abonnement à ouvrir.
+    if (!p.userId) return;
     const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId }, select: { abonnementFinLe: true } });
     const periode = p.periode as Periode;
     await tx.user.update({ where: { id: p.userId }, data: { abonnementPeriode: periode, abonnementFinLe: prolonger(u.abonnementFinLe, periode) } });

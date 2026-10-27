@@ -192,6 +192,8 @@ export const AuthService = {
         // Jeton illisible ou Google injoignable : la suppression continue.
       }
     }
+    // Les paiements restent pour la comptabilité, sans le numéro de téléphone (le lien au compte disparaît avec lui).
+    await prisma.paiement.updateMany({ where: { userId }, data: { telephone: '' } });
     await prisma.user.delete({ where: { id: userId } });
     return { ok: true };
   },
