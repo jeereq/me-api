@@ -4,16 +4,29 @@ import { ConfigService } from './ConfigService.js';
 
 const MAX_DONNEES = 60_000;
 const MODELE_DEFAUT = 'gpt-4o-mini';
+const DELAI_MS = 60_000;
 const OPENAI_URL = () => (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
 
 /** Appelle OpenAI ; une panne réseau devient une erreur lisible au lieu d'une erreur serveur. */
 async function openai(path: string, init: RequestInit = {}) {
   try {
-    return await fetch(`${OPENAI_URL()}${path}`, { ...init, headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json', ...init.headers } });
+    return await fetch(`${OPENAI_URL()}${path}`, { signal: AbortSignal.timeout(DELAI_MS), ...init, headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json', ...init.headers } });
   } catch (e) {
     console.error('OpenAI injoignable', e);
+    if ((e as Error)?.name === 'TimeoutError') throw new HttpError(504, "L'IA met trop de temps à répondre, réessaie dans un moment.");
     throw new HttpError(502, "OpenAI est injoignable pour l'instant, réessaie dans un moment.");
   }
+}
+
+/**
+ * Les modèles qui raisonnent (o1, o3, o4-mini, gpt-5…) comptent leur réflexion dans `max_completion_tokens` :
+ * avec un petit budget, ils l'épuisent avant d'écrire et renvoient un texte vide (le plan ne s'affichait pas).
+ * On leur demande une réflexion courte et on leur laisse de la marge.
+ */
+export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/chat|o1-mini|o1-preview/.test(modele);
+export function corpsRequete(modele: string, contenu: string) {
+  const r = raisonne(modele);
+  return { model: modele, max_completion_tokens: r ? 6000 : 900, ...(r ? { reasoning_effort: 'low' } : {}), messages: [{ role: 'user', content: contenu }] };
 }
 
 // Modèles qui ne répondent pas à une conversation texte (audio, image, recherche…).
@@ -23,7 +36,7 @@ function prompt(b: AssistantBody): string {
   const donnees = String(b.donnees ?? '').slice(0, MAX_DONNEES);
   const ton = b.ton ?? 'neutre';
   if (b.type === 'plan') {
-    return `Tu es « Me », le copilote personnel de l'utilisateur. Il est ${b.heure ?? ''}. À partir de ses données (JSON ci-dessous), propose un plan de journée réaliste en français, ton ${ton} : d'abord les 3 priorités, puis un déroulé par créneaux qui tient compte de l'agenda, des relances dues, des tâches urgentes et des habitudes (factures en premier si elles sont dues ou en retard). 12 lignes au maximum, phrases courtes, sans markdown ni émojis.\n\nDonnées :\n${donnees}`;
+    return `Tu es « Me », le copilote personnel de l'utilisateur. Il est ${b.heure ?? ''}. À partir de ses données (JSON ci-dessous), propose un plan pour le reste de sa journée, réaliste, en français, ton ${ton} : d'abord les 3 priorités, puis un déroulé par créneaux à partir de maintenant (jamais avant ${b.heure ?? "l'heure actuelle"}) qui respecte les rendez-vous de l'agenda et place les relances dues, les tâches urgentes et les habitudes du jour ; les factures proches passent en premier. Ne cite que des éléments présents dans les données, et s'il reste du temps, propose des tâches de la semaine. Si tout est vide, dis-le simplement et propose une journée légère. 12 lignes au maximum, une idée par ligne, phrases courtes, sans markdown ni émojis.\n\nDonnées :\n${donnees}`;
   }
   if (b.type === 'relance') {
     const style = b.boite === 'pro' ? 'professionnel, vouvoiement' : 'personnel, ton amical';
@@ -60,15 +73,23 @@ export const AssistantService = {
 
   async demander(body: AssistantBody): Promise<string> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    const modele = await this.modele();
     const res = await openai('/chat/completions', {
       method: 'POST',
-      body: JSON.stringify({ model: await this.modele(), max_completion_tokens: 900, messages: [{ role: 'user', content: prompt(body) }] }),
+      body: JSON.stringify(corpsRequete(modele, prompt(body))),
     });
-    const data = (await res.json().catch(() => ({}))) as { choices?: { message?: { content?: string | null } }[]; error?: { message?: string } };
+    const data = (await res.json().catch(() => ({}))) as { choices?: { finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }[]; error?: { message?: string } };
     if (!res.ok) {
-      console.error('OpenAI', res.status, data?.error?.message);
+      console.error('OpenAI', res.status, modele, data?.error?.message);
       throw new HttpError(502, "L'IA n'a pas pu répondre, réessaie dans un instant.");
     }
-    return (data.choices?.[0]?.message?.content ?? '').trim();
+    const choix = data.choices?.[0];
+    const texte = (choix?.message?.content ?? '').trim();
+    if (!texte) {
+      // Réponse vide : réflexion trop longue (finish_reason « length ») ou refus. Mieux vaut le dire que de ne rien afficher.
+      console.error('OpenAI : réponse vide', modele, choix?.finish_reason, choix?.message?.refusal);
+      throw new HttpError(502, "L'IA a renvoyé une réponse vide. Réessaie, ou choisis un autre modèle dans la configuration.");
+    }
+    return texte;
   },
 };
