@@ -1,5 +1,6 @@
 import { type ConfigModes, heureDe, type Mode, reglesDuMode, MODES_LISTE } from './modes.js';
 import { estTacheDeProjet, resumes, tachesActives, type TacheProjet } from './projets.js';
+import { alertesObjectifs } from './objectifs.js';
 import { alertesFinances, type FinancesRappels } from './previsions.js';
 
 export type { Mode } from './modes.js';
@@ -121,6 +122,8 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
 
   // Alertes de budget : une seule fois par période et par niveau, d'où une clé sans date du jour.
   for (const a of fin.alertes) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux });
+  // Objectifs : versement du jour, retard, échéance passée, objectif atteint (clé sans date du jour, sauf le versement).
+  for (const a of alertesObjectifs(e.finances, jour, soir)) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux });
 
   // Soir : un coup de pouce seulement s'il change quelque chose (série en danger, journée parfaite toute proche).
   if (jeu && !pointsDuJour && serie)
