@@ -78,9 +78,10 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/assistant/modeles` | admin | `{ modeles, actuel }` : modèles OpenAI disponibles avec la clé du serveur |
 | GET | `/api/integrations` | compte | Services configurés sur le serveur et comptes connectés |
 | GET | `/api/integrations/:service/connecter?retour=` | compte | `{ url }` de la page d'autorisation (google, microsoft, trello, slack) |
-| PATCH | `/api/integrations/:id` | compte | `{ ctx: "perso" \| "pro" }` |
+| GET | `/api/integrations/:id/agendas` | compte | `{ agendas, choisis }` : agendas du compte (Google, Microsoft) et ceux cochés |
+| PATCH | `/api/integrations/:id` | compte | `{ ctx?: "perso" \| "pro", agendas?: string[] }` → `{ integration }` ; changer les agendas relit le compte |
 | DELETE | `/api/integrations/:id` | compte | Déconnecte le compte et oublie ses jetons |
-| GET | `/api/sync` | compte | Éléments importés : `{ integrations, agenda, taches, relances }` |
+| GET | `/api/sync` | compte | Éléments importés : `{ integrations, agenda, taches, relances, mails }` |
 | POST | `/api/sync` | compte | Relit tous les comptes tout de suite, puis comme GET |
 | GET | `/api/notifications` | compte | 50 derniers rappels et nombre de non lus |
 | POST | `/api/notifications/lues` | compte | `{ ids? }` : marque lus (tous sans `ids`) |
@@ -137,14 +138,18 @@ Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son f
 
 Chaque compte me peut connecter plusieurs comptes externes (par exemple Gmail perso et Google Workspace pro), depuis l'écran **Agendas & outils** de l'app. Le serveur garde les jetons chiffrés et relit les comptes toutes les 15 minutes.
 
-| Service | Agenda | Tâches | Relances |
-| --- | --- | --- | --- |
-| Google | Rendez-vous des 14 prochains jours (agendas affichés, ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours | Fils où ton dernier message attend une réponse depuis plus de N jours |
-| Microsoft | Rendez-vous des 14 prochains jours (agenda principal, ou ceux du filtre) | Mails avec drapeau, tâches To Do ouvertes | Mails envoyés sans réponse depuis plus de N jours |
-| Trello | Échéances des 14 prochains jours | Cartes où tu es membre, non terminées | |
-| Slack | | Messages des derniers jours qui te mentionnent ou t'écrivent en direct | Tes questions restées sans réponse dans leur fil |
+| Service | Agenda | Tâches | Relances | Mails |
+| --- | --- | --- | --- | --- |
+| Google | Rendez-vous des 14 prochains jours (agendas cochés pour le compte, sinon ceux affichés ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours | Fils où ton dernier message attend une réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
+| Microsoft | Rendez-vous des 14 prochains jours (mêmes règles) | Mails avec drapeau, tâches To Do ouvertes | Mails envoyés sans réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
+| Trello | Échéances des 14 prochains jours | Cartes où tu es membre, non terminées | | |
+| Slack | | Messages des derniers jours qui te mentionnent ou t'écrivent en direct | Tes questions restées sans réponse dans leur fil | |
 
 N est le « délai avant relance » de la configuration système (3 jours par défaut). Les filtres et les types d'import se règlent par source dans l'app.
+
+**Quels agendas** (`src/services/integrations/choix.ts`, module pur testé) : les agendas cochés pour ce compte dans l'app (`PATCH /api/integrations/:id`, champ `agendas`) ; sinon ceux dont le nom contient le filtre de la source ; sinon ceux que le service affiche par défaut. Un agenda coché puis disparu est ignoré, et si tous ont disparu on revient au défaut plutôt que de ne rien importer.
+
+**Mails** : seulement l'objet, le contact, la date, l'état lu/non lu et le lien vers le fil d'origine — jamais le contenu. Un seul message par fil, le plus récent, 25 au maximum par compte.
 
 Pour activer un service, crée son application OAuth (les étapes sont dans `.env.example`), remplis ses variables, `PUBLIC_URL` et `ENCRYPTION_KEY`, puis redémarre. Le bouton « Connecter » apparaît alors dans l'app.
 

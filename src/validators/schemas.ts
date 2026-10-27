@@ -47,7 +47,11 @@ export const assistantSchema = z.object({
 export type AssistantBody = z.infer<typeof assistantSchema>['body'];
 
 export const integrationParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
-export const patchIntegrationSchema = integrationParamsSchema.extend({ body: z.object({ ctx: z.enum(['perso', 'pro']) }) });
+export const patchIntegrationSchema = integrationParamsSchema.extend({
+  body: z
+    .object({ ctx: z.enum(['perso', 'pro']).optional(), agendas: z.array(z.string().min(1).max(300)).max(50).optional() })
+    .refine((b) => b.ctx !== undefined || b.agendas !== undefined, { message: 'Rien à modifier : donne « ctx » ou « agendas ».' }),
+});
 export const trelloJetonSchema = z.object({ body: z.object({ state: z.string().max(2000).optional(), token: z.string().max(500).nullable().optional() }) });
 export const notificationsLuesSchema = z.object({ body: z.object({ ids: z.array(z.string()).max(200).optional() }).optional() });
 
