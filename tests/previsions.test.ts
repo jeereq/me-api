@@ -65,3 +65,35 @@ describe('budgets jusqu’à une date', () => {
     assert.equal(p?.budgets.length, 0);
   });
 });
+
+// Mêmes cas que l'app (me-mobile/tests/budget-du-jour.test.ts) : les alertes annoncent le chiffre affiché à l'écran.
+describe('un seul budget du jour, comme dans l’app', () => {
+  const courses = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
+  // Novembre : 30 jours. Le 11, il reste 20 jours, aujourd'hui compris.
+  const f = { budgets: [courses], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 'b', montant: 20, budget: 'c', date: '2026-11-11' }] };
+  it('répartit ce qui reste du mois sur les jours restants, sans compter la dépense du jour', () => {
+    assert.equal(prevision(f, 'jour', '2026-11-11')?.plafond, 10);
+  });
+  it('propose pour demain ce qui reste une fois la dépense du jour retirée', () => {
+    // 300 − 120 = 180 sur les 19 jours du 12 au 30.
+    assert.equal(prevision(f, 'jour', '2026-11-11')?.parJour, 9.47);
+  });
+  it('donne le montant fixé pour un budget par jour', () => {
+    const g = { budgets: [{ id: 'g', nom: 'Budget du jour', emoji: '💰', montant: 25, periode: 'jour' as const, global: true }], depenses: [{ id: 'a', montant: 40, budget: null, date: '2026-11-10' }] };
+    assert.equal(prevision(g, 'jour', '2026-11-11')?.plafond, 25);
+  });
+  it('ne compte pas le hors budget sans budget global', () => {
+    const h = { budgets: [courses], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 'h', montant: 50, budget: null, date: '2026-11-06' }, { id: 'j', montant: 30, budget: null, date: '2026-11-11' }] };
+    // Les 50 hors budget ne réduisent pas le budget du jour, les 30 du jour ne comptent pas face à lui.
+    assert.equal(prevision(h, 'jour', '2026-11-11')?.plafond, 10);
+    assert.equal(prevision(h, 'jour', '2026-11-11')?.depense, 0);
+    assert.equal(prevision(h, 'mois', '2026-11-11')?.depense, 100);
+  });
+  it('calcule chaque budget sur ses propres dépenses et ses propres jours', () => {
+    // Sorties jusqu'au 20 : 100 × 20/30 = 66,67 sur le mois, 40 déjà dépensés, 26,67 sur les 10 jours du 11 au 20 = 2,67 ;
+    // plus 10 pour les courses.
+    const sorties = { id: 's', nom: 'Sorties', emoji: '🎉', montant: 100, periode: 'mois' as const, fin: '2026-11-20' };
+    const m = { budgets: [courses, sorties], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 's', montant: 40, budget: 's', date: '2026-11-03' }] };
+    assert.equal(prevision(m, 'jour', '2026-11-11')?.plafond, 12.67);
+  });
+});
