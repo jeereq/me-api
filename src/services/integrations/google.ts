@@ -116,7 +116,9 @@ export const google: Connecteur = {
     if (gmail.actif && gmail.imports.includes('taches')) {
       const { messages = [] } = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/messages?${new URLSearchParams({ q: `is:starred newer_than:30d${filtreGmail}`, maxResults: '20' })}`, auth);
       for (const m of await lire(messages.map((x) => x.id))) {
-        out.taches.push({ id: m.id, titre: `${entete(m, 'Subject') || '(sans objet)'} · ${nomContact(entete(m, 'From'))}`, echeance: null, source: 'gmail', lien: lienMail(m.threadId) });
+        const sujet = entete(m, 'Subject') || '(sans objet)';
+        const de = entete(m, 'From');
+        out.taches.push({ id: m.id, titre: `${sujet} · ${nomContact(de)}`, echeance: null, source: 'gmail', lien: lienMail(m.threadId), mail: { fil: m.threadId, sujet, contact: nomContact(de), adresse: de || undefined } });
       }
     }
 
@@ -128,13 +130,16 @@ export const google: Connecteur = {
         const fil = await json<{ messages?: Message[] }>('Gmail', `${GMAIL}/threads/${t.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=To`, auth);
         const dernier = fil.messages?.at(-1);
         if (!dernier?.labelIds?.includes('SENT')) continue;
+        const a = entete(dernier, 'To').split(',')[0];
+        const sujet = entete(fil.messages![0], 'Subject') || '(sans objet)';
         out.relances.push({
           id: t.id,
-          contact: nomContact(entete(dernier, 'To').split(',')[0]),
-          sujet: entete(fil.messages![0], 'Subject') || '(sans objet)',
+          contact: nomContact(a),
+          sujet,
           date: jour(0, fuseau),
           source: 'gmail',
           lien: lienMail(t.id),
+          mail: { fil: t.id, sujet, contact: nomContact(a), adresse: a.trim() || undefined },
         });
       }
     }
