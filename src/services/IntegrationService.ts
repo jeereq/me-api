@@ -4,13 +4,14 @@ import jwt from 'jsonwebtoken';
 import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
-import { choixValides } from './integrations/choix.js';
+import { choixValides, type MailImporte } from './integrations/choix.js';
+import { ErreurSaisie } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
 import { slackConnecteur } from './integrations/slack.js';
 import { trello } from './integrations/trello.js';
-import { vide, type Connecteur, type Ctx, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
+import { vide, type Connecteur, type Ctx, type EcritureEvenement, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
 
 export const CONNECTEURS: Record<string, Connecteur> = { google, microsoft, trello, slack: slackConnecteur };
 const parFournisseur = (f: Fournisseur) => Object.values(CONNECTEURS).find((c) => c.fournisseur === f)!;
@@ -173,6 +174,72 @@ export const IntegrationService = {
   async synchroniserTout() {
     const ids = await prisma.integration.findMany({ select: { id: true } });
     for (const { id } of ids) await this.synchroniserUne(id);
+  },
+
+  /* ---------- Écrire dans le compte ---------- */
+
+  /** Le compte, son connecteur et ses jetons, avec un message clair si le service ne sait pas faire. */
+  async _pourEcrire(userId: string, id: string, quoi: keyof Connecteur) {
+    const i = await prisma.integration.findFirst({ where: { id, userId }, include: { user: { select: { fuseau: true } } } });
+    if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
+    const c = parFournisseur(i.fournisseur);
+    if (typeof c[quoi] !== 'function') throw new HttpError(400, `${c.nom} ne permet pas cette action depuis Me.`);
+    return { i, c, jetons: await jetonsValides(i), fuseau: i.user.fuseau };
+  },
+
+  /** Transforme l'erreur d'un service externe en message lisible (et dit quand il faut reconnecter le compte). */
+  async _ecrire<T>(fn: () => Promise<T>, i: { id: string }, relire = true): Promise<T> {
+    try {
+      const r = await fn();
+      // Le compte est relu pour que l'app voie tout de suite le rendez-vous ou la tâche.
+      if (relire) await this.synchroniserUne(i.id).catch(() => {});
+      return r;
+    } catch (e) {
+      if (e instanceof ErreurSaisie) throw new HttpError(400, e.message);
+      if (e instanceof ErreurExterne) throw new HttpError(e.auth ? 403 : 502, e.message);
+      console.error('Écriture', e);
+      throw new HttpError(502, "L'action n'a pas pu être faite, réessaie dans un moment.");
+    }
+  },
+
+  /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */
+  async repondre(userId: string, id: string, mailId: string, texte: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'repondre');
+    const m = (((i.donnees ?? vide()) as unknown as Elements).mails ?? []).find((x) => x.id === mailId) as MailImporte | undefined;
+    if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
+    // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.
+    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references }), i, false);
+  },
+
+  async creerEvenement(userId: string, id: string, e: Omit<EcritureEvenement, 'fuseau'>) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'creerEvenement');
+    return this._ecrire(() => c.creerEvenement!(jetons, { ...e, fuseau }), i);
+  },
+
+  async modifierEvenement(userId: string, id: string, e: Omit<EcritureEvenement, 'fuseau'> & { id: string }) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'modifierEvenement');
+    return this._ecrire(() => c.modifierEvenement!(jetons, { ...e, fuseau }), i);
+  },
+
+  async supprimerEvenement(userId: string, id: string, e: { agendaId: string; id: string }) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'supprimerEvenement');
+    await this._ecrire(() => c.supprimerEvenement!(jetons, e), i);
+  },
+
+  /** Listes de tâches du compte (Google Tasks, Microsoft To Do), pour choisir où envoyer une tâche. */
+  async listesTaches(userId: string, id: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'listesTaches');
+    return { listes: await this._ecrire(() => c.listesTaches!(jetons), i, false) };
+  },
+
+  async creerTache(userId: string, id: string, t: { listeId: string; titre: string; echeance?: string | null }) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'creerTache');
+    return this._ecrire(() => c.creerTache!(jetons, t), i);
+  },
+
+  async majTache(userId: string, id: string, t: { listeId: string; id: string; titre: string; echeance?: string | null; fait?: boolean }) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'majTache');
+    await this._ecrire(() => c.majTache!(jetons, t), i);
   },
 
   /** Tous les éléments importés du compte, chacun avec son contexte et un identifiant stable. */

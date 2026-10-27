@@ -52,6 +52,25 @@ export const patchIntegrationSchema = integrationParamsSchema.extend({
     .object({ ctx: z.enum(['perso', 'pro']).optional(), agendas: z.array(z.string().min(1).max(300)).max(50).optional() })
     .refine((b) => b.ctx !== undefined || b.agendas !== undefined, { message: 'Rien à modifier : donne « ctx » ou « agendas ».' }),
 });
+
+const DATE_TXT = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.');
+const HEURE_TXT = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Heure attendue au format HH:MM.');
+const rendezvous = {
+  agendaId: z.string().min(1).max(300),
+  titre: z.string().min(1).max(300),
+  date: DATE_TXT,
+  debut: HEURE_TXT.optional(),
+  fin: HEURE_TXT.optional(),
+  lieu: z.string().max(300).optional(),
+  journee: z.boolean().optional(),
+};
+
+export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000) }) });
+export const creerEvenementSchema = integrationParamsSchema.extend({ body: z.object(rendezvous) });
+export const modifierEvenementSchema = integrationParamsSchema.extend({ body: z.object({ ...rendezvous, id: z.string().min(1).max(500) }) });
+export const supprimerEvenementSchema = integrationParamsSchema.extend({ body: z.object({ agendaId: z.string().min(1).max(300), id: z.string().min(1).max(500) }) });
+export const creerTacheSchema = integrationParamsSchema.extend({ body: z.object({ listeId: z.string().min(1).max(300), titre: z.string().min(1).max(300), echeance: DATE_TXT.nullish() }) });
+export const majTacheSchema = integrationParamsSchema.extend({ body: z.object({ listeId: z.string().min(1).max(300), id: z.string().min(1).max(500), titre: z.string().min(1).max(300), echeance: DATE_TXT.nullish(), fait: z.boolean().optional() }) });
 export const trelloJetonSchema = z.object({ body: z.object({ state: z.string().max(2000).optional(), token: z.string().max(500).nullable().optional() }) });
 export const notificationsLuesSchema = z.object({ body: z.object({ ids: z.array(z.string()).max(200).optional() }).optional() });
 
