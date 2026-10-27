@@ -99,3 +99,14 @@ export const jetonInvitationSchema = z.object({ body: z.object({ jeton }) });
 export const equipeMembreParamsSchema = z.object({ params: equipeParams.extend({ membreId: z.string().min(1) }) });
 export const roleMembreSchema = z.object({ params: equipeParams.extend({ membreId: z.string().min(1) }), body: z.object({ role: roleEquipe }) });
 export const putEspaceEquipeSchema = z.object({ params: equipeParams, body: z.object({ data: document, baseRevision: z.number().int().min(0).optional() }) });
+
+/** S'abonner : la case des CGV et la demande d'accès immédiat (droit de rétractation) sont obligatoires. */
+export const paiementSchema = z.object({
+  body: z.object({
+    periode: z.enum(['mensuel', 'annuel'], { errorMap: () => ({ message: 'Choisis mensuel ou annuel.' }) }),
+    telephone: z.string({ required_error: 'Numéro de téléphone requis' }).trim().min(8, 'Numéro de téléphone requis').max(20),
+    accepteCgv: z.literal(true, { errorMap: () => ({ message: 'Accepte les conditions générales de vente pour continuer.' }) }),
+    accesImmediat: z.literal(true, { errorMap: () => ({ message: "Demande l'accès immédiat à Pro pour continuer." }) }),
+  }),
+});
+export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });

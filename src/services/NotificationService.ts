@@ -2,6 +2,7 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
+import { avisAbonnement, etatAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from './rappels/calcul.js';
 
@@ -40,7 +41,13 @@ export const NotificationService = {
   async generer(maintenant = new Date()) {
     const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as ConfigRappels & { canaux?: { mail?: boolean } };
     const mailActif = cfg.canaux?.mail !== false && EmailService.configure();
-    const users = await prisma.user.findMany({ select: { id: true, email: true, nom: true, fuseau: true, espace: { select: { data: true } } } });
+    const users = await prisma.user.findMany({
+      select: {
+        id: true, email: true, nom: true, fuseau: true, espace: { select: { data: true } },
+        role: true, essaiJusqua: true, abonnementPeriode: true, abonnementFinLe: true,
+      },
+    });
+    await this.avisAbonnements(users, maintenant);
 
     for (const u of users) {
       if (!u.espace) continue;
@@ -58,18 +65,20 @@ export const NotificationService = {
       // Un rappel déjà créé lors d'un passage précédent n'est pas renvoyé.
       const deja = new Set((await prisma.notification.findMany({ where: { userId: u.id, cle: { in: dus.map((r) => r.cle) } }, select: { cle: true } })).map((n) => n.cle));
       const nouveaux = dus.filter((r) => !deja.has(r.cle));
+      // Email et push font partie de Pro : sans abonnement (ni essai), les rappels restent dans l'app.
+      const pro = etatAbonnement(u, maintenant).pro;
       await prisma.notification.createMany({
         data: nouveaux.map((r) => ({ userId: u.id, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: prefs.app === false })),
         skipDuplicates: true,
       });
       const enPush = nouveaux.filter((r) => r.canaux?.push !== false);
-      if (enPush.length && prefs.app !== false) {
+      if (pro && enPush.length && prefs.app !== false) {
         // Un seul push par passage : le rappel s'il est seul, sinon un résumé.
         const m = enPush.length === 1 ? { titre: enPush[0].titre, corps: enPush[0].corps, mode: enPush[0].mode } : { titre: `${enPush.length} rappels`, corps: enPush.map((r) => r.titre).join(' · '), mode: enPush[0].mode };
         await PushService.envoyer(u.id, { ...m, tag: enPush[0].cle });
       }
       const parMail = nouveaux.filter((r) => r.canaux?.email !== false);
-      if (parMail.length && mailActif && prefs.email !== false) {
+      if (pro && parMail.length && mailActif && prefs.email !== false) {
         const m = email(parMail, u.nom);
         if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) {
           await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });
@@ -78,6 +87,21 @@ export const NotificationService = {
     }
     // On garde 60 jours d'historique.
     await prisma.notification.deleteMany({ where: { createdAt: { lt: new Date(maintenant.getTime() - 60 * 86400000) } } });
+  },
+
+  /** Fin d'essai et fin de la période payée : un message par échéance, quels que soient les réglages de rappels. */
+  async avisAbonnements(users: ({ id: string; email: string; nom: string } & Parameters<typeof avisAbonnement>[0])[], maintenant: Date) {
+    for (const u of users) {
+      const avis = avisAbonnement(u, maintenant);
+      if (!avis) continue;
+      const cree = await prisma.notification.createMany({
+        data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: maintenant.toISOString().slice(0, 16) }],
+        skipDuplicates: true,
+      });
+      if (!cree.count || !avis.parEmail || !EmailService.configure()) continue;
+      const m = email([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
+      if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
+    }
   },
 
   async liste(userId: string) {

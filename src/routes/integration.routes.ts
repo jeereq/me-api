@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { IntegrationController } from '../controllers/IntegrationController.js';
+import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
@@ -14,6 +15,9 @@ router.get('/:nom/callback', asyncHandler(IntegrationController.callback));
 
 router.use(authenticateJWT);
 router.get('/', asyncHandler(IntegrationController.liste));
+// Sans Pro, on peut encore voir et déconnecter ses comptes, mais plus en connecter ni s'en servir.
+router.delete('/:id', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.supprimer));
+router.use(asyncHandler(requirePro('integrations')));
 router.get('/:nom/connecter', asyncHandler(IntegrationController.connecter));
 router.get('/:id/agendas', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.agendas));
 router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(IntegrationController.modifier));
@@ -28,5 +32,4 @@ router.post('/:id/agenda/supprimer', validateRequest(supprimerEvenementSchema), 
 router.get('/:id/listes', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.listesTaches));
 router.post('/:id/taches', validateRequest(creerTacheSchema), asyncHandler(IntegrationController.creerTache));
 router.patch('/:id/taches', validateRequest(majTacheSchema), asyncHandler(IntegrationController.majTache));
-router.delete('/:id', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.supprimer));
 export default router;

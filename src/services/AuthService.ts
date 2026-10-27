@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import type { Prisma } from '@prisma/client';
 
 import { dechiffrer } from '../utils/crypto.js';
+import { etatAbonnement, finEssai, type ChampsAbonnement } from './abonnements/offres.js';
 import { HttpError } from '../utils/http.js';
 import { generateToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
@@ -10,9 +11,9 @@ import { EmailsCompte, emailsActifs } from './comptes/emails.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
 
-type Compte = { id: string; email: string; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null };
+type Compte = { id: string; email: string; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null } & ChampsAbonnement;
 
-const publicUser = (u: Compte) => ({ id: u.id, email: u.email, nom: u.nom, role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId });
+const publicUser = (u: Compte) => ({ id: u.id, email: u.email, nom: u.nom, role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
 // Les jetons de session ont une précision à la seconde : on tronque pour que la session ouverte juste après reste valable.
 const maintenant = () => new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -25,7 +26,8 @@ function creerCompte(data: Omit<Prisma.UserCreateInput, 'role'>) {
       const count = await tx.user.count();
       if (count > 0 && process.env.SIGNUP_OPEN === 'false') throw new HttpError(403, "Les inscriptions sont fermées. Demande à l'admin.");
       if (await tx.user.findUnique({ where: { email: data.email } })) throw new HttpError(409, 'Un compte existe déjà avec cet email.');
-      return tx.user.create({ data: { ...data, role: count === 0 && !process.env.ADMIN_EMAIL ? 'ADMIN' : 'UTILISATEUR' } });
+      // Chaque nouveau compte commence par l'essai Pro.
+      return tx.user.create({ data: { ...data, essaiJusqua: finEssai(), role: count === 0 && !process.env.ADMIN_EMAIL ? 'ADMIN' : 'UTILISATEUR' } });
     },
     { isolationLevel: 'Serializable' },
   );
@@ -155,6 +157,7 @@ export const AuthService = {
         integrations: { select: { fournisseur: true, compte: true, ctx: true, derniereSync: true, donnees: true, createdAt: true } },
         notifications: { select: { titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
         abonnementsPush: { select: { appareil: true, createdAt: true } },
+        paiements: { select: { reference: true, periode: true, montant: true, devise: true, statut: true, payeLe: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
       },
     });
     return {
@@ -164,6 +167,8 @@ export const AuthService = {
       comptesConnectes: u.integrations,
       notifications: u.notifications,
       appareilsPush: u.abonnementsPush,
+      abonnement: { ...etatAbonnement(u), cgvAccepteesLe: u.cgvAccepteesLe, cgvVersion: u.cgvVersion },
+      paiements: u.paiements,
     };
   },
 

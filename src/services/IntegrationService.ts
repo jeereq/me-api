@@ -12,6 +12,7 @@ import { microsoft } from './integrations/microsoft.js';
 import { slackConnecteur } from './integrations/slack.js';
 import { trello } from './integrations/trello.js';
 import { vide, type Connecteur, type Ctx, type EcritureEvenement, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
+import { etatAbonnement } from './abonnements/offres.js';
 
 export const CONNECTEURS: Record<string, Connecteur> = { google, microsoft, trello, slack: slackConnecteur };
 const parFournisseur = (f: Fournisseur) => Object.values(CONNECTEURS).find((c) => c.fournisseur === f)!;
@@ -172,8 +173,11 @@ export const IntegrationService = {
   },
 
   async synchroniserTout() {
-    const ids = await prisma.integration.findMany({ select: { id: true } });
-    for (const { id } of ids) await this.synchroniserUne(id);
+    const liste = await prisma.integration.findMany({
+      select: { id: true, user: { select: { role: true, essaiJusqua: true, abonnementPeriode: true, abonnementFinLe: true } } },
+    });
+    // Les comptes connectés font partie de Pro : sans abonnement (ni essai), ils ne sont plus relus.
+    for (const { id, user } of liste) if (etatAbonnement(user).pro) await this.synchroniserUne(id);
   },
 
   /* ---------- Écrire dans le compte ---------- */

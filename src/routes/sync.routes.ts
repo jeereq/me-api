@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { IntegrationController } from '../controllers/IntegrationController.js';
+import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { asyncHandler } from '../utils/http.js';
 
@@ -11,5 +12,5 @@ const limite = rateLimit({ windowMs: 10 * 60 * 1000, limit: 10, keyGenerator: (r
 const router = Router();
 router.use(authenticateJWT);
 router.get('/', asyncHandler(IntegrationController.elements));
-router.post('/', limite, asyncHandler(IntegrationController.synchroniser));
+router.post('/', requirePro('integrations'), limite, asyncHandler(IntegrationController.synchroniser));
 export default router;

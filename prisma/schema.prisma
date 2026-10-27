@@ -34,12 +34,21 @@ model User {
   updatedAt    DateTime @updatedAt
   /// Fuseau IANA du téléphone (ex. Europe/Paris), pour placer les rendez-vous importés à la bonne heure.
   fuseau       String   @default("UTC")
+  /// Fin de l'essai Pro gratuit (14 jours à l'inscription). Voir src/services/abonnements/offres.ts.
+  essaiJusqua  DateTime?
+  /// Abonnement Pro prépayé : période choisie au dernier paiement, et fin de la période payée (sans renouvellement automatique).
+  abonnementPeriode  String?
+  abonnementFinLe    DateTime?
+  /// Acceptation des conditions générales de vente au moment du paiement, et leur version.
+  cgvAccepteesLe     DateTime?
+  cgvVersion         String?
   espace       Espace?
   integrations Integration[]
   notifications Notification[]
   abonnementsPush PushAbonnement[]
   jetons       JetonCompte[]
   equipes      EquipeMembre[]
+  paiements    Paiement[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -217,4 +226,28 @@ model EspaceEquipe {
   majLe    DateTime @default(now())
   /// Numéro de version, +1 à chaque écriture : un appareil qui écrit sur une version périmée est refusé (409).
   revision Int      @default(0)
+}
+
+/// Un paiement d'abonnement Pro par FlexPaie (mobile money). Il prolonge abonnementFinLe une fois confirmé.
+model Paiement {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Référence envoyée à FlexPaie, unique : un paiement n'est jamais compté deux fois.
+  reference String    @unique
+  /// mensuel ou annuel
+  periode   String
+  /// Montant en centimes, et sa devise (USD, CDF).
+  montant   Int
+  devise    String
+  telephone String    @default("")
+  /// en_attente, paye ou echoue
+  statut    String    @default("en_attente")
+  /// Numéro de commande renvoyé par FlexPaie, pour vérifier le paiement chez eux.
+  commande  String?
+  message   String?
+  payeLe    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
 }
