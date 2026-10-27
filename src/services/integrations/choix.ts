@@ -51,6 +51,12 @@ export type MailImporte = {
   nonLu?: boolean;
   /** Fil de discussion : les messages du même échange portent le même identifiant. */
   fil?: string;
+  /** Adresse du contact, pour lui répondre. */
+  adresse?: string;
+  /** `Message-ID` du message : c'est lui qui raccroche une réponse au bon fil. */
+  messageId?: string;
+  /** `References` du message, à prolonger dans la réponse. */
+  references?: string;
   lien?: string;
   source: 'gmail' | 'outlook';
 };

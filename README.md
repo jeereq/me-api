@@ -80,6 +80,11 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/integrations/:service/connecter?retour=` | compte | `{ url }` de la page d'autorisation (google, microsoft, trello, slack) |
 | GET | `/api/integrations/:id/agendas` | compte | `{ agendas, choisis }` : agendas du compte (Google, Microsoft) et ceux cochés |
 | PATCH | `/api/integrations/:id` | compte | `{ ctx?: "perso" \| "pro", agendas?: string[] }` → `{ integration }` ; changer les agendas relit le compte |
+| POST | `/api/integrations/:id/repondre` | compte | `{ mail, texte }` : envoie la réponse dans le fil du message |
+| POST \| PATCH | `/api/integrations/:id/agenda` | compte | Crée (`{ agendaId, titre, date, debut?, fin?, lieu?, journee? }`) ou modifie (avec `id`) un rendez-vous |
+| POST | `/api/integrations/:id/agenda/supprimer` | compte | `{ agendaId, id }` : supprime le rendez-vous |
+| GET | `/api/integrations/:id/listes` | compte | `{ listes }` : listes de tâches du compte (Google Tasks, To Do) |
+| POST \| PATCH | `/api/integrations/:id/taches` | compte | Crée (`{ listeId, titre, echeance? }`) ou met à jour (avec `id`, `fait`) une tâche |
 | DELETE | `/api/integrations/:id` | compte | Déconnecte le compte et oublie ses jetons |
 | GET | `/api/sync` | compte | Éléments importés : `{ integrations, agenda, taches, relances, mails }` |
 | POST | `/api/sync` | compte | Relit tous les comptes tout de suite, puis comme GET |
@@ -140,7 +145,7 @@ Chaque compte me peut connecter plusieurs comptes externes (par exemple Gmail pe
 
 | Service | Agenda | Tâches | Relances | Mails |
 | --- | --- | --- | --- | --- |
-| Google | Rendez-vous des 14 prochains jours (agendas cochés pour le compte, sinon ceux affichés ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours | Fils où ton dernier message attend une réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
+| Google | Rendez-vous des 14 prochains jours (agendas cochés pour le compte, sinon ceux affichés ou ceux du filtre) | Mails suivis (étoile) des 30 derniers jours, et les tâches ouvertes de Google Tasks | Fils où ton dernier message attend une réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
 | Microsoft | Rendez-vous des 14 prochains jours (mêmes règles) | Mails avec drapeau, tâches To Do ouvertes | Mails envoyés sans réponse depuis plus de N jours | Réception des 7 derniers jours, un message par fil |
 | Trello | Échéances des 14 prochains jours | Cartes où tu es membre, non terminées | | |
 | Slack | | Messages des derniers jours qui te mentionnent ou t'écrivent en direct | Tes questions restées sans réponse dans leur fil | |
@@ -150,6 +155,16 @@ N est le « délai avant relance » de la configuration système (3 jours par d�
 **Quels agendas** (`src/services/integrations/choix.ts`, module pur testé) : les agendas cochés pour ce compte dans l'app (`PATCH /api/integrations/:id`, champ `agendas`) ; sinon ceux dont le nom contient le filtre de la source ; sinon ceux que le service affiche par défaut. Un agenda coché puis disparu est ignoré, et si tous ont disparu on revient au défaut plutôt que de ne rien importer.
 
 **Mails** : seulement l'objet, le contact, la date, l'état lu/non lu et le lien vers le fil d'origine — jamais le contenu. Un seul message par fil, le plus récent, 25 au maximum par compte.
+
+### Écrire dans les comptes
+
+Me peut répondre à un mail, tenir l'agenda et les tâches depuis l'app. Ce que ça implique :
+
+- **Autorisations demandées** : Google `calendar.events`, `gmail.readonly`, `gmail.send`, `tasks` ; Microsoft `Calendars.ReadWrite`, `Mail.ReadWrite`, `Mail.Send`, `Tasks.ReadWrite`. Ajoute-les à l'écran de consentement Google et aux autorisations d'API de l'application Azure, **puis reconnecte chaque compte** : un compte relié avant ces autorisations ne peut pas écrire, et Me répond alors « Autorisations insuffisantes : reconnecte ce compte ».
+- **Réponse à un mail** : le destinataire, l'objet et les en-têtes du fil viennent du message gardé lors de la dernière relecture (`donnees.mails`), pas de l'app. Gmail reçoit un message RFC 2822 complet (`In-Reply-To`, `References`), Outlook passe par `POST /messages/{id}/reply`. La mise en forme du message est dans `src/services/integrations/ecriture.ts` (module pur testé).
+- **Tâches dans les deux sens** : une tâche importée de Google Tasks ou de Microsoft To Do garde sa liste d'origine (`liste`, et un identifiant `gtask:<liste>:<tâche>` ou `todo:<liste>:<tâche>`) ; la cocher dans Me la coche à la source.
+- **Rendez-vous et tâches** : le compte est relu juste après l'écriture, pour que l'app voie le résultat sans attendre les 15 minutes. Un envoi de mail ne relit rien : la réponse part dans les messages envoyés, pas dans la réception.
+- **Vérification Google** : `gmail.send` est un niveau d'accès restreint. Tant que l'application OAuth est en mode « Test », il fonctionne pour les utilisateurs test ; pour la publier, Google demande une validation.
 
 Pour activer un service, crée son application OAuth (les étapes sont dans `.env.example`), remplis ses variables, `PUBLIC_URL` et `ENCRYPTION_KEY`, puis redémarre. Le bouton « Connecter » apparaît alors dans l'app.
 
