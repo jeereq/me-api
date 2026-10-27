@@ -71,6 +71,26 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
   lireMail: async (req: Request, res: Response) => {
     res.json(await IntegrationService.lireMail(req.user!.id, req.params.id, req.params.mail));
   },
+  dossiers: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.dossiers(req.user!.id, req.params.id, typeof req.query.boite === 'string' ? req.query.boite : undefined));
+  },
+  mailsDuDossier: async (req: Request, res: Response) => {
+    const q = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
+    res.json(await IntegrationService.mailsDuDossier(req.user!.id, req.params.id, req.params.dossier, { boite: q('boite'), suivant: q('suivant') }));
+  },
+  mailDuFil: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.mailDuFil(req.user!.id, req.params.id, req.params.fil));
+  },
+  deplacer: async (req: Request, res: Response) => {
+    await IntegrationService.deplacer(req.user!.id, req.params.id, req.params.mail, req.body);
+    res.status(204).end();
+  },
+  regles: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.regles(req.user!.id, req.params.id));
+  },
+  activerRegle: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.activerRegle(req.user!.id, req.params.id, req.params.regle, req.body.active));
+  },
   etiqueter: async (req: Request, res: Response) => {
     res.json(await IntegrationService.etiqueter(req.user!.id, req.params.id, req.params.mail, req.body));
   },

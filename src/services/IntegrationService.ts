@@ -4,14 +4,14 @@ import jwt from 'jsonwebtoken';
 import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
-import { boitesValides, choixValides, type MailImporte } from './integrations/choix.js';
+import { boitesValides, chargementValide, choixValides, type MailImporte } from './integrations/choix.js';
 import { adresses, ErreurSaisie } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
 import { slackConnecteur } from './integrations/slack.js';
 import { trello } from './integrations/trello.js';
-import { vide, type Connecteur, type Ctx, type EcritureEvenement, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
+import { CHARGEMENT_DEFAUT, vide, type Connecteur, type Ctx, type EcritureEvenement, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
 import { etatAbonnement } from './abonnements/offres.js';
 
 export const CONNECTEURS: Record<string, Connecteur> = { google, microsoft, trello, slack: slackConnecteur };
@@ -25,8 +25,8 @@ export const connecteur = (nom: string) => {
 
 const textes = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 const prefsCompte = (i: Integration): PrefsCompte => {
-  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown } | null;
-  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees) };
+  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown; mails?: { jours?: unknown; max?: unknown } } | null;
+  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees), mails: chargementValide(p?.mails) };
 };
 const donneesDe = (i: Integration) => (i.donnees ?? vide()) as unknown as Elements;
 
@@ -48,6 +48,11 @@ const publique = (i: Integration) => ({
   }),
   /** Étiquettes qu'on peut poser sur un mail de ce compte. */
   libelles: donneesDe(i).libelles ?? [],
+  /** Comment la boîte de réception se charge (jours, nombre de fils). */
+  chargement: prefsCompte(i).mails,
+  /** Ce que le service sait faire de plus avec la boîte : dossiers, règles. */
+  dossiers: !!parFournisseur(i.fournisseur).dossiers,
+  regles: !!parFournisseur(i.fournisseur).regles,
 });
 
 /** Le paramètre `state` d'OAuth : signé, lié au compte me, valable 10 minutes. */
@@ -126,7 +131,7 @@ export const IntegrationService = {
   },
 
   /** Change le contexte (perso/pro), les agendas synchronisés et/ou les boîtes partagées lues, puis relit le compte. */
-  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[] }) {
+  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[]; chargement?: { jours?: number; max?: number } }) {
     const i = await prisma.integration.findFirst({ where: { id, userId } });
     if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
     if (patch.boitesPartagees?.length && !parFournisseur(i.fournisseur).boitesPartagees)
@@ -136,10 +141,12 @@ export const IntegrationService = {
     const prefs = { ...prefsCompte(i) };
     if (patch.agendas) prefs.agendas = [...new Set(patch.agendas)].slice(0, 50);
     if (patch.boitesPartagees) prefs.boitesPartagees = boitesValides(patch.boitesPartagees).filter((b) => b !== i.compte.toLowerCase());
-    if (patch.agendas || patch.boitesPartagees) data.prefs = prefs as Prisma.InputJsonObject;
+    if (patch.chargement) prefs.mails = chargementValide({ ...prefs.mails, ...patch.chargement });
+    const relire = !!(patch.agendas || patch.boitesPartagees || patch.chargement);
+    if (relire) data.prefs = prefs as Prisma.InputJsonObject;
     await prisma.integration.update({ where: { id }, data });
-    // Les agendas et les boîtes choisis ne changent rien tant que le compte n'a pas été relu.
-    if (patch.agendas || patch.boitesPartagees) await this.synchroniserUne(id).catch(() => {});
+    // Les agendas, les boîtes et le chargement choisis ne changent rien tant que le compte n'a pas été relu.
+    if (relire) await this.synchroniserUne(id).catch(() => {});
     return publique(await prisma.integration.findUniqueOrThrow({ where: { id } }));
   },
 
@@ -175,8 +182,11 @@ export const IntegrationService = {
         prefs: lirePrefs(i.user.espace?.data),
         agendas: prefsCompte(i).agendas ?? [],
         boitesPartagees: prefsCompte(i).boitesPartagees ?? [],
+        chargement: prefsCompte(i).mails ?? CHARGEMENT_DEFAUT,
       });
-      await prisma.integration.update({ where: { id }, data: { donnees: donnees as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
+      // Les mails vus dans les dossiers restent : ils ne viennent pas de cet import.
+      const vus = donneesDe(i).vus;
+      await prisma.integration.update({ where: { id }, data: { donnees: { ...donnees, ...(vus?.length ? { vus } : {}) } as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
     } catch (e) {
       const message = e instanceof ErreurExterne ? e.message : 'Synchronisation impossible pour l’instant.';
       if (!(e instanceof ErreurExterne)) console.error('Synchro', i.fournisseur, e);
@@ -225,7 +235,64 @@ export const IntegrationService = {
 
   /** Un mail gardé dans les messages relus du compte (objet, contact, fil, boîte). */
   _mailGarde(i: Integration, mailId: string) {
-    return (donneesDe(i).mails ?? []).find((x) => x.id === mailId) as MailImporte | undefined;
+    const d = donneesDe(i);
+    return [...(d.mails ?? []), ...(d.vus ?? [])].find((x) => x.id === mailId) as MailImporte | undefined;
+  },
+
+  /** Les dossiers de la boîte (la sienne ou une partagée lue avec le compte). */
+  async dossiers(userId: string, id: string, boite?: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'dossiers');
+    if (boite && !(prefsCompte(i).boitesPartagees ?? []).includes(boite)) throw new HttpError(400, 'Ajoute d’abord cette boîte partagée dans Agendas & outils.');
+    return { dossiers: await this._ecrire(() => c.dossiers!(jetons, boite), i, false) };
+  },
+
+  /**
+   * Une page de mails d'un dossier, lue à la demande. Comme pour la réception, seuls l'objet, le contact, la date
+   * et l'extrait sont gardés (les 200 derniers vus), pour pouvoir lire ou répondre à ces mails ensuite.
+   */
+  async mailsDuDossier(userId: string, id: string, dossier: string, o: { boite?: string; suivant?: string }) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'mailsDuDossier');
+    if (o.boite && !(prefsCompte(i).boitesPartagees ?? []).includes(o.boite)) throw new HttpError(400, 'Ajoute d’abord cette boîte partagée dans Agendas & outils.');
+    const max = prefsCompte(i).mails?.max ?? CHARGEMENT_DEFAUT.max;
+    const page = await this._ecrire(() => c.mailsDuDossier!(jetons, { dossier, boite: o.boite, suivant: o.suivant, max, fuseau }), i, false);
+    const d = donneesDe(i);
+    const neufs = new Set(page.mails.map((m) => m.id));
+    const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
+  },
+
+  /** Range un mail dans un autre dossier, puis relit le compte pour que la réception suive. */
+  async deplacer(userId: string, id: string, mailId: string, d: { dossier: string; depuis?: string }) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'deplacer');
+    const garde = this._mailGarde(i, mailId);
+    await this._ecrire(() => c.deplacer!(jetons, { mailId, fil: garde?.fil, boite: garde?.boite, dossier: d.dossier, depuis: d.depuis ?? garde?.dossier ?? (i.fournisseur === 'GOOGLE' ? 'INBOX' : undefined) }), i);
+  },
+
+  /**
+   * Le mail d'origine d'une relance ou d'une tâche, lu par son fil même s'il n'est plus dans la réception relue
+   * (un mail envoyé qui attend sa réponse, un mail rangé). Il est gardé avec les mails vus pour le lire et y répondre.
+   */
+  async mailDuFil(userId: string, id: string, fil: string) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'mailDuFil');
+    const m = await this._ecrire(() => c.mailDuFil!(jetons, { fil, fuseau, moi: i.compte ?? undefined }), i, false);
+    if (!m) throw new HttpError(404, "Ce mail n'est plus dans la boîte : il a peut-être été supprimé.");
+    const d = donneesDe(i);
+    const vus = [m, ...(d.vus ?? []).filter((x) => x.id !== m.id)].slice(0, 200);
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    return { mail: { ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte } };
+  },
+
+  /** Les règles de la boîte de réception (Outlook), décrites en français. */
+  async regles(userId: string, id: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'regles');
+    return { regles: await this._ecrire(() => c.regles!(jetons), i, false) };
+  },
+
+  async activerRegle(userId: string, id: string, regle: string, active: boolean) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'activerRegle');
+    await this._ecrire(() => c.activerRegle!(jetons, regle, active), i, false);
+    return this.regles(userId, id);
   },
 
   /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */

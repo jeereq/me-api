@@ -27,6 +27,8 @@ export type Elements = {
   libelles?: LibelleDispo[];
   /** Les boîtes partagées demandées pour ce compte, et leur état à la dernière lecture. */
   boites?: BoitePartagee[];
+  /** Les derniers mails vus en ouvrant un dossier (200 au plus) : de quoi les lire ou y répondre ensuite. */
+  vus?: MailImporte[];
 };
 
 export type Jetons = { accessToken: string; refreshToken?: string | null; expiresAt?: Date | null };
@@ -35,7 +37,29 @@ export type Jetons = { accessToken: string; refreshToken?: string | null; expire
 export type Prefs = { actif: boolean; imports: ImportKind[]; filtre: string[] };
 
 /** Réglages propres à un compte connecté (écran Agendas & outils, bouton « Agendas à synchroniser »). */
-export type PrefsCompte = { agendas?: string[]; /** Adresses des boîtes partagées à lire avec ce compte (Microsoft 365). */ boitesPartagees?: string[] };
+export type PrefsCompte = {
+  agendas?: string[];
+  /** Adresses des boîtes partagées à lire avec ce compte (Microsoft 365). */
+  boitesPartagees?: string[];
+  /** Comment la boîte de réception se charge : sur combien de jours, et combien de fils au plus. */
+  mails?: ChargementMails;
+};
+export type ChargementMails = { jours: number; max: number };
+/** Par défaut : 7 jours, 25 fils, comme avant ce réglage. */
+export const CHARGEMENT_DEFAUT: ChargementMails = { jours: 7, max: 25 };
+
+/** Le genre d'un dossier, pour son icône et son ordre (comme le volet des dossiers d'Outlook). */
+export type GenreDossier = 'reception' | 'envoyes' | 'brouillons' | 'archive' | 'supprimes' | 'indesirables' | 'suivis' | 'importants' | 'autre';
+/** Un dossier de la boîte (Outlook) ou un libellé qui en tient lieu (Gmail) ; `parent` pour les sous-dossiers. */
+export type DossierMail = { id: string; nom: string; parent?: string; genre: GenreDossier; nonLus: number; total?: number };
+/** Une page de mails d'un dossier ; `suivant` se repasse pour la page d'après. */
+export type PageMails = { mails: MailImporte[]; suivant?: string };
+/** Une règle de la boîte Outlook, décrite en français. */
+export type Regle = { id: string; nom: string; active: boolean; ordre: number; conditions: string[]; actions: string[]; enErreur?: boolean };
+export type LectureDossier = { dossier: string; boite?: string; suivant?: string; max: number; fuseau: string };
+/** Le fil d'un mail rattaché à une relance ou une tâche ; `moi` est l'adresse du compte (pour reconnaître un message envoyé). */
+export type LectureFil = { fil: string; fuseau: string; moi?: string };
+export type Deplacement = { mailId: string; fil?: string; dossier: string; depuis?: string; boite?: string };
 
 export type Contexte = {
   jetons: Jetons;
@@ -47,6 +71,8 @@ export type Contexte = {
   prefs: (k: SourceKey) => Prefs;
   /** Boîtes partagées à lire en plus de la boîte du compte. */
   boitesPartagees: string[];
+  /** Combien de jours et de fils charger dans la boîte de réception. */
+  chargement: ChargementMails;
 };
 
 export interface Connecteur {
@@ -74,6 +100,18 @@ export interface Connecteur {
   etiqueter?(jetons: Jetons, e: Etiquetage): Promise<{ libelles: string[] }>;
   /** Accepte des boîtes partagées à lire avec le compte. */
   boitesPartagees?: boolean;
+  /** Les dossiers de la boîte (la sienne ou une partagée), avec leurs non lus. */
+  dossiers?(jetons: Jetons, boite?: string): Promise<DossierMail[]>;
+  /** Une page de mails d'un dossier, lue à la demande. */
+  mailsDuDossier?(jetons: Jetons, l: LectureDossier): Promise<PageMails>;
+  /** Le dernier message d'un fil, où qu'il soit rangé (réception, envoyés, un dossier) ; null s'il n'existe plus. */
+  mailDuFil?(jetons: Jetons, f: LectureFil): Promise<MailImporte | null>;
+  /** Range un mail dans un autre dossier. */
+  deplacer?(jetons: Jetons, d: Deplacement): Promise<void>;
+  /** Les règles de la boîte de réception. */
+  regles?(jetons: Jetons): Promise<Regle[]>;
+  /** Active ou coupe une règle. */
+  activerRegle?(jetons: Jetons, id: string, active: boolean): Promise<void>;
   /** Écrit un nouveau mail (pas une réponse). */
   envoyer?(jetons: Jetons, m: NouveauMail): Promise<{ lien?: string }>;
   /** Crée un rendez-vous dans un agenda du compte ; rend son identifiant. */
