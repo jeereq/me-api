@@ -76,6 +76,7 @@ const libelle = z.string().trim().min(1).max(100, 'Une étiquette tient en 100 c
 const boiteQuery = z.string().trim().email().max(320).optional();
 export const dossiersSchema = integrationParamsSchema.extend({ query: z.object({ boite: boiteQuery }).passthrough() });
 export const mailsDossierSchema = z.object({ params: z.object({ id: z.string().min(1), dossier: z.string().min(1).max(500) }), query: z.object({ boite: boiteQuery, suivant: z.string().max(2000).optional() }).passthrough() });
+export const filMailSchema = z.object({ params: z.object({ id: z.string().min(1), fil: z.string().min(1).max(500) }) });
 export const deplacerMailSchema = lireMailSchema.extend({ body: z.object({ dossier: z.string().min(1).max(500), depuis: z.string().min(1).max(500).optional() }) });
 export const activerRegleSchema = z.object({ params: z.object({ id: z.string().min(1), regle: z.string().min(1).max(500) }), body: z.object({ active: z.boolean() }) });
 export const etiqueterMailSchema = lireMailSchema.extend({

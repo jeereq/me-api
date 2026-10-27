@@ -84,6 +84,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/integrations/:id/mails/:mail` | compte | `{ mail }` : le mail en entier (texte, destinataires, pièces jointes, étiquettes) et les messages plus anciens du fil (`fil`, 10 au plus), lu à la demande et marqué comme lu |
 | GET | `/api/integrations/:id/dossiers?boite=` | compte | `{ dossiers }` : les dossiers de la boîte (Outlook, arbre sur 3 niveaux) ou les libellés qui en tiennent lieu (Gmail), avec les non lus |
 | GET | `/api/integrations/:id/dossiers/:dossier/mails?boite=&suivant=` | compte | `{ mails, suivant }` : une page de mails du dossier (taille = réglage du compte) ; `suivant` pour la page d'après |
+| GET | `/api/integrations/:id/fils/:fil` | compte | `{ mail }` : le dernier message d'un fil (le mail d'origine d'une relance ou d'une tâche), même hors de la réception relue (envoyés, dossier) ; il est gardé avec les mails vus pour le lire et y répondre |
 | POST | `/api/integrations/:id/mails/:mail/deplacer` | compte | `{ dossier, depuis? }` : range le mail (Outlook : déplacer ; Gmail : poser le libellé, retirer celui d'origine) |
 | GET | `/api/integrations/:id/regles` | compte | `{ regles }` : les règles de la boîte Outlook, conditions et actions en français |
 | PATCH | `/api/integrations/:id/regles/:regle` | compte | `{ active }` : active ou coupe une règle Outlook |

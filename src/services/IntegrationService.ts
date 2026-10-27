@@ -269,6 +269,20 @@ export const IntegrationService = {
     await this._ecrire(() => c.deplacer!(jetons, { mailId, fil: garde?.fil, boite: garde?.boite, dossier: d.dossier, depuis: d.depuis ?? garde?.dossier ?? (i.fournisseur === 'GOOGLE' ? 'INBOX' : undefined) }), i);
   },
 
+  /**
+   * Le mail d'origine d'une relance ou d'une tâche, lu par son fil même s'il n'est plus dans la réception relue
+   * (un mail envoyé qui attend sa réponse, un mail rangé). Il est gardé avec les mails vus pour le lire et y répondre.
+   */
+  async mailDuFil(userId: string, id: string, fil: string) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'mailDuFil');
+    const m = await this._ecrire(() => c.mailDuFil!(jetons, { fil, fuseau, moi: i.compte ?? undefined }), i, false);
+    if (!m) throw new HttpError(404, "Ce mail n'est plus dans la boîte : il a peut-être été supprimé.");
+    const d = donneesDe(i);
+    const vus = [m, ...(d.vus ?? []).filter((x) => x.id !== m.id)].slice(0, 200);
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    return { mail: { ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte } };
+  },
+
   /** Les règles de la boîte de réception (Outlook), décrites en français. */
   async regles(userId: string, id: string) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'regles');

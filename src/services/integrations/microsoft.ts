@@ -356,6 +356,17 @@ export const microsoft: Connecteur = {
     return { mails: value.map((m) => versMailImporte(m, l.fuseau, l.boite, envoyes, l.dossier)), ...(value.length === l.max ? { suivant: String(saut + l.max) } : {}) };
   },
 
+  async mailDuFil({ accessToken }, f) {
+    // Graph refuse de trier sur un champ absent du filtre : les messages du fil sont triés ici, le plus récent d'abord.
+    const q = new URLSearchParams({ $filter: `conversationId eq '${f.fil.replace(/'/g, "''")}'`, $top: '50', $select: CHAMPS_LISTE });
+    const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${GRAPH}/messages?${q}`, bearer(accessToken));
+    const quand = (m: Mail) => m.sentDateTime || m.receivedDateTime || '';
+    const m = [...value].sort((a, b) => quand(b).localeCompare(quand(a)))[0];
+    if (!m) return null;
+    const envoye = !!f.moi && m.from?.emailAddress?.address?.toLowerCase() === f.moi.toLowerCase();
+    return versMailImporte(m, f.fuseau, undefined, envoye);
+  },
+
   async deplacer({ accessToken }, d) {
     await json('Outlook', `${racine(d.boite)}/messages/${encodeURIComponent(d.mailId)}/move`, corpsJson(accessToken, 'POST', { destinationId: d.dossier }));
   },

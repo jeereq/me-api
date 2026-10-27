@@ -322,6 +322,16 @@ export const google: Connecteur = {
     return { mails: (await lireMeta(auth, messages.map((m) => m.id))).map((m) => versMailImporte(m, l.fuseau, parId, envoye, l.dossier)), ...(nextPageToken ? { suivant: nextPageToken } : {}) };
   },
 
+  async mailDuFil({ accessToken }, f) {
+    const auth = bearer(accessToken);
+    const t = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/threads/${encodeURIComponent(f.fil)}?format=minimal`, auth);
+    const dernier = t.messages?.at(-1);
+    if (!dernier) return null;
+    const [m] = await lireMeta(auth, [dernier.id]);
+    const parId = await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>());
+    return versMailImporte(m, f.fuseau, parId, !!m.labelIds?.includes('SENT'));
+  },
+
   async deplacer({ accessToken }, d) {
     // Ranger dans un libellé : on le pose, et on retire celui d'où vient le mail (sortir de la réception = archiver).
     const corps = { addLabelIds: [d.dossier], removeLabelIds: d.depuis && d.depuis !== d.dossier ? [d.depuis] : [] };

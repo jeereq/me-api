@@ -57,6 +57,8 @@ export type PageMails = { mails: MailImporte[]; suivant?: string };
 /** Une règle de la boîte Outlook, décrite en français. */
 export type Regle = { id: string; nom: string; active: boolean; ordre: number; conditions: string[]; actions: string[]; enErreur?: boolean };
 export type LectureDossier = { dossier: string; boite?: string; suivant?: string; max: number; fuseau: string };
+/** Le fil d'un mail rattaché à une relance ou une tâche ; `moi` est l'adresse du compte (pour reconnaître un message envoyé). */
+export type LectureFil = { fil: string; fuseau: string; moi?: string };
 export type Deplacement = { mailId: string; fil?: string; dossier: string; depuis?: string; boite?: string };
 
 export type Contexte = {
@@ -102,6 +104,8 @@ export interface Connecteur {
   dossiers?(jetons: Jetons, boite?: string): Promise<DossierMail[]>;
   /** Une page de mails d'un dossier, lue à la demande. */
   mailsDuDossier?(jetons: Jetons, l: LectureDossier): Promise<PageMails>;
+  /** Le dernier message d'un fil, où qu'il soit rangé (réception, envoyés, un dossier) ; null s'il n'existe plus. */
+  mailDuFil?(jetons: Jetons, f: LectureFil): Promise<MailImporte | null>;
   /** Range un mail dans un autre dossier. */
   deplacer?(jetons: Jetons, d: Deplacement): Promise<void>;
   /** Les règles de la boîte de réception. */

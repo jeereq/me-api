@@ -78,6 +78,9 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
     const q = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
     res.json(await IntegrationService.mailsDuDossier(req.user!.id, req.params.id, req.params.dossier, { boite: q('boite'), suivant: q('suivant') }));
   },
+  mailDuFil: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.mailDuFil(req.user!.id, req.params.id, req.params.fil));
+  },
   deplacer: async (req: Request, res: Response) => {
     await IntegrationService.deplacer(req.user!.id, req.params.id, req.params.mail, req.body);
     res.status(204).end();

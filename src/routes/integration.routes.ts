@@ -5,7 +5,7 @@ import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailSchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailSchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Routes ouvertes : le navigateur y revient après l'autorisation, le `state` signé identifie le compte.
@@ -27,6 +27,8 @@ router.get('/:id/mails/:mail', validateRequest(lireMailSchema), asyncHandler(Int
 // L'environnement de la boîte : dossiers, mails d'un dossier page par page, ranger un mail, règles.
 router.get('/:id/dossiers', validateRequest(dossiersSchema), asyncHandler(IntegrationController.dossiers));
 router.get('/:id/dossiers/:dossier/mails', validateRequest(mailsDossierSchema), asyncHandler(IntegrationController.mailsDuDossier));
+// Le mail d'origine d'une relance ou d'une tâche, retrouvé par son fil.
+router.get('/:id/fils/:fil', validateRequest(filMailSchema), asyncHandler(IntegrationController.mailDuFil));
 router.post('/:id/mails/:mail/deplacer', validateRequest(deplacerMailSchema), asyncHandler(IntegrationController.deplacer));
 router.get('/:id/regles', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.regles));
 router.patch('/:id/regles/:regle', validateRequest(activerRegleSchema), asyncHandler(IntegrationController.activerRegle));
