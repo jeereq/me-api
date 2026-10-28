@@ -203,6 +203,8 @@ Une équipe garde toujours au moins un propriétaire : rétrograder ou retirer l
 
 **Invitations** : un lien valable 7 jours, à usage unique, dont seule l'empreinte SHA-256 est gardée, comme les liens de compte. Le compte qui accepte doit porter l'adresse invitée (sinon **403** `AUTRE_ADRESSE`). Sans SendGrid ni `APP_URL`, la réponse contient le `lien` : à celui qui invite de le transmettre. On n'invite pas directement un propriétaire : on nomme la personne une fois qu'elle a rejoint.
 
+**Affecter une tâche** : dans l'espace d'une équipe, une tâche peut être confiée à un membre (`affecteA` : l'identifiant de son compte, en plus du nom affiché dans `responsable`). Le serveur ne lit pas les tâches une à une ; à chaque `PUT /api/equipes/:id/espace` réussi qui contient des tâches affectées, il compare avec la version gardée (`src/services/equipes/affectations.ts`, testé dans `tests/affectations.test.ts`) et prévient la personne à qui une tâche vient d'être confiée ou reconfiée : message dans la cloche de l'app, push et email (`NotificationService.affecter`). On ne prévient pas celui qui s'affecte lui-même, un compte qui n'est plus membre, ni pour une tâche déjà faite ; 20 avis au plus par enregistrement. C'est un message d'un collègue et non un rappel : il part sans condition d'abonnement, mais chacun peut couper les emails et les notifications dans Mon compte › Notifications (et l'admin le canal « Mail à moi-même »). Un échec d'envoi n'empêche jamais l'enregistrement.
+
 L'espace de l'équipe suit **exactement les mêmes révisions et les mêmes conflits** que l'espace privé : les deux passent par `src/services/espaces/document.ts` (voir la section suivante).
 
 ## Synchro entre appareils : versions et conflits
