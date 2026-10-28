@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import type { Request, Response } from 'express';
 
 import { IntegrationService, lireState } from '../services/IntegrationService.js';
+import { expliquerRefus } from '../services/integrations/erreurs.js';
 
 /** Renvoie vers l'app avec le résultat de la connexion. */
 const versApp = (retour: string, params: Record<string, string>) => `${retour}${retour.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`;
@@ -22,7 +23,7 @@ export const IntegrationController = {
     let retour = 'me://sources';
     try {
       retour = lireState(state, nom).retour;
-      if (req.query.error) throw new Error(String(req.query.error_description || 'Connexion annulée.'));
+      if (req.query.error) throw new Error(expliquerRefus(`${req.query.error} ${req.query.error_description ?? ''}`) ?? String(req.query.error_description || 'Connexion annulée.'));
       await IntegrationService.terminer(nom, state, String(req.query.code || ''));
       res.redirect(versApp(retour, { connecte: nom }));
     } catch (e) {
