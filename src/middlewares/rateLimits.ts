@@ -19,15 +19,34 @@ export const mailLimiter = [
   rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message }),
 ];
 
+/** L'analyse des mails mail par mail : l'app envoie les non lus par paquets de 10, une demande par paquet. */
+export const estAnalyseMails = (req: Request) => req.body?.type === 'mails';
+const cleCompte = (req: Request) => req.user?.id ?? ipKeyGenerator(req.ip ?? '');
+
 /** Assistant IA : 30 demandes / 10 min par compte, pour garder la facture OpenAI sous contrôle. */
-export const assistantLimiter = rateLimit({
+const assistantGeneral = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: 30,
-  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? ''),
+  keyGenerator: cleCompte,
+  skip: estAnalyseMails,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: "Beaucoup de demandes à l'IA d'un coup, réessaie dans quelques minutes." },
 });
+/**
+ * L'analyse des mails a son propre compteur : 60 paquets (600 mails) / 10 min par compte. Analyser 200 non lus ne bloque
+ * donc ni le plan du jour ni les questions, et l'app sait reprendre là où elle s'est arrêtée si la limite est atteinte.
+ */
+const assistantMails = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 60,
+  keyGenerator: cleCompte,
+  skip: (req) => !estAnalyseMails(req),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: "Beaucoup de mails analysés d'un coup : la suite reprendra dans quelques minutes.", code: 'LIMITE_ANALYSE' },
+});
+export const assistantLimiter = [assistantGeneral, assistantMails];
 
 /** Justificatifs : 60 fichiers / heure par compte, pour garder le stockage Cloudinary sous contrôle. */
 export const justificatifLimiter = rateLimit({
