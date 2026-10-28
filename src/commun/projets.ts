@@ -16,11 +16,25 @@ export function resumes(taches: Pick<TacheProjet, 'parent'>[]): Set<string> {
 /** Une tâche appartient à un projet qui existe encore (sinon c'est une tâche simple). */
 export const estTacheDeProjet = (t: Pick<TacheProjet, 'projet'>, projets?: { id: string }[]) => !!t.projet && !!projets?.some((p) => p.id === t.projet);
 
-/** Tâches pas faites, jamais les résumés ni les tâches bloquées. Sans projet, c'est simplement « pas faites ». */
+/**
+ * Tâches pas faites, jamais les résumés ni les tâches bloquées. Sans projet, c'est simplement « pas faites ».
+ * Comme le planning de l'app, chaque projet se calcule seul : un lien ou un parent vers une tâche d'un autre projet,
+ * ou vers une tâche simple, ne bloque rien.
+ */
 export function tachesActives<T extends TacheProjet>(e: { taches?: T[]; projets?: { id: string }[] }): T[] {
   const taches = e.taches || [];
   if (!taches.some((t) => estTacheDeProjet(t, e.projets))) return taches.filter((t) => t.statut !== 'fait');
+  const bloquees = new Set<string>();
+  for (const p of e.projets ?? []) {
+    const duProjet = taches.filter((t) => t.projet === p.id);
+    if (duProjet.length) for (const id of bloqueesDe(duProjet)) bloquees.add(id);
+  }
+  const parents = resumes(taches);
+  return taches.filter((t) => t.statut !== 'fait' && !parents.has(t.id) && !bloquees.has(t.id));
+}
 
+/** Les tâches d'un projet bloquées par une tâche précédente pas finie (liens `apres`, les siens et ceux de ses parents). */
+function bloqueesDe(taches: TacheProjet[]): Set<string> {
   const parNom = new Map(taches.map((t) => [t.id, t]));
   // Parent valide : présent dans la liste, sans boucle de parents.
   const parentDe = (id: string) => {
@@ -62,11 +76,10 @@ export function tachesActives<T extends TacheProjet>(e: { taches?: T[]; projets?
       }
   const ordonnees = new Set(file);
 
-  const parents = resumes(taches.filter((t) => parentDe(t.id)).map((t) => ({ parent: parentDe(t.id) })));
-  return taches.filter((t) => {
-    if (t.statut === 'fait' || parents.has(t.id)) return false;
-    if (!ordonnees.has(t.id)) return true;
-    for (const a of precedentes.get(t.id) ?? []) if (!fait(a)) return false;
-    return true;
-  });
+  const bloquees = new Set<string>();
+  for (const f of feuilles) {
+    if (f.statut === 'fait' || !ordonnees.has(f.id)) continue;
+    for (const a of precedentes.get(f.id) ?? []) if (!fait(a)) bloquees.add(f.id);
+  }
+  return bloquees;
 }

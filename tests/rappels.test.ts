@@ -240,3 +240,22 @@ describe('rappelsDesElements : calcul à l’avance (notifications du téléphon
     assert.deepEqual(titres(rappelsDesElements(e, cfg, LUNDI)), titres(jour));
   });
 });
+
+describe('tâches de projet : chaque projet se calcule seul, comme le planning de l’app', () => {
+  it('un lien vers une tâche simple ou d’un autre projet ne bloque pas', () => {
+    const projets = [{ id: 'p' }, { id: 'q' }];
+    const e = espace({
+      projets,
+      taches: [
+        tache({ id: 'simple', titre: 'Simple' }),
+        tache({ id: 'q1', titre: 'Q1', projet: 'q' }),
+        tache({ id: 'p1', titre: 'P1', projet: 'p', apres: ['simple'], echeance: LUNDI }),
+        tache({ id: 'p2', titre: 'P2', projet: 'p', apres: ['q1'], echeance: LUNDI }),
+        tache({ id: 'p3', titre: 'P3', projet: 'p', apres: ['p1'], echeance: LUNDI }),
+      ],
+    });
+    const vus = titres(rappelsDesElements(e, cfg, LUNDI));
+    assert.ok(vus.includes('P1') && vus.includes('P2'));
+    assert.ok(!vus.includes('P3'), 'P3 attend P1, du même projet');
+  });
+});
