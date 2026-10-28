@@ -42,3 +42,14 @@ describe('assistant : copilote et analyse des mails', () => {
     assert.match(p, /g:1/);
   });
 });
+
+describe('assistant : analyse d’un lot de mails', () => {
+  it('demande une synthèse d’ensemble, des actions et l’analyse de chaque mail', () => {
+    const p = prompt({ type: 'lot', perimetre: 'les mails de @ovh.com en octobre', donnees: '[{"id":"g:1"}]' });
+    for (const k of ['"synthese"', '"points"', '"actions"', '"analyses"', '@ovh.com en octobre', 'g:1']) assert.ok(p.includes(k), k);
+  });
+  it('laisse plus de place à un lot', () => {
+    assert.equal(enJson('lot'), true);
+    assert.ok(corpsRequete('gpt-4o-mini', 'x', true, true).max_completion_tokens > corpsRequete('gpt-4o-mini', 'x', true).max_completion_tokens);
+  });
+});

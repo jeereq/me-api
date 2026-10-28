@@ -2,6 +2,7 @@ import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo
 import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { decoderEntites, texteDeGmail, type PartieGmail } from './lecture.js';
+import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
 
@@ -247,7 +248,12 @@ export const google: Connecteur = {
     const m = tous.find((x) => x.id === mailId) ?? (await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, auth));
     const { texte, piecesJointes } = texteDeGmail(m.payload);
     // Ouvert dans Me = lu. Un compte connecté sans ce droit reste « non lu » chez Gmail, sans bloquer la lecture.
-    if (m.labelIds?.includes('UNREAD') && !ou?.garderNonLu) await json('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}/modify`, corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] })).catch(() => {});
+    // Tout le fil, comme Gmail : la liste de Me signale un fil non lu tant qu'un de ses messages l'est, même ancien.
+    const nonLu = [m, ...tous].some((x) => x.labelIds?.includes('UNREAD'));
+    if (nonLu && !ou?.garderNonLu) {
+      const url = ou?.fil ? `${GMAIL}/threads/${encodeURIComponent(ou.fil)}/modify` : `${GMAIL}/messages/${encodeURIComponent(mailId)}/modify`;
+      await json('Gmail', url, corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] })).catch((e) => console.error('Gmail : marquer comme lu', (e as Error).message));
+    }
     const quand = (x: Message) => (x.internalDate ? local(new Date(Number(x.internalDate)), fuseau) : undefined);
     const d = quand(m);
     const de = entete(m, 'From');
@@ -320,6 +326,15 @@ export const google: Connecteur = {
     const parId = await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>());
     const envoye = l.dossier === 'SENT' || l.dossier === 'DRAFT';
     return { mails: (await lireMeta(auth, messages.map((m) => m.id))).map((m) => versMailImporte(m, l.fuseau, parId, envoye, l.dossier)), ...(nextPageToken ? { suivant: nextPageToken } : {}) };
+  },
+
+  async chercherMails({ accessToken }, r) {
+    const auth = bearer(accessToken);
+    const q = new URLSearchParams({ maxResults: String(r.max), ...(requeteGmail(r) ? { q: requeteGmail(r) } : {}), ...(r.dossier ? { labelIds: r.dossier } : {}), ...(r.suivant ? { pageToken: r.suivant } : {}) });
+    const { messages = [], nextPageToken } = await json<{ messages?: { id: string }[]; nextPageToken?: string }>('Gmail', `${GMAIL}/messages?${q}`, auth);
+    const parId = await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>());
+    const envoye = r.dossier === 'SENT' || r.dossier === 'DRAFT';
+    return { mails: (await lireMeta(auth, messages.map((m) => m.id))).map((m) => versMailImporte(m, r.fuseau, parId, envoye, r.dossier)), ...(nextPageToken ? { suivant: nextPageToken } : {}) };
   },
 
   async mailDuFil({ accessToken }, f) {

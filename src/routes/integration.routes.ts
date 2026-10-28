@@ -5,7 +5,7 @@ import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { chercherMailsSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Routes ouvertes : le navigateur y revient après l'autorisation, le `state` signé identifie le compte.
@@ -22,6 +22,7 @@ router.get('/:nom/connecter', asyncHandler(IntegrationController.connecter));
 router.get('/:id/agendas', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.agendas));
 router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(IntegrationController.modifier));
 // Lire un mail en entier, à la demande.
+router.get('/:id/mails/recherche', validateRequest(chercherMailsSchema), asyncHandler(IntegrationController.chercherMails));
 router.get('/:id/mails/:mail', validateRequest(lireMailQuerySchema), asyncHandler(IntegrationController.lireMail));
 // Poser ou retirer des étiquettes (libellés Gmail, catégories Outlook).
 // L'environnement de la boîte : dossiers, mails d'un dossier page par page, ranger un mail, règles.

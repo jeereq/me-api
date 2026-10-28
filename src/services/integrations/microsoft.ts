@@ -2,6 +2,7 @@ import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo
 import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
+import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type ChargementMails, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
 
@@ -288,6 +289,8 @@ export const microsoft: Connecteur = {
     const conv = m.conversationId
       ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '25', $select: champs })}`, texte).catch(() => ({ value: [] }))).value ?? [])
       : [];
+    // Les autres messages non lus de la conversation aussi : la liste de Me montre la conversation entière comme non lue.
+    if (!ou?.garderNonLu) await Promise.all(conv.filter((x) => x.id !== m.id && x.isRead === false && !x.isDraft).map((x) => json('Outlook', `${base}/messages/${encodeURIComponent(x.id)}`, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {})));
     const avant = conv
       .filter((x) => x.id !== m.id && !x.isDraft && (x.receivedDateTime ?? '') <= (m.receivedDateTime ?? ''))
       .sort((a, b) => (a.receivedDateTime ?? '').localeCompare(b.receivedDateTime ?? ''))
@@ -354,6 +357,16 @@ export const microsoft: Connecteur = {
     const q = new URLSearchParams({ $orderby: `${envoyes ? 'sentDateTime' : 'receivedDateTime'} desc`, $top: String(l.max), $skip: String(saut), $select: CHAMPS_LISTE });
     const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${base}/mailFolders/${encodeURIComponent(l.dossier)}/messages?${q}`, auth);
     return { mails: value.map((m) => versMailImporte(m, l.fuseau, l.boite, envoyes, l.dossier)), ...(value.length === l.max ? { suivant: String(saut + l.max) } : {}) };
+  },
+
+  async chercherMails({ accessToken }, r) {
+    const base = racine(r.boite);
+    const { params, garder } = requeteOutlook(r, CHAMPS_LISTE);
+    const chemin = r.dossier ? `${base}/mailFolders/${encodeURIComponent(r.dossier)}/messages` : `${base}/messages`;
+    const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${chemin}?${params}`, bearer(accessToken));
+    const gardes = value.filter((m) => garder(m.receivedDateTime)).slice(0, r.max);
+    const saut = Math.max(0, Number(r.suivant) || 0);
+    return { mails: gardes.map((m) => versMailImporte(m, r.fuseau, r.boite, false, r.dossier)), ...(!params.has('$search') && value.length === r.max ? { suivant: String(saut + r.max) } : {}) };
   },
 
   async mailDuFil({ accessToken }, f) {

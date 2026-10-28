@@ -262,6 +262,21 @@ export const IntegrationService = {
     return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
   },
 
+  /**
+   * Les mails d'une personne, d'un domaine, d'un dossier ou d'une boîte partagée, sur une période : le lot que le copilote
+   * analyse d'un coup. Gardés avec les mails vus (200 au plus), pour pouvoir les lire et y répondre ensuite.
+   */
+  async chercherMails(userId: string, id: string, r: { de?: string; domaine?: string; dossier?: string; boite?: string; depuis?: string; jusqua?: string; suivant?: string; max?: number }) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'chercherMails');
+    if (r.boite && !(prefsCompte(i).boitesPartagees ?? []).includes(r.boite)) throw new HttpError(400, 'Ajoute d’abord cette boîte partagée dans Agendas & outils.');
+    const page = await this._ecrire(() => c.chercherMails!(jetons, { ...r, max: Math.min(100, r.max ?? 50), fuseau }), i, false);
+    const d = donneesDe(i);
+    const neufs = new Set(page.mails.map((m) => m.id));
+    const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
+  },
+
   /** Range un mail dans un autre dossier, puis relit le compte pour que la réception suive. */
   async deplacer(userId: string, id: string, mailId: string, d: { dossier: string; depuis?: string }) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'deplacer');
@@ -332,11 +347,14 @@ export const IntegrationService = {
   /** Corrige un mail gardé sans relire tout le compte ; `nouvelles` rejoint la liste des étiquettes du compte. */
   async _majMail(i: Integration, mailId: string, patch: Partial<MailImporte>, nouvelles: string[] = []) {
     const d = (i.donnees ?? null) as unknown as Elements | null;
-    if (!d?.mails) return;
-    const mails = d.mails.map((m) => (m.id === mailId ? { ...m, ...patch } : m));
+    if (!d?.mails && !d?.vus) return;
+    // Le mail peut venir de la réception relue ou d'un dossier ouvert (`vus`) : les deux suivent.
+    const maj = (l?: MailImporte[]) => l?.map((m) => (m.id === mailId ? { ...m, ...patch } : m));
+    const mails = maj(d.mails) ?? [];
+    const vus = maj(d.vus);
     const connues = d.libelles ?? [];
     const libelles = [...connues, ...nouvelles.filter((n) => !connues.some((l) => l.nom.toLowerCase() === n.toLowerCase())).map((nom) => ({ nom }))];
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, mails, libelles } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, mails, ...(vus ? { vus } : {}), libelles } as unknown as Prisma.InputJsonObject } }).catch(() => {});
   },
 
   /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */

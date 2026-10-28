@@ -1,4 +1,5 @@
 import type { Fournisseur } from '@prisma/client';
+import type { RechercheMails } from './recherche.js';
 
 import type { AgendaDispo, MailImporte } from './choix.js';
 
@@ -104,6 +105,8 @@ export interface Connecteur {
   dossiers?(jetons: Jetons, boite?: string): Promise<DossierMail[]>;
   /** Une page de mails d'un dossier, lue à la demande. */
   mailsDuDossier?(jetons: Jetons, l: LectureDossier): Promise<PageMails>;
+  /** Cherche des mails par expéditeur, domaine, dossier, boîte et période (analyse d'un lot par le copilote). */
+  chercherMails?(jetons: Jetons, r: RechercheMails): Promise<PageMails>;
   /** Le dernier message d'un fil, où qu'il soit rangé (réception, envoyés, un dossier) ; null s'il n'existe plus. */
   mailDuFil?(jetons: Jetons, f: LectureFil): Promise<MailImporte | null>;
   /** Range un mail dans un autre dossier. */

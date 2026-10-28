@@ -25,12 +25,13 @@ async function openai(path: string, init: RequestInit = {}) {
  */
 export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/chat|o1-mini|o1-preview/.test(modele);
 /** Les réponses du copilote et de l'analyse des mails sont du JSON que l'app range en cases à cocher : plus longues, et forcées en JSON. */
-export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails';
-export function corpsRequete(modele: string, contenu: string, json = false) {
+export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot';
+/** Un lot de mails (jusqu'à 50) demande une synthèse et une analyse par mail : la plus longue des réponses. */
+export function corpsRequete(modele: string, contenu: string, json = false, long = false) {
   const r = raisonne(modele);
   return {
     model: modele,
-    max_completion_tokens: r ? (json ? 8000 : 6000) : json ? 2500 : 900,
+    max_completion_tokens: r ? (long ? 16000 : json ? 8000 : 6000) : long ? 8000 : json ? 2500 : 900,
     ...(r ? { reasoning_effort: 'low' } : {}),
     ...(json ? { response_format: { type: 'json_object' } } : {}),
     messages: [{ role: 'user', content: contenu }],
@@ -57,6 +58,13 @@ ${donnees}`;
   if (b.type === 'mails') {
     return `Tu es « Me », le copilote de l'utilisateur. Analyse ses mails (JSON ci-dessous : id, de, sujet, boite perso ou pro, texte) et réponds uniquement par un objet JSON de la forme {"analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}, une entrée par mail, avec le même id.
 « resume » : ce que veut l'expéditeur, en une phrase. « action » : « repondre » si le mail attend une réponse, « tache » s'il demande surtout un travail, « rien » pour une lettre d'information, une publicité ou une notification automatique. « reponse » : une réponse prête à envoyer, en français, ${ton === 'neutre' ? '' : `ton ${ton}, `}vouvoiement pour une boîte pro et ton amical pour une boîte perso, 3 à 6 phrases, qui répond vraiment à la demande sans inventer de fait, de date ni de prix (propose plutôt d'en convenir) ; sans objet, sans markdown, terminée par « [Ton prénom] » ; chaîne vide quand l'action est « rien ». « tache » : le travail à faire, commençant par un verbe, ou chaîne vide.
+
+Mails :
+${donnees}`;
+  }
+  if (b.type === 'lot') {
+    return `Tu es « Me », le copilote de l'utilisateur. Il te confie un lot de mails à analyser ensemble : ${b.perimetre || 'des mails choisis'}. Les mails sont dans le JSON ci-dessous (id, de, adresse, date, sujet, boite perso ou pro, texte ; le texte est parfois seulement le début du mail). Réponds uniquement par un objet JSON de la forme {"synthese": "…", "points": ["…"], "actions": [{"titre": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null", "raison": "…"}], "analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}.
+« synthese » : 3 à 6 phrases, en français${ton === 'neutre' ? '' : `, ton ${ton}`}, qui disent de quoi parle ce lot dans son ensemble : les sujets récurrents, ce qui a changé dans le temps, ce qui reste en suspens, les montants, échéances ou engagements qui reviennent ; sans markdown. « points » : de 2 à 6 constats courts et concrets (« 3 factures OVH impayées depuis septembre »). « actions » : de 1 à 8 actions concrètes pour l'utilisateur, chacune commençant par un verbe, que l'app pourra convertir en tâches ; « echeance » seulement si les mails la justifient. « analyses » : une entrée par mail avec le même id, comme pour une analyse mail par mail ; « reponse » est une réponse prête à envoyer (vouvoiement pour une boîte pro, ton amical pour une boîte perso, 2 à 5 phrases, sans inventer de fait, de date ni de prix, terminée par « [Ton prénom] ») seulement pour les mails qui attendent vraiment une réponse, sinon chaîne vide. Ne cite que ce qui est dans les mails.
 
 Mails :
 ${donnees}`;
@@ -104,7 +112,7 @@ export const AssistantService = {
     let modele = candidats[0];
     for (const [i, m] of candidats.entries()) {
       modele = m;
-      const res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, prompt(body), enJson(body.type))) });
+      const res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, prompt(body), enJson(body.type), body.type === 'lot')) });
       data = (await res.json().catch(() => ({}))) as Reponse;
       if (res.ok) break;
       console.error('OpenAI', res.status, m, data?.error?.message);
