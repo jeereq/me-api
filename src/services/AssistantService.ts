@@ -24,8 +24,8 @@ async function openai(path: string, init: RequestInit = {}) {
  * On leur demande une réflexion courte et on leur laisse de la marge.
  */
 export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/chat|o1-mini|o1-preview/.test(modele);
-/** Les réponses du copilote et de l'analyse des mails sont du JSON que l'app range en cases à cocher : plus longues, et forcées en JSON. */
-export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot';
+/** Les réponses du copilote, de l'analyse des mails et des comptes rendus sont du JSON que l'app range en cases à cocher : plus longues, et forcées en JSON. */
+export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot' || type === 'compte_rendu';
 /** Un lot de mails (jusqu'à 50) demande une synthèse et une analyse par mail : la plus longue des réponses. */
 export function corpsRequete(modele: string, contenu: string, json = false, long = false) {
   const r = raisonne(modele);
@@ -67,6 +67,13 @@ ${donnees}`;
 « synthese » : 3 à 6 phrases, en français${ton === 'neutre' ? '' : `, ton ${ton}`}, qui disent de quoi parle ce lot dans son ensemble : les sujets récurrents, ce qui a changé dans le temps, ce qui reste en suspens, les montants, échéances ou engagements qui reviennent ; sans markdown. « points » : de 2 à 6 constats courts et concrets (« 3 factures OVH impayées depuis septembre »). « actions » : de 1 à 8 actions concrètes pour l'utilisateur, chacune commençant par un verbe, que l'app pourra convertir en tâches ; « echeance » seulement si les mails la justifient. « analyses » : une entrée par mail avec le même id, comme pour une analyse mail par mail ; « reponse » est une réponse prête à envoyer (vouvoiement pour une boîte pro, ton amical pour une boîte perso, 2 à 5 phrases, sans inventer de fait, de date ni de prix, terminée par « [Ton prénom] ») seulement pour les mails qui attendent vraiment une réponse, sinon chaîne vide. Ne cite que ce qui est dans les mails.
 
 Mails :
+${donnees}`;
+  }
+  if (b.type === 'compte_rendu') {
+    return `Tu es « Me », le copilote de l'utilisateur. Voici le compte rendu qu'il vient de noter (JSON ci-dessous : titre, date, genre, participants, projets rattachés, notes brutes, et « ouverts » : ses tâches et relances encore ouvertes qui y sont rattachées, chacune avec sa référence « ref »). Réponds uniquement par un objet JSON de la forme {"resume": "…", "decisions": ["…"], "actions": [{"genre": "tache|relance", "titre": "…", "contact": "…", "responsable": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null"}], "clotures": ["ref"]}.
+« resume » : 2 à 4 phrases en français${ton === 'neutre' ? '' : `, ton ${ton}`}, sans markdown, qui disent ce qui s'est dit et où en est le sujet. « decisions » : les décisions prises, une par entrée, courtes ; liste vide s'il n'y en a pas. « actions » : chaque chose à faire qui sort de l'échange, commençant par un verbe (« Envoyer le devis signé ») ; « genre » vaut « relance » quand il s'agit d'attendre ou d'obtenir une réponse de quelqu'un (alors « contact » est cette personne et « titre » le sujet, sans le verbe), sinon « tache » ; « responsable » est la personne chargée de l'action si ce n'est pas l'utilisateur, sinon chaîne vide ; « echeance » seulement si les notes donnent une date ou un délai (calcule-la à partir de « aujourdhui »). Ne reprends pas en action ce qui figure déjà dans « ouverts ». « clotures » : les « ref » des éléments ouverts que les notes disent faits, réglés, obtenus ou devenus inutiles ; rien en cas de doute. Ne cite que ce qui est dans les notes.
+
+Compte rendu :
 ${donnees}`;
   }
   if (b.type === 'relance') {

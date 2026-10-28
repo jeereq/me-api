@@ -53,3 +53,11 @@ describe('assistant : analyse d’un lot de mails', () => {
     assert.ok(corpsRequete('gpt-4o-mini', 'x', true, true).max_completion_tokens > corpsRequete('gpt-4o-mini', 'x', true).max_completion_tokens);
   });
 });
+
+describe('assistant : compte rendu', () => {
+  it('demande un résumé, les décisions, les actions et les éléments à clôturer', () => {
+    const p = prompt({ type: 'compte_rendu', donnees: '{"notes":"Devis envoyé","ouverts":[{"ref":"t:1"}]}' });
+    for (const k of ['"resume"', '"decisions"', '"actions"', '"clotures"', '"ref"', 't:1']) assert.ok(p.includes(k), k);
+    assert.equal(enJson('compte_rendu'), true);
+  });
+});

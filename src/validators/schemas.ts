@@ -34,7 +34,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot']),
+    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'compte_rendu']),
     /** Pour « lot » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
     perimetre: z.string().max(300).optional(),
     ton: z.string().max(40).optional(),
