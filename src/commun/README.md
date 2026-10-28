@@ -15,5 +15,6 @@ Ce dossier est la **seule source** du code qui doit donner le même résultat da
 
 - **Rien d'autre que du TypeScript pur** : aucun import hors de ce dossier, ni Node, ni React Native, ni Prisma.
 - **On modifie ici, jamais dans l'app.** L'app en garde une copie exacte dans `me-mobile/src/lib/commun/` (les imports y perdent seulement leur extension `.js`).
+- Un fichier ajouté ici doit aussi entrer dans `fichiers.json` (un test le vérifie), d'après quoi l'app recopie le dossier.
 - Après une modification fusionnée, dans `me-mobile` : `npm run commun` recopie les fichiers. La CI de l'app (`npm run commun:verifier`) échoue tant que sa copie diffère de celle-ci, sur la branche du même nom si elle existe, sinon sur `main`.
 - Des tests de contrat dans l'app (`tests/commun.test.ts`) comparent ce code avec les versions de l'app qui restent séparées (planning des projets, mission du jour) : un écart fait échouer la CI au lieu de passer inaperçu.

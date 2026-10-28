@@ -1,0 +1,12 @@
+{
+  "fichiers": [
+    "README.md",
+    "calcul.ts",
+    "jours.ts",
+    "modes.ts",
+    "objectifs.ts",
+    "patch.ts",
+    "previsions.ts",
+    "projets.ts"
+  ]
+}
