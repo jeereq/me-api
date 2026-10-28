@@ -6,6 +6,7 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 
 import { assertPeutGerer, assertResteUnProprietaire } from './equipes/droits.js';
+import { invitationPourApp, invitationsAffichables, memeAdresse } from './equipes/invitations.js';
 import { EmailsEquipe } from './comptes/emails.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
 
@@ -15,7 +16,7 @@ const JOURS_INVITATION = 7;
 const empreinte = (brut: string) => createHash('sha256').update(brut).digest('hex');
 
 const membreSelect = { id: true, role: true, depuisLe: true, user: { select: { id: true, nom: true, email: true } } } as const;
-const invitationSelect = { id: true, email: true, role: true, parNom: true, expireLe: true, createdAt: true } as const;
+const invitationSelect = { id: true, email: true, role: true, parNom: true, expireLe: true, createdAt: true, ouverteLe: true, ouvertePar: true } as const;
 
 type MembreLu = { id: string; role: RoleEquipe; depuisLe: Date; user: { id: string; nom: string; email: string } };
 
@@ -41,7 +42,7 @@ export const EquipeService = {
       creeLe: equipe.createdAt.toISOString(),
       monRole: role,
       membres: equipe.membres.map(lireMembre),
-      invitations: role === 'PROPRIETAIRE' ? equipe.invitations.map((i) => ({ id: i.id, email: i.email, role: i.role, parNom: i.parNom, expireLe: i.expireLe.toISOString() })) : [],
+      invitations: role === 'PROPRIETAIRE' ? invitationsAffichables(equipe.invitations, equipe.membres.map((m) => m.user.email)).map(invitationPourApp) : [],
     }));
   },
 
@@ -106,7 +107,9 @@ export const EquipeService = {
   async apercuInvitation(jeton: string, email: string) {
     const i = await prisma.invitationEquipe.findUnique({ where: { empreinte: empreinte(jeton || '') }, select: { ...invitationSelect, utiliseLe: true, equipe: { select: { nom: true, emoji: true } } } });
     if (!i || i.utiliseLe || i.expireLe < new Date()) throw new HttpError(400, 'Cette invitation n’est plus valable. Demande-en une nouvelle.', 'INVITATION_INVALIDE');
-    return { equipe: i.equipe.nom, emoji: i.equipe.emoji, email: i.email, role: i.role, parNom: i.parNom, pourMoi: i.email === email };
+    // On retient que le lien a été ouvert, et avec quel compte : le propriétaire voit alors que la personne a cliqué, et si elle l'a fait avec une autre adresse.
+    await prisma.invitationEquipe.update({ where: { id: i.id }, data: { ouverteLe: new Date(), ouvertePar: email } }).catch(() => {});
+    return { equipe: i.equipe.nom, emoji: i.equipe.emoji, email: i.email, role: i.role, parNom: i.parNom, pourMoi: memeAdresse(i.email, email) };
   },
 
   /** Accepte l'invitation : le compte connecté doit porter l'adresse invitée. */
@@ -114,7 +117,7 @@ export const EquipeService = {
     const e = empreinte(jeton || '');
     const i = await prisma.invitationEquipe.findUnique({ where: { empreinte: e }, select: { id: true, equipeId: true, email: true, role: true, utiliseLe: true, expireLe: true } });
     if (!i || i.utiliseLe || i.expireLe < new Date()) throw new HttpError(400, 'Cette invitation n’est plus valable. Demande-en une nouvelle.', 'INVITATION_INVALIDE');
-    if (i.email !== email) throw new HttpError(403, `Cette invitation a été envoyée à ${i.email}. Connecte-toi avec ce compte pour la rejoindre.`, 'AUTRE_ADRESSE');
+    if (!memeAdresse(i.email, email)) throw new HttpError(403, `Cette invitation a été envoyée à ${i.email}. Connecte-toi avec ce compte pour la rejoindre.`, 'AUTRE_ADRESSE');
 
     // Marque l'invitation servie avant d'ajouter le membre : deux appareils ne peuvent pas la consommer deux fois.
     const { count } = await prisma.invitationEquipe.updateMany({ where: { id: i.id, utiliseLe: null }, data: { utiliseLe: new Date() } });
