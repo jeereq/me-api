@@ -71,7 +71,10 @@ ${donnees}`;
   }
   if (b.type === 'relance') {
     const style = b.boite === 'pro' ? 'professionnel, vouvoiement' : 'personnel, ton amical';
-    return `Rédige en français un court mail de relance (${style}) à ${b.contact ?? ''} au sujet de : ${b.sujet ?? ''}. 4 à 6 phrases, poli, avec une demande claire et une proposition de prochaine étape. Commence par une ligne « Objet : … ». Sans markdown ; termine par « [Ton prénom] ».`;
+    // Une 2e ou 3e relance rappelle les messages précédents et se fait un peu plus directe ; la note donne le contexte.
+    const rang = b.deja ? ` C'est la relance numéro ${b.deja + 1} : rappelle brièvement les messages précédents restés sans réponse, reste courtois mais un peu plus direct.` : '';
+    const note = b.note?.trim() ? ` À savoir (note de l'utilisateur, à utiliser sans inventer autre chose) : ${b.note.trim()}.` : '';
+    return `Rédige en français un court mail de relance (${style}) à ${b.contact ?? ''} au sujet de : ${b.sujet ?? ''}.${rang}${note} 4 à 6 phrases, poli, avec une demande claire et une proposition de prochaine étape. Commence par une ligne « Objet : … ». Sans markdown ; termine par « [Ton prénom] ».`;
   }
   return `Tu es « Me », l'assistant personnel de l'utilisateur. Réponds en français, ton ${ton}, en 2 à 5 phrases courtes faites pour être lues à voix haute : pas de listes, pas de markdown, pas d'émojis. Appuie-toi uniquement sur ses données ci-dessous (JSON) ; si l'information n'y est pas, dis-le simplement.\n\nDonnées :\n${donnees}\n\nQuestion : ${b.question ?? ''}`;
 }
