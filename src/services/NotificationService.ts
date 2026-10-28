@@ -4,6 +4,7 @@ import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
 import { avisAbonnement, etatAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
+import type { Affectation } from './equipes/affectations.js';
 import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from './rappels/calcul.js';
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
@@ -13,9 +14,12 @@ const COULEURS: Record<string, string> = { agressif: '#FF6474', normal: '#62AEFF
 type Prefs = { app?: boolean; email?: boolean };
 const echapper = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-function email(rappels: Rappel[], nom: string) {
+const PIED_RAPPELS = 'Tu reçois cet email parce que les rappels par email sont activés dans Me (Mon compte).';
+const dateFr = (d: string) => d.split('-').reverse().join('/');
+
+function email(rappels: Rappel[], nom: string, pied = PIED_RAPPELS) {
   const sujet = rappels.length === 1 ? rappels[0].titre : `${rappels.length} rappels de Me`;
-  const texte = `${nom ? `Bonjour ${nom},\n\n` : ''}${rappels.map((r) => `• ${r.titre}\n  ${r.corps}`).join('\n\n')}\n\n— Me, ton assistant personnel`;
+  const texte = `${nom ? `Bonjour ${nom},\n\n` : ''}${rappels.map((r) => `• ${r.titre}\n  ${r.corps}`).join('\n\n')}\n\n— Me, ton assistant personnel${pied === PIED_RAPPELS ? '' : `\n${pied}`}`;
   const lignes = rappels
     .map(
       (r) =>
@@ -31,7 +35,7 @@ function email(rappels: Rappel[], nom: string) {
     `<div style="color:#38D9FF;font-family:monospace;font-size:11px;letter-spacing:2px;margin:4px 0 20px">TES RAPPELS</div>` +
     (nom ? `<p style="color:#DCF3FF;font-size:15px">Bonjour ${echapper(nom)},</p>` : '') +
     `<table role="presentation" width="100%" cellspacing="0" cellpadding="0">${lignes}</table>` +
-    `<p style="color:#86A7B8;font-size:12px;margin-top:18px">Tu reçois cet email parce que les rappels par email sont activés dans Me (Mon compte).</p>` +
+    `<p style="color:#86A7B8;font-size:12px;margin-top:18px">${echapper(pied)}</p>` +
     `</div></div>`;
   return { sujet, texte, html };
 }
@@ -101,6 +105,50 @@ export const NotificationService = {
       if (!cree.count || !avis.parEmail || !EmailService.configure()) continue;
       const m = email([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
       if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
+    }
+  },
+
+  /**
+   * Prévient les membres à qui des tâches viennent d'être confiées : dans l'app (cloche), en push et par email.
+   * C'est un message d'un collègue, pas un rappel : il part sans condition d'abonnement, mais chacun garde la main
+   * (réglages Notifications de son compte, et canal « Mail à moi-même » coupé par l'admin).
+   * `revision` rend la clé unique par enregistrement : reconfier la même tâche plus tard prévient de nouveau.
+   */
+  async affecter(equipe: { nom: string }, acteur: { nom: string }, affectations: Affectation[], revision: number) {
+    if (!affectations.length) return;
+    const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as { canaux?: { mail?: boolean } };
+    const mailActif = cfg.canaux?.mail !== false && EmailService.configure();
+    const quand = new Date().toISOString().slice(0, 16);
+    const parPersonne = new Map<string, Affectation[]>();
+    for (const a of affectations) parPersonne.set(a.userId, [...(parPersonne.get(a.userId) ?? []), a]);
+
+    for (const [userId, liste] of parPersonne) {
+      const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, espace: { select: { data: true } } } });
+      if (!u) continue;
+      const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
+      const qui = acteur.nom || "Quelqu'un";
+      const avis: Rappel[] = liste.map((a) => ({
+        cle: `affectation|${a.tacheId}|${userId}|${revision}`,
+        titre: `${qui} t'a confié une tâche`,
+        corps: `« ${a.titre} »${a.echeance ? ` · pour le ${dateFr(a.echeance)}` : ''} · équipe ${equipe.nom}`,
+        mode: 'normal',
+        quand,
+      }));
+      // Une tâche déjà signalée (même clé) n'est pas renvoyée.
+      const { count } = await prisma.notification.createMany({
+        data: avis.map((r) => ({ userId, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: prefs.app === false })),
+        skipDuplicates: true,
+      });
+      if (!count) continue;
+      if (prefs.app !== false) {
+        const m = avis.length === 1 ? { titre: avis[0].titre, corps: avis[0].corps } : { titre: `${qui} t'a confié ${avis.length} tâches`, corps: avis.map((r) => r.corps.split(' · ')[0]).join(' · ') };
+        await PushService.envoyer(userId, { ...m, mode: 'normal', url: '/taches', tag: avis[0].cle });
+      }
+      if (mailActif && prefs.email !== false) {
+        const sujet = avis.length === 1 ? avis[0].titre : `${qui} t'a confié ${avis.length} tâches`;
+        const m = email(avis, u.nom, `Tu reçois cet email parce qu'une tâche t'a été confiée dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
+        if (await EmailService.envoyer(u.email, sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId, cle: { in: avis.map((r) => r.cle) } }, data: { parEmail: true } });
+      }
     }
   },
 
