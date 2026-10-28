@@ -283,7 +283,7 @@ export const microsoft: Connecteur = {
     // Graph sait rendre le corps en texte ; s'il renvoie quand même du HTML, on le convertit.
     const m = await json<MailComplet>('Outlook', `${url}?$select=${champs}`, texte);
     const pieces = m.hasAttachments ? ((await json<{ value?: { name?: string }[] }>('Outlook', `${url}/attachments?$select=name`, bearer(accessToken)).catch(() => ({ value: [] }))).value ?? []) : [];
-    if (m.isRead === false) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
+    if (m.isRead === false && !ou?.garderNonLu) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
     // Les messages plus anciens de la conversation (sans tri côté Graph, qui refuse filtre et tri sur ces champs ensemble).
     const conv = m.conversationId
       ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '25', $select: champs })}`, texte).catch(() => ({ value: [] }))).value ?? [])

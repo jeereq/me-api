@@ -247,7 +247,7 @@ export const google: Connecteur = {
     const m = tous.find((x) => x.id === mailId) ?? (await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, auth));
     const { texte, piecesJointes } = texteDeGmail(m.payload);
     // Ouvert dans Me = lu. Un compte connecté sans ce droit reste « non lu » chez Gmail, sans bloquer la lecture.
-    if (m.labelIds?.includes('UNREAD')) await json('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}/modify`, corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] })).catch(() => {});
+    if (m.labelIds?.includes('UNREAD') && !ou?.garderNonLu) await json('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}/modify`, corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] })).catch(() => {});
     const quand = (x: Message) => (x.internalDate ? local(new Date(Number(x.internalDate)), fuseau) : undefined);
     const d = quand(m);
     const de = entete(m, 'From');
