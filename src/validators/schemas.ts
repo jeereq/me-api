@@ -44,6 +44,9 @@ export const assistantSchema = z.object({
     contact: z.string().max(200).optional(),
     sujet: z.string().max(1000).optional(),
     boite: z.enum(['perso', 'pro']).optional(),
+    /** Pour « relance » : la note de l'utilisateur sur la relance, et combien de fois la personne a déjà été relancée. */
+    note: z.string().max(1000).optional(),
+    deja: z.number().int().min(0).max(50).optional(),
   }),
 });
 export type AssistantBody = z.infer<typeof assistantSchema>['body'];

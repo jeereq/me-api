@@ -12,7 +12,13 @@ export type { Mode } from './modes.js';
 
 type Frequence = 'quotidien' | 'hebdo' | 'mensuel';
 type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[] };
-type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string };
+type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string; derniereRelance?: string };
+/**
+ * Une relance qui attend une action à sa date : à faire, ou déjà relancée depuis que l'app reprogramme la suivante
+ * (`derniereRelance`). Les anciennes relances « Relancé » sans cette date ne reviennent pas d'un coup en retard.
+ */
+export const relanceAttendue = (r: Pick<Relance, 'statut' | 'derniereRelance'>) => r.statut === 'a_faire' || (r.statut === 'relance' && !!r.derniereRelance);
+const titreRelance = (r: Relance) => `${r.statut === 'relance' ? 'Relancer à nouveau' : 'Relancer'} ${r.contact}`;
 type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null } & Partial<TacheProjet>;
 type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
 export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; projets?: { id: string }[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels };
@@ -63,7 +69,7 @@ export function missionDuJour(e: EspaceRappels, jour: string) {
   const bientot = addDays(jour, 2);
   const out: { titre: string; fait: boolean; points: number }[] = [];
   for (const r of e.relances || [])
-    if ((r.statut === 'a_faire' && r.date <= jour) || (r.statut === 'repondu' && r.reponduLe === jour)) out.push({ titre: `Relancer ${r.contact}`, fait: r.statut === 'repondu', points: POINTS.relance });
+    if ((relanceAttendue(r) && r.date <= jour) || (r.statut === 'repondu' && r.reponduLe === jour)) out.push({ titre: titreRelance(r), fait: r.statut === 'repondu', points: POINTS.relance });
   // Tâches de projet : seulement celles à faire bientôt et pas bloquées ; jamais les résumés (voir projets.ts).
   const urgentes = new Set(
     tachesActives(e)
@@ -133,7 +139,7 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     add(soir, 'Presque une journée parfaite', `Encore ${pluriel(restants.length, 'action', 'actions')} : ${restants.map((m) => m.titre).join(', ')}. Bonus de ${POINTS.parfait} pts à la clé.`, 'coach', 'serie', true);
 
   const dates = [
-    ...(e.relances || []).filter((r) => r.statut === 'a_faire' && r.date).map((r) => ({ id: r.id, titre: `Relancer ${r.contact}`, detail: r.sujet, date: r.date, mode: r.mode })),
+    ...(e.relances || []).filter((r) => relanceAttendue(r) && r.date).map((r) => ({ id: r.id, titre: titreRelance(r), detail: r.sujet, date: r.date, mode: r.mode })),
     // Tâches de projet : pas les résumés ni les tâches bloquées, et pas de rappel quotidien pour un vieux retard.
     ...tachesActives(e).filter((t) => t.echeance && (!estTacheDeProjet(t, e.projets) || t.echeance >= addDays(jour, -3))).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
   ];

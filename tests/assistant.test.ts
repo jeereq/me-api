@@ -53,3 +53,16 @@ describe('assistant : analyse d’un lot de mails', () => {
     assert.ok(corpsRequete('gpt-4o-mini', 'x', true, true).max_completion_tokens > corpsRequete('gpt-4o-mini', 'x', true).max_completion_tokens);
   });
 });
+
+describe('prompt de relance', () => {
+  it('reste simple pour une première relance', () => {
+    const p = prompt({ type: 'relance', contact: 'Marie', sujet: 'Devis', boite: 'pro' });
+    assert.match(p, /Marie/);
+    assert.doesNotMatch(p, /relance numéro/);
+  });
+  it('se fait plus direct après des relances, et reprend la note', () => {
+    const p = prompt({ type: 'relance', contact: 'Marie', sujet: 'Devis', boite: 'pro', deja: 2, note: 'devis de 1 200 € envoyé le 3' });
+    assert.match(p, /relance numéro 3/);
+    assert.match(p, /devis de 1 200 € envoyé le 3/);
+  });
+});
