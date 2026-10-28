@@ -127,7 +127,8 @@ export interface Connecteur {
 /** Une réponse à envoyer : le message d'origine, et le texte écrit dans Me. */
 export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string };
 /** Où se trouve un mail : son fil, et la boîte partagée qui le contient (absente = la boîte du compte). */
-export type OuMail = { fil?: string; boite?: string };
+/** `garderNonLu` : lu pour l'analyse du copilote, le mail reste « non lu » dans la boîte. */
+export type OuMail = { fil?: string; boite?: string; garderNonLu?: boolean };
 export type Etiquetage = OuMail & { mailId: string; ajouter: string[]; retirer: string[] };
 /** Un message plus ancien du même fil, lu avec le mail ouvert. */
 export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; piecesJointes: string[] };

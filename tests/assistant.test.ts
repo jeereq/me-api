@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { corpsRequete, raisonne } from '../src/services/AssistantService.js';
+import { corpsRequete, enJson, prompt, raisonne } from '../src/services/AssistantService.js';
 
 describe('assistant : requête OpenAI', () => {
   it('reconnaît les modèles qui raisonnent', () => {
@@ -17,5 +17,28 @@ describe('assistant : requête OpenAI', () => {
     const c = corpsRequete('gpt-4o-mini', 'Bonjour');
     assert.equal('reasoning_effort' in c, false);
     assert.equal(c.max_completion_tokens, 900);
+  });
+});
+
+describe('assistant : copilote et analyse des mails', () => {
+  it('demande du JSON, avec plus de place, pour le copilote et les mails', () => {
+    for (const type of ['copilote', 'mails'] as const) assert.equal(enJson(type), true, type);
+    for (const type of ['plan', 'question', 'relance'] as const) assert.equal(enJson(type), false, type);
+    const c = corpsRequete('gpt-4o-mini', 'x', true);
+    assert.deepEqual(c.response_format, { type: 'json_object' });
+    assert.ok(c.max_completion_tokens >= 2000);
+    assert.equal('response_format' in corpsRequete('gpt-4o-mini', 'x'), false);
+  });
+  it('le copilote rend un plan et des propositions convertibles en tâches', () => {
+    const p = prompt({ type: 'copilote', heure: '14:05', donnees: '{"aujourdhui":"2026-10-27"}' });
+    assert.match(p, /"propositions"/);
+    assert.match(p, /"plan"/);
+    assert.match(p, /14:05/);
+  });
+  it('les mails sont analysés un par un, avec une réponse proposée', () => {
+    const p = prompt({ type: 'mails', donnees: '[{"id":"g:1","de":"Paul","sujet":"Devis"}]' });
+    assert.match(p, /"analyses"/);
+    assert.match(p, /"reponse"/);
+    assert.match(p, /g:1/);
   });
 });

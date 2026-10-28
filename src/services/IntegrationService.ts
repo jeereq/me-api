@@ -304,12 +304,15 @@ export const IntegrationService = {
     return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite }), i, false);
   },
 
-  /** Lit un mail en entier, sans le garder : seul l'état « lu » est noté dans les messages relus. */
-  async lireMail(userId: string, id: string, mailId: string) {
+  /**
+   * Lit un mail en entier, sans le garder : seul l'état « lu » est noté dans les messages relus.
+   * `garderNonLu` : lu pour l'analyse du copilote, il reste « non lu » chez le service et dans Me.
+   */
+  async lireMail(userId: string, id: string, mailId: string, garderNonLu = false) {
     const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'lireMail');
     const garde = this._mailGarde(i, mailId);
-    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite }), i, false);
-    if (garde?.nonLu) await this._majMail(i, mailId, { nonLu: false });
+    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite, garderNonLu }), i, false);
+    if (garde?.nonLu && !garderNonLu) await this._majMail(i, mailId, { nonLu: false });
     return { mail: { ...contenu, ...(garde?.boite ? { boite: garde.boite } : {}) } };
   },
 

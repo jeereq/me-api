@@ -34,7 +34,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance']),
+    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails']),
     ton: z.string().max(40).optional(),
     donnees: z.string().max(200_000).optional(),
     question: z.string().max(2000).optional(),
@@ -72,6 +72,8 @@ const rendezvous = {
 
 export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000) }) });
 export const lireMailSchema = z.object({ params: z.object({ id: z.string().min(1), mail: z.string().min(1).max(500) }) });
+/** `lu=0` : lire sans marquer comme lu (analyse des mails par le copilote). */
+export const lireMailQuerySchema = lireMailSchema.extend({ query: z.object({ lu: z.enum(['0', '1']).optional() }).passthrough() });
 const libelle = z.string().trim().min(1).max(100, 'Une étiquette tient en 100 caractères.');
 const boiteQuery = z.string().trim().email().max(320).optional();
 export const dossiersSchema = integrationParamsSchema.extend({ query: z.object({ boite: boiteQuery }).passthrough() });

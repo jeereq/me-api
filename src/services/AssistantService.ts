@@ -24,19 +24,42 @@ async function openai(path: string, init: RequestInit = {}) {
  * On leur demande une réflexion courte et on leur laisse de la marge.
  */
 export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/chat|o1-mini|o1-preview/.test(modele);
-export function corpsRequete(modele: string, contenu: string) {
+/** Les réponses du copilote et de l'analyse des mails sont du JSON que l'app range en cases à cocher : plus longues, et forcées en JSON. */
+export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails';
+export function corpsRequete(modele: string, contenu: string, json = false) {
   const r = raisonne(modele);
-  return { model: modele, max_completion_tokens: r ? 6000 : 900, ...(r ? { reasoning_effort: 'low' } : {}), messages: [{ role: 'user', content: contenu }] };
+  return {
+    model: modele,
+    max_completion_tokens: r ? (json ? 8000 : 6000) : json ? 2500 : 900,
+    ...(r ? { reasoning_effort: 'low' } : {}),
+    ...(json ? { response_format: { type: 'json_object' } } : {}),
+    messages: [{ role: 'user', content: contenu }],
+  };
 }
 
 // Modèles qui ne répondent pas à une conversation texte (audio, image, recherche…).
 const NON_CHAT = /audio|realtime|transcribe|tts|image|search|embedding|instruct|moderation/;
 
-function prompt(b: AssistantBody): string {
+export function prompt(b: AssistantBody): string {
   const donnees = String(b.donnees ?? '').slice(0, MAX_DONNEES);
   const ton = b.ton ?? 'neutre';
   if (b.type === 'plan') {
     return `Tu es « Me », le copilote personnel de l'utilisateur. Il est ${b.heure ?? ''}. À partir de ses données (JSON ci-dessous), propose un plan pour le reste de sa journée, réaliste, en français, ton ${ton} : d'abord les 3 priorités, puis un déroulé par créneaux à partir de maintenant (jamais avant ${b.heure ?? "l'heure actuelle"}) qui respecte les rendez-vous de l'agenda et place les relances dues, les tâches urgentes et les habitudes du jour ; les factures proches passent en premier. Ne cite que des éléments présents dans les données, et s'il reste du temps, propose des tâches de la semaine. Si tout est vide, dis-le simplement et propose une journée légère. 12 lignes au maximum, une idée par ligne, phrases courtes, sans markdown ni émojis.\n\nDonnées :\n${donnees}`;
+  }
+  if (b.type === 'copilote') {
+    return `Tu es « Me », le copilote personnel de l'utilisateur. Il est ${b.heure ?? ''}. À partir de ses données (JSON ci-dessous), prépare le reste de sa journée, réaliste, en français, ton ${ton}. Réponds uniquement par un objet JSON de la forme {"plan": "…", "propositions": [{"titre": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null", "heure": "HH:MM ou null", "raison": "…"}]}.
+« plan » : le déroulé lu à voix haute, d'abord les 3 priorités puis des créneaux à partir de maintenant (jamais avant ${b.heure ?? "l'heure actuelle"}), qui respecte les rendez-vous de l'agenda et place les relances dues, les tâches urgentes et les habitudes du jour ; les factures proches passent en premier. 12 lignes au maximum séparées par des retours à la ligne, phrases courtes, sans markdown ni émojis.
+« propositions » : de 3 à 8 actions concrètes que l'utilisateur pourra ajouter à ses tâches d'un geste, chacune commençant par un verbe (« Appeler Paul pour le devis », « Payer la facture d'électricité »). Reprends ce que le plan demande de faire, sans les rendez-vous de l'agenda ni les habitudes. Une tâche déjà présente dans les données garde exactement son titre. « echeance » vaut la date « aujourdhui » des données sauf raison claire ; « heure » est le créneau du plan ; « raison » tient en une courte phrase. Ne cite que des éléments présents dans les données ; si tout est vide, propose une journée légère et 3 propositions simples.
+
+Données :
+${donnees}`;
+  }
+  if (b.type === 'mails') {
+    return `Tu es « Me », le copilote de l'utilisateur. Analyse ses mails (JSON ci-dessous : id, de, sujet, boite perso ou pro, texte) et réponds uniquement par un objet JSON de la forme {"analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}, une entrée par mail, avec le même id.
+« resume » : ce que veut l'expéditeur, en une phrase. « action » : « repondre » si le mail attend une réponse, « tache » s'il demande surtout un travail, « rien » pour une lettre d'information, une publicité ou une notification automatique. « reponse » : une réponse prête à envoyer, en français, ${ton === 'neutre' ? '' : `ton ${ton}, `}vouvoiement pour une boîte pro et ton amical pour une boîte perso, 3 à 6 phrases, qui répond vraiment à la demande sans inventer de fait, de date ni de prix (propose plutôt d'en convenir) ; sans objet, sans markdown, terminée par « [Ton prénom] » ; chaîne vide quand l'action est « rien ». « tache » : le travail à faire, commençant par un verbe, ou chaîne vide.
+
+Mails :
+${donnees}`;
   }
   if (b.type === 'relance') {
     const style = b.boite === 'pro' ? 'professionnel, vouvoiement' : 'personnel, ton amical';
@@ -81,7 +104,7 @@ export const AssistantService = {
     let modele = candidats[0];
     for (const [i, m] of candidats.entries()) {
       modele = m;
-      const res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, prompt(body))) });
+      const res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, prompt(body), enJson(body.type))) });
       data = (await res.json().catch(() => ({}))) as Reponse;
       if (res.ok) break;
       console.error('OpenAI', res.status, m, data?.error?.message);
