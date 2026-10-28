@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 
 import { assistantLimiter, estAnalyseMails } from '../src/middlewares/rateLimits.js';
 
@@ -12,7 +12,7 @@ describe("assistant : limites de demandes à l'IA", () => {
   before(async () => {
     const app = express();
     app.use(express.json());
-    app.post('/', assistantLimiter, (_req, res) => {
+    app.post('/', assistantLimiter, (_req: Request, res: Response) => {
       res.json({ ok: true });
     });
     const serveur = app.listen(0);
