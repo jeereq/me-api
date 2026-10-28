@@ -15,4 +15,12 @@ export const EspaceController = {
     }
     res.json(r);
   },
+  patch: async (req: Request, res: Response) => {
+    const r = await EspaceService.patch(req.user!.id, req.body.operations, req.body.baseRevision);
+    if ('conflit' in r) {
+      res.status(409).json({ error: 'Ton espace a été modifié depuis un autre appareil.', code: 'CONFLIT', espace: r.espace });
+      return;
+    }
+    res.json(r);
+  },
 };

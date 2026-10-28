@@ -3,7 +3,8 @@ import { prisma } from '../utils/prisma.js';
 import { aDesAffectations, nouvellesAffectations } from './equipes/affectations.js';
 import { assertPeutEcrire } from './equipes/droits.js';
 import { EquipeService } from './EquipeService.js';
-import { ecrireEspace, lireEspace, type ResultatEcriture, type TableEspace } from './espaces/document.js';
+import type { Operation } from '../commun/patch.js';
+import { ecrireDifferences, ecrireEspace, lireEspace, type ResultatEcriture, type TableEspace } from './espaces/document.js';
 import { NotificationService } from './NotificationService.js';
 
 /** L'espace partagé d'une équipe, rangé par `equipeId`. Mêmes révisions et mêmes conflits que l'espace privé. */
@@ -50,5 +51,13 @@ export const EspaceEquipeService = {
     const r = await ecrireEspace(table, equipeId, data, baseRevision);
     if (!('conflit' in r)) await prevenirAffectes(equipeId, userId, avant, data, r.revision);
     return r;
+  },
+
+  /** Écrire seulement ce qui a changé (voir `commun/patch.ts`) : mêmes droits, mêmes conflits et mêmes avis que `put`. */
+  async patch(equipeId: string, userId: string, operations: Operation[], baseRevision: number): Promise<ResultatEcriture> {
+    assertPeutEcrire(await EquipeService.monRole(equipeId, userId));
+    const { resultat, avant, apres } = await ecrireDifferences(table, equipeId, operations, baseRevision);
+    if (!('conflit' in resultat) && apres && aDesAffectations(apres)) await prevenirAffectes(equipeId, userId, avant, apres, resultat.revision);
+    return resultat;
   },
 };

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { rappelsDuJour, type EspaceRappels } from '../src/services/rappels/calcul.js';
-import { alertesObjectifs, datesVersements, suiviRappel, type ObjectifRappel } from '../src/services/rappels/objectifs.js';
+import { rappelsDuJour, type EspaceRappels } from '../src/commun/calcul.js';
+import { alertesObjectifs, datesVersements, suiviRappel, type ObjectifRappel } from '../src/commun/objectifs.js';
 
 // Le 26 octobre 2026 est un lundi.
 const JOUR = '2026-10-26';

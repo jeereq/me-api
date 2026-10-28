@@ -6,7 +6,7 @@
  * s'il faut un message du soir qui regroupe les habitudes, et un éventuel bilan de la semaine.
  * Une règle absente de la configuration prend la valeur d'origine, donc les anciennes configurations continuent de marcher.
  *
- * Ce fichier est copié à l'identique dans l'app (me-mobile/src/lib/modes.ts) : à garder synchronisés.
+ * Code commun (voir src/commun/README.md) : l'app en reçoit une copie exacte, vérifiée par sa CI.
  */
 export type Mode = 'passif' | 'normal' | 'agressif' | 'coach' | 'hebdo';
 

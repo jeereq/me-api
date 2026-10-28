@@ -1,6 +1,7 @@
 import { prisma } from '../utils/prisma.js';
 
-import { ecrireEspace, lireEspace, type ResultatEcriture, type TableEspace } from './espaces/document.js';
+import type { Operation } from '../commun/patch.js';
+import { ecrireDifferences, ecrireEspace, lireEspace, type ResultatEcriture, type TableEspace } from './espaces/document.js';
 
 export type ResultatPut = ResultatEcriture;
 
@@ -23,4 +24,7 @@ export const EspaceService = {
    * (sinon `conflit`) ; sans elle (anciennes versions de l'app), la dernière écriture gagne. Voir `espaces/document.ts`.
    */
   put: (userId: string, data: Record<string, unknown>, baseRevision?: number): Promise<ResultatPut> => ecrireEspace(table, userId, data, baseRevision),
+
+  /** Enregistre seulement ce qui a changé depuis `baseRevision` (voir `commun/patch.ts`), avec les mêmes conflits que `put`. */
+  patch: async (userId: string, operations: Operation[], baseRevision: number): Promise<ResultatPut> => (await ecrireDifferences(table, userId, operations, baseRevision)).resultat,
 };

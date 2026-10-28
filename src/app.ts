@@ -31,6 +31,9 @@ app.set('trust proxy', 1);
 app.use(helmet());
 // L'app mobile n'envoie pas d'en-tête Origin ; seules les origines web listées sont acceptées.
 app.use(cors({ origin: (process.env.CORS_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean), methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
+// L'envoi complet d'un espace (première synchro, ancienne version de l'app) peut dépasser 2 Mo ; les synchros suivantes
+// n'envoient que les différences (PATCH), bien plus légères.
+app.use(['/api/espace', '/api/equipes/:id/espace'], express.json({ limit: '10mb' }));
 app.use(express.json({ limit: '2mb' }));
 
 // Vérifie aussi la base : ouvrir /api/health dans un navigateur dit si elle répond et si les tables existent.

@@ -1,5 +1,8 @@
 import type { Prisma } from '@prisma/client';
 
+import { appliquer, ErreurDifferences, type Operation } from '../../commun/patch.js';
+import { HttpError } from '../../utils/http.js';
+
 /**
  * Le contrat d'écriture d'un espace, le même pour l'espace privé d'un compte et pour l'espace partagé d'une équipe.
  *
@@ -58,4 +61,38 @@ export async function ecrireEspace(table: TableEspace, id: string, data: Record<
     if (!gagnant) throw err;
     return { conflit: true, espace: lu(gagnant) };
   }
+}
+
+/** Taille maximale d'un espace une fois les différences appliquées (le JSON enregistré en base). */
+export const TAILLE_MAX_ESPACE = 20 * 1024 * 1024;
+
+/**
+ * Synchro par différences : l'appareil envoie seulement ce qui a changé depuis `baseRevision` (voir `commun/patch.ts`).
+ * Même contrat de version que `ecrireEspace` : si quelqu'un a écrit entre-temps, `conflit` avec la version du serveur.
+ * Un espace qui n'existe pas encore se crée par un envoi complet (`PUT`) : ici, c'est un conflit sans espace (404).
+ * `avant` et `apres` donnent aussi le document avant et après l'écriture, pour qui doit comparer (avis d'affectation des équipes).
+ */
+export async function ecrireDifferences(table: TableEspace, id: string, operations: Operation[], baseRevision: number): Promise<{ resultat: ResultatEcriture; avant?: Prisma.JsonValue; apres?: Record<string, unknown> }> {
+  const actuel = await table.lire(id);
+  if (!actuel) throw new HttpError(404, 'Espace pas encore enregistré : envoie-le en entier.', 'ESPACE_ABSENT');
+  if (actuel.revision !== baseRevision) return { resultat: { conflit: true, espace: lu(actuel) } };
+
+  let apres: unknown;
+  try {
+    apres = appliquer(actuel.data, operations);
+  } catch (err) {
+    // L'app renvoie alors l'espace en entier : rien n'est perdu.
+    if (err instanceof ErreurDifferences) throw new HttpError(422, err.message, 'DIFFERENCES_INVALIDES');
+    throw err;
+  }
+  if (typeof apres !== 'object' || apres === null || Array.isArray(apres)) throw new HttpError(422, "L'espace doit rester un objet.", 'DIFFERENCES_INVALIDES');
+  const majLe = new Date();
+  const json = { ...(apres as Record<string, unknown>), majLe: majLe.toISOString() } as Prisma.InputJsonObject;
+  if (Buffer.byteLength(JSON.stringify(json)) > TAILLE_MAX_ESPACE) throw new HttpError(413, 'Espace trop volumineux.', 'ESPACE_TROP_GROS');
+
+  if ((await table.ecrireSi(id, baseRevision, json, majLe)) === 1) return { resultat: { majLe: majLe.toISOString(), revision: baseRevision + 1 }, avant: actuel.data, apres: json as Record<string, unknown> };
+  // Un autre appareil a écrit entre notre lecture et notre écriture.
+  const gagnant = await table.lire(id);
+  if (!gagnant) throw new HttpError(404, 'Espace introuvable.', 'ESPACE_ABSENT');
+  return { resultat: { conflit: true, espace: lu(gagnant) } };
 }
