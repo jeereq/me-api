@@ -212,6 +212,9 @@ model InvitationEquipe {
   parNom    String     @default("")
   expireLe  DateTime
   utiliseLe DateTime?
+  /// Dernière ouverture du lien (aperçu dans l'app) et adresse du compte qui l'a ouvert : montre au propriétaire qu'une personne a cliqué, et avec quel compte.
+  ouverteLe  DateTime?
+  ouvertePar String?
   createdAt DateTime   @default(now())
 
   @@index([equipeId])
