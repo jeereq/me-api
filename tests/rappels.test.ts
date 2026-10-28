@@ -94,6 +94,18 @@ describe('rappelsDuJour : modes des tâches et relances', () => {
     const e = espace({ relances: [relance({ mode: 'agressif', statut: 'repondu', reponduLe: LUNDI })] });
     assert.equal(rappelsDuJour(e, cfg, LUNDI).filter((x) => x.mode === 'agressif').length, 0);
   });
+
+  it('une relance déjà relancée revient à la date de la relance suivante', () => {
+    const e = espace({ relances: [relance({ statut: 'relance', derniereRelance: addDays(LUNDI, -3) })] });
+    assert.deepEqual(titres(rappelsDuJour(e, cfg, LUNDI).filter((x) => x.mode === 'normal')), ['Relancer à nouveau Marie']);
+    assert.deepEqual(titres(missionDuJour(e, LUNDI)), ['Relancer à nouveau Marie']);
+  });
+
+  it('une ancienne relance « Relancé » sans date de relance ne revient pas en retard', () => {
+    const e = espace({ relances: [relance({ statut: 'relance', mode: 'agressif', date: addDays(LUNDI, -20) })] });
+    assert.equal(rappelsDuJour(e, cfg, LUNDI).filter((x) => x.mode === 'agressif').length, 0);
+    assert.equal(missionDuJour(e, LUNDI).length, 0);
+  });
 });
 
 describe('rappelsDuJour : habitudes et bilan', () => {
