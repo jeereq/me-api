@@ -12,6 +12,10 @@ const RATTRAPAGE_MIN = 45;
 const COULEURS: Record<string, string> = { agressif: '#FF6474', normal: '#62AEFF', coach: '#3EF0B0', hebdo: '#FFCB5C', briefing: '#38D9FF', passif: '#7F98A6' };
 
 type Prefs = { app?: boolean; email?: boolean };
+/** Ce que dit l'avis selon ce qui est confié, au singulier, au pluriel, et où il mène. */
+const PHRASE_AFFECTATION: Record<Affectation['genre'], string> = { tache: "t'a confié une tâche", relance: "t'a confié une relance", rdv: "t'a affecté un rendez-vous" };
+const PLURIEL_AFFECTATION: Record<Affectation['genre'], string> = { tache: 'tâches', relance: 'relances', rdv: 'rendez-vous' };
+const URL_AFFECTATION: Record<Affectation['genre'], string> = { tache: '/taches', relance: '/relances', rdv: '/calendrier' };
 const echapper = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 const PIED_RAPPELS = 'Tu reçois cet email parce que les rappels par email sont activés dans Me (Mon compte).';
@@ -128,25 +132,28 @@ export const NotificationService = {
       const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
       const qui = acteur.nom || "Quelqu'un";
       const avis: Rappel[] = liste.map((a) => ({
-        cle: `affectation|${a.tacheId}|${userId}|${revision}`,
-        titre: `${qui} t'a confié une tâche`,
-        corps: `« ${a.titre} »${a.echeance ? ` · pour le ${dateFr(a.echeance)}` : ''} · équipe ${equipe.nom}`,
+        // La clé d'une tâche garde sa forme d'origine : un avis déjà envoyé n'est pas renvoyé après une mise à jour.
+        cle: `affectation|${a.genre === 'tache' ? '' : `${a.genre}|`}${a.id}|${userId}|${revision}`,
+        titre: `${qui} ${PHRASE_AFFECTATION[a.genre]}`,
+        corps: `« ${a.titre} »${a.echeance ? ` · ${a.genre === 'tache' ? 'pour le' : 'le'} ${dateFr(a.echeance)}` : ''} · équipe ${equipe.nom}`,
         mode: 'normal',
         quand,
       }));
-      // Une tâche déjà signalée (même clé) n'est pas renvoyée.
+      // Un élément déjà signalé (même clé) n'est pas renvoyé.
       const { count } = await prisma.notification.createMany({
         data: avis.map((r) => ({ userId, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: prefs.app === false })),
         skipDuplicates: true,
       });
       if (!count) continue;
+      const genres = new Set(liste.map((a) => a.genre));
+      const resume = `${qui} t'a confié ${avis.length} ${genres.size === 1 ? PLURIEL_AFFECTATION[liste[0].genre] : 'éléments'}`;
       if (prefs.app !== false) {
-        const m = avis.length === 1 ? { titre: avis[0].titre, corps: avis[0].corps } : { titre: `${qui} t'a confié ${avis.length} tâches`, corps: avis.map((r) => r.corps.split(' · ')[0]).join(' · ') };
-        await PushService.envoyer(userId, { ...m, mode: 'normal', url: '/taches', tag: avis[0].cle });
+        const m = avis.length === 1 ? { titre: avis[0].titre, corps: avis[0].corps } : { titre: resume, corps: avis.map((r) => r.corps.split(' · ')[0]).join(' · ') };
+        await PushService.envoyer(userId, { ...m, mode: 'normal', url: genres.size === 1 ? URL_AFFECTATION[liste[0].genre] : '/', tag: avis[0].cle });
       }
       if (mailActif && prefs.email !== false) {
-        const sujet = avis.length === 1 ? avis[0].titre : `${qui} t'a confié ${avis.length} tâches`;
-        const m = email(avis, u.nom, `Tu reçois cet email parce qu'une tâche t'a été confiée dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
+        const sujet = avis.length === 1 ? avis[0].titre : resume;
+        const m = email(avis, u.nom, `Tu reçois cet email parce que quelque chose t'a été confié dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
         if (await EmailService.envoyer(u.email, sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId, cle: { in: avis.map((r) => r.cle) } }, data: { parEmail: true } });
       }
     }
