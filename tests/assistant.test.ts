@@ -59,6 +59,9 @@ describe('assistant : compte rendu', () => {
     const p = prompt({ type: 'compte_rendu', donnees: '{"notes":"Devis envoyé","ouverts":[{"ref":"t:1"}]}' });
     for (const k of ['"resume"', '"decisions"', '"actions"', '"clotures"', '"ref"', 't:1']) assert.ok(p.includes(k), k);
     assert.equal(enJson('compte_rendu'), true);
+  });
+});
+
 describe('prompt de relance', () => {
   it('reste simple pour une première relance', () => {
     const p = prompt({ type: 'relance', contact: 'Marie', sujet: 'Devis', boite: 'pro' });
