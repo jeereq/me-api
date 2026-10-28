@@ -81,7 +81,7 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
   const restants = mission.filter((m) => !m.fait);
   const { serie, pointsDuJour, jokers } = serieDuJour(e, jour);
   const fin = alertesFinances(e.finances, jour, soir);
-  const budget = fin.budgetDuJour ? ` Budget du jour : ${fin.budgetDuJour}.` : '';
+  const budget = fin.resteBudgets ? ` ${fin.resteBudgets}.` : '';
 
   // Matin : la mission du jour, avec les points à gagner et la série à tenir.
   if (restants.length) {
