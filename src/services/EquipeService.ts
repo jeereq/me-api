@@ -7,6 +7,7 @@ import { prisma } from '../utils/prisma.js';
 
 import { assertPeutGerer, assertResteUnProprietaire } from './equipes/droits.js';
 import { EmailsEquipe } from './comptes/emails.js';
+import { StockJustificatifs } from './justificatifs/stock.js';
 
 /** Une invitation reste valable une semaine : assez pour une boîte mail relevée de temps en temps. */
 const JOURS_INVITATION = 7;
@@ -64,6 +65,7 @@ export const EquipeService = {
 
   async supprimer(equipeId: string, userId: string) {
     assertPeutGerer(await this.monRole(equipeId, userId));
+    await StockJustificatifs.purgerEquipe(equipeId);
     // Les membres, les invitations et l'espace partent avec elle (cascade).
     await prisma.equipe.delete({ where: { id: equipeId } });
   },
