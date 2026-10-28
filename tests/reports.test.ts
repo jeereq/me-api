@@ -19,7 +19,6 @@ describe('restes reportés', () => {
   it('répartit un reste reporté sur une semaine', () => {
     const f = { budgets: [parJour], depenses, reports: [{ id: 'r2', montant: 7, de, vers: { budget: 'g', periode: 'semaine' as const, debut: '2026-11-02' } }] };
     assert.equal(prevision(f, 'jour', '2026-11-03')?.plafond, 21);
-    assert.equal(prevision(f, 'semaine', '2026-11-03')?.plafond, 147);
   });
   it('retire des budgets un reste versé sur un objectif, tant que le versement existe', () => {
     const report = { id: 'r3', montant: 8, de, vers: { objectif: 'o' } };
@@ -29,10 +28,17 @@ describe('restes reportés', () => {
     const sans = { ...avec, objectifs: [objectif([])] };
     assert.equal(prevision(sans, 'jour', mardi)?.plafond, 20);
   });
-  it('ne répartit plus sur les jours suivants le reste d’un jour versé ailleurs (budget au mois)', () => {
+  it('retire d’un budget au mois le reste de son mois versé sur un objectif', () => {
     const mois = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
-    const report = { id: 'r4', montant: 10, de: { budget: 'c', periode: 'jour' as const, debut: '2026-11-01' }, vers: { objectif: 'o' } };
+    const report = { id: 'r4', montant: 10, de: { budget: 'c', periode: 'mois' as const, debut: '2026-11-01' }, vers: { objectif: 'o' } };
     const f = { budgets: [mois], depenses: [], reports: [report], objectifs: [{ id: 'o', nom: 'Voyage', emoji: '✈️', genre: 'epargne' as const, cible: 500, debut: '2026-10-01', echeance: '2027-06-01', versements: [{ id: 'rep:r4', date: '2026-11-02', montant: 10, report: 'r4' }] }] };
-    assert.equal(prevision(f, 'jour', '2026-11-02')?.plafond, 10);
+    assert.equal(prevision(f, 'mois', '2026-11-02')?.plafond, 290);
+  });
+  it('monte le mois d’arrivée du reste reporté', () => {
+    const mois = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
+    const report = { id: 'r5', montant: 40, de: { budget: 'c', periode: 'mois' as const, debut: '2026-10-01' }, vers: { budget: 'c', periode: 'mois' as const, debut: '2026-11-01' } };
+    const f = { budgets: [mois], depenses: [{ id: 'a', montant: 260, budget: 'c', date: '2026-10-10' }], reports: [report] };
+    assert.equal(prevision(f, 'mois', '2026-10-20')?.reste, 0);
+    assert.equal(prevision(f, 'mois', '2026-11-02')?.plafond, 340);
   });
 });

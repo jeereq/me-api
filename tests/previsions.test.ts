@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { prevision } from '../src/commun/previsions.js';
+import { alertesFinances, prevision, resteDesBudgets } from '../src/commun/previsions.js';
 
 const budgets = [{ id: 'b', nom: 'Total', emoji: '💰', montant: 100, periode: 'jour' as const, global: true }];
 
@@ -43,18 +43,17 @@ describe('budgets jusqu’à une date', () => {
   const jour = '2026-11-10';
   it('ne compte plus un budget après sa date de fin', () => {
     const b = [{ id: 'v', nom: 'Vacances', emoji: '🏖️', montant: 300, periode: 'mois' as const, fin: '2026-10-31' }];
-    const p = prevision({ budgets: b, depenses: [{ id: 'a', montant: 50, budget: 'v', date: jour }] }, 'mois', jour);
-    assert.equal(p?.plafond, 0);
+    assert.equal(prevision({ budgets: b, depenses: [{ id: 'a', montant: 50, budget: 'v', date: jour }] }, 'mois', jour), null);
   });
-  it('répartit une enveloppe sur toute sa durée', () => {
-    // 600 du 1er au 30 novembre puis rien : le mois de novembre porte tout, la semaine en porte 7/30.
+  it('suit une enveloppe sur toute sa durée, sans la répartir', () => {
     const b = [{ id: 'e', nom: 'Travaux', emoji: '🔨', montant: 600, periode: 'mois' as const, debut: '2026-11-01', fin: '2026-11-30', enveloppe: true }];
-    assert.equal(prevision({ budgets: b, depenses: [] }, 'mois', jour)?.plafond, 600);
-    assert.equal(prevision({ budgets: b, depenses: [] }, 'semaine', jour)?.plafond, 140);
+    const p = prevision({ budgets: b, depenses: [{ id: 'a', montant: 150, budget: 'e', date: '2026-11-03' }] }, 'mois', jour);
+    assert.equal(p?.plafond, 600);
+    assert.equal(p?.reste, 450);
   });
-  it('prorate un budget qui s’arrête en cours de mois', () => {
+  it('garde tout le montant d’un budget qui s’arrête en cours de mois', () => {
     const b = [{ id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const, fin: '2026-11-15' }];
-    assert.equal(prevision({ budgets: b, depenses: [] }, 'mois', jour)?.plafond, 150);
+    assert.equal(prevision({ budgets: b, depenses: [] }, 'mois', jour)?.plafond, 300);
   });
   it('ne range plus par catégorie dans un budget terminé', () => {
     const b = [
@@ -67,33 +66,53 @@ describe('budgets jusqu’à une date', () => {
 });
 
 // Mêmes cas que l'app (me-mobile/tests/budget-du-jour.test.ts) : les alertes annoncent le chiffre affiché à l'écran.
-describe('un seul budget du jour, comme dans l’app', () => {
+describe('seulement les dépenses notées, rien de supposé', () => {
   const courses = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
-  // Novembre : 30 jours. Le 11, il reste 20 jours, aujourd'hui compris.
   const f = { budgets: [courses], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 'b', montant: 20, budget: 'c', date: '2026-11-11' }] };
-  it('répartit ce qui reste du mois sur les jours restants, sans compter la dépense du jour', () => {
-    assert.equal(prevision(f, 'jour', '2026-11-11')?.plafond, 10);
+  it('suit un budget au mois sur son mois : montant moins dépenses', () => {
+    const p = prevision(f, 'mois', '2026-11-11');
+    assert.equal(p?.plafond, 300);
+    assert.equal(p?.depense, 120);
+    assert.equal(p?.reste, 180);
   });
-  it('propose pour demain ce qui reste une fois la dépense du jour retirée', () => {
-    // 300 − 120 = 180 sur les 19 jours du 12 au 30.
-    assert.equal(prevision(f, 'jour', '2026-11-11')?.parJour, 9.47);
+  it('ne tire pas de budget du jour d’un budget au mois', () => {
+    assert.equal(prevision(f, 'jour', '2026-11-11'), null);
+    assert.equal(prevision(f, 'semaine', '2026-11-11'), null);
+  });
+  it('ne prévient pas d’un dépassement « à ce rythme » tant que les dépenses tiennent', () => {
+    // 290 dépensés dès le 2 : l'ancien calcul projetait 4 350 sur le mois. Le budget n'est pas dépassé.
+    const g = { budgets: [courses], depenses: [{ id: 'a', montant: 290, budget: 'c', date: '2026-11-02' }] };
+    assert.equal(prevision(g, 'mois', '2026-11-02')?.etat, 'ok');
+    assert.equal(prevision(g, 'mois', '2026-11-02', 0.8)?.etat, 'risque');
+  });
+  it('un budget de 40 $ pour un besoin : 40 moins ce qui y est noté', () => {
+    const besoin = { id: 'n', nom: 'Cadeau', emoji: '🎁', montant: 40, periode: 'mois' as const, debut: '2026-11-01', fin: '2026-11-30', enveloppe: true };
+    const h = { budgets: [besoin], depenses: [{ id: 'a', montant: 15, budget: 'n', date: '2026-11-04' }, { id: 'b', montant: 99, budget: null, date: '2026-11-05' }] };
+    assert.equal(prevision(h, 'mois', '2026-11-20')?.reste, 25);
+    assert.equal(resteDesBudgets(h, '2026-11-20'), 25);
   });
   it('donne le montant fixé pour un budget par jour', () => {
     const g = { budgets: [{ id: 'g', nom: 'Budget du jour', emoji: '💰', montant: 25, periode: 'jour' as const, global: true }], depenses: [{ id: 'a', montant: 40, budget: null, date: '2026-11-10' }] };
     assert.equal(prevision(g, 'jour', '2026-11-11')?.plafond, 25);
+    assert.equal(prevision(g, 'jour', '2026-11-10')?.etat, 'depasse');
   });
   it('ne compte pas le hors budget sans budget global', () => {
-    const h = { budgets: [courses], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 'h', montant: 50, budget: null, date: '2026-11-06' }, { id: 'j', montant: 30, budget: null, date: '2026-11-11' }] };
-    // Les 50 hors budget ne réduisent pas le budget du jour, les 30 du jour ne comptent pas face à lui.
-    assert.equal(prevision(h, 'jour', '2026-11-11')?.plafond, 10);
-    assert.equal(prevision(h, 'jour', '2026-11-11')?.depense, 0);
+    const h = { budgets: [courses], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 'h', montant: 50, budget: null, date: '2026-11-06' }] };
     assert.equal(prevision(h, 'mois', '2026-11-11')?.depense, 100);
   });
-  it('calcule chaque budget sur ses propres dépenses et ses propres jours', () => {
-    // Sorties jusqu'au 20 : 100 × 20/30 = 66,67 sur le mois, 40 déjà dépensés, 26,67 sur les 10 jours du 11 au 20 = 2,67 ;
-    // plus 10 pour les courses.
-    const sorties = { id: 's', nom: 'Sorties', emoji: '🎉', montant: 100, periode: 'mois' as const, fin: '2026-11-20' };
-    const m = { budgets: [courses, sorties], depenses: [{ id: 'a', montant: 100, budget: 'c', date: '2026-11-05' }, { id: 's', montant: 40, budget: 's', date: '2026-11-03' }] };
-    assert.equal(prevision(m, 'jour', '2026-11-11')?.plafond, 12.67);
+});
+
+describe('alertes et briefing', () => {
+  const courses = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
+  it('annonce le matin le reste des budgets, pas un budget du jour', () => {
+    const f = { devise: '$', budgets: [courses], depenses: [{ id: 'a', montant: 120, budget: 'c', date: '2026-11-05' }] };
+    assert.equal(alertesFinances(f, '2026-11-11', '19:00').resteBudgets, 'Reste sur tes budgets : 180 $');
+  });
+  it('n’alerte qu’une fois le budget réellement dépassé', () => {
+    const f = { devise: '$', budgets: [courses], depenses: [{ id: 'a', montant: 310, budget: 'c', date: '2026-11-05' }] };
+    const [a] = alertesFinances(f, '2026-11-11', '19:00').alertes;
+    assert.equal(a.titre, 'Budget du mois dépassé');
+    assert.equal(a.corps, '310 $ dépensés pour 300 $ prévus.');
+    assert.equal(alertesFinances({ ...f, depenses: [{ id: 'a', montant: 200, budget: 'c', date: '2026-11-02' }] }, '2026-11-02', '19:00').alertes.length, 0);
   });
 });
