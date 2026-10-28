@@ -3,8 +3,8 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 
-import { delai, estDelai } from '../src/utils/delai.ts';
-import { ErreurExterne, json } from '../src/services/integrations/http.ts';
+import { delai, estDelai } from '../src/utils/delai.js';
+import { ErreurExterne, json } from '../src/services/integrations/http.js';
 
 // Un « service externe » qui accepte la connexion mais ne répond jamais, et un autre qui répond tout de suite.
 let muet: Server;

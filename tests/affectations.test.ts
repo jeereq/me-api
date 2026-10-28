@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { aDesAffectations, MAX_AVIS_PAR_ENREGISTREMENT, nouvellesAffectations } from '../src/services/equipes/affectations.ts';
+import { aDesAffectations, MAX_AVIS_PAR_ENREGISTREMENT, nouvellesAffectations } from '../src/services/equipes/affectations.js';
 
 const membres = new Set(['alice', 'bob', 'chloe']);
 const tache = (id: string, extra: Record<string, unknown> = {}) => ({ id, titre: `Tâche ${id}`, statut: 'en_attente', echeance: null, ...extra });
