@@ -1,3 +1,5 @@
+import { delai } from '../utils/delai.js';
+
 /** Envoi d'emails par SendGrid (API v3). Sans clé configurée, rien n'est envoyé. */
 export const EmailService = {
   configure: () => !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM),
@@ -7,6 +9,7 @@ export const EmailService = {
     try {
       const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
         method: 'POST',
+        signal: delai(),
         headers: { Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           personalizations: [{ to: [{ email: to }] }],

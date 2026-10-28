@@ -1,3 +1,4 @@
+import { delai, estDelai } from '../../utils/delai.js';
 import { HttpError } from '../../utils/http.js';
 import { diagnostiquer } from './erreurs.js';
 
@@ -14,9 +15,10 @@ export class ErreurExterne extends Error {
 export async function json<T>(service: string, url: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, init);
-  } catch {
-    throw new ErreurExterne(`${service} est injoignable.`);
+    // Le délai court aussi pendant la lecture de la réponse (`res.json()` plus bas).
+    res = await fetch(url, { signal: delai(), ...init });
+  } catch (e) {
+    throw new ErreurExterne(estDelai(e) ? `${service} met trop de temps à répondre.` : `${service} est injoignable.`);
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: unknown; ok?: boolean };
   if (!res.ok) {
