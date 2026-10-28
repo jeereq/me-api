@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { corpsRequete, enJson, prompt, raisonne } from '../src/services/AssistantService.js';
+import { consignesPrompt, corpsRequete, enJson, MAX_CONSIGNES, prompt, raisonne } from '../src/services/AssistantService.js';
 
 describe('assistant : requête OpenAI', () => {
   it('reconnaît les modèles qui raisonnent', () => {
@@ -72,5 +72,33 @@ describe('prompt de relance', () => {
     const p = prompt({ type: 'relance', contact: 'Marie', sujet: 'Devis', boite: 'pro', deja: 2, note: 'devis de 1 200 € envoyé le 3' });
     assert.match(p, /relance numéro 3/);
     assert.match(p, /devis de 1 200 € envoyé le 3/);
+  });
+});
+
+describe('consignes de l\'utilisateur pour l\'analyse', () => {
+  it('sont glissées avant les mails, pour un mail comme pour un lot', () => {
+    for (const type of ['mails', 'lot'] as const) {
+      const p = prompt({ type, donnees: '[{"id":"a"}]', consignes: 'Repère les factures impayées et le ton des relances' });
+      const i = p.indexOf('Consignes de l\'utilisateur');
+      assert.ok(i > 0, type);
+      assert.ok(p.includes('"Repère les factures impayées et le ton des relances"'), type);
+      assert.ok(i < p.indexOf('Mails :'), `${type} : avant les données`);
+      assert.match(p, /ne changent ni le format JSON/, type);
+    }
+  });
+  it('ne changent rien sans consignes', () => {
+    assert.equal(consignesPrompt(undefined), '');
+    assert.equal(consignesPrompt('   \n  '), '');
+    assert.doesNotMatch(prompt({ type: 'lot', donnees: '[]' }), /Consignes de l'utilisateur/);
+  });
+  it('sont nettoyées, limitées et citées : elles ne cassent pas le prompt', () => {
+    const c = consignesPrompt('Ligne 1\n\n\nLigne 2 "guillemets"');
+    assert.ok(c.includes('"Ligne 1 Ligne 2 \\"guillemets\\""'), c);
+    assert.ok(!c.slice(1, -1).includes('\n\n'));
+    const long = consignesPrompt('a'.repeat(5000));
+    assert.ok(long.length < MAX_CONSIGNES + 400);
+  });
+  it('ne s\'ajoutent pas aux autres prompts', () => {
+    for (const type of ['plan', 'copilote', 'compte_rendu'] as const) assert.doesNotMatch(prompt({ type, donnees: '{}', consignes: 'secret' }), /secret/, type);
   });
 });

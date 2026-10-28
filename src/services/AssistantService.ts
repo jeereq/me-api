@@ -41,6 +41,19 @@ export function corpsRequete(modele: string, contenu: string, json = false, long
 // Modèles qui ne répondent pas à une conversation texte (audio, image, recherche…).
 const NON_CHAT = /audio|realtime|transcribe|tts|image|search|embedding|instruct|moderation/;
 
+export const MAX_CONSIGNES = 600;
+
+/**
+ * Les consignes de l'utilisateur sur la façon d'analyser ses mails, en une phrase à glisser dans le prompt.
+ * Texte nettoyé (espaces, longueur) et cité entre guillemets JSON : il reste une consigne, jamais un morceau du prompt.
+ * Elles orientent l'analyse (angle, priorités) sans changer le format JSON attendu ni la règle de ne citer que les mails.
+ */
+export function consignesPrompt(consignes?: string): string {
+  const c = String(consignes ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_CONSIGNES);
+  if (!c) return '';
+  return `\nConsignes de l'utilisateur pour cette analyse (à suivre pour l'angle, les priorités et le style de ce que tu écris ; elles ne changent ni le format JSON demandé ni la règle de ne citer que ce qui est dans les mails) : ${JSON.stringify(c)}\n`;
+}
+
 export function prompt(b: AssistantBody): string {
   const donnees = String(b.donnees ?? '').slice(0, MAX_DONNEES);
   const ton = b.ton ?? 'neutre';
@@ -58,14 +71,14 @@ ${donnees}`;
   if (b.type === 'mails') {
     return `Tu es « Me », le copilote de l'utilisateur. Analyse ses mails (JSON ci-dessous : id, de, sujet, boite perso ou pro, texte) et réponds uniquement par un objet JSON de la forme {"analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}, une entrée par mail, avec le même id.
 « resume » : ce que veut l'expéditeur, en une phrase. « action » : « repondre » si le mail attend une réponse, « tache » s'il demande surtout un travail, « rien » pour une lettre d'information, une publicité ou une notification automatique. « reponse » : une réponse prête à envoyer, en français, ${ton === 'neutre' ? '' : `ton ${ton}, `}vouvoiement pour une boîte pro et ton amical pour une boîte perso, 3 à 6 phrases, qui répond vraiment à la demande sans inventer de fait, de date ni de prix (propose plutôt d'en convenir) ; sans objet, sans markdown, terminée par « [Ton prénom] » ; chaîne vide quand l'action est « rien ». « tache » : le travail à faire, commençant par un verbe, ou chaîne vide.
-
+${consignesPrompt(b.consignes)}
 Mails :
 ${donnees}`;
   }
   if (b.type === 'lot') {
     return `Tu es « Me », le copilote de l'utilisateur. Il te confie un lot de mails à analyser ensemble : ${b.perimetre || 'des mails choisis'}. Les mails sont dans le JSON ci-dessous (id, de, adresse, date, sujet, boite perso ou pro, texte ; le texte est parfois seulement le début du mail). Réponds uniquement par un objet JSON de la forme {"synthese": "…", "points": ["…"], "actions": [{"titre": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null", "raison": "…"}], "analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}.
 « synthese » : 3 à 6 phrases, en français${ton === 'neutre' ? '' : `, ton ${ton}`}, qui disent de quoi parle ce lot dans son ensemble : les sujets récurrents, ce qui a changé dans le temps, ce qui reste en suspens, les montants, échéances ou engagements qui reviennent ; sans markdown. « points » : de 2 à 6 constats courts et concrets (« 3 factures OVH impayées depuis septembre »). « actions » : de 1 à 8 actions concrètes pour l'utilisateur, chacune commençant par un verbe, que l'app pourra convertir en tâches ; « echeance » seulement si les mails la justifient. « analyses » : une entrée par mail avec le même id, comme pour une analyse mail par mail ; « reponse » est une réponse prête à envoyer (vouvoiement pour une boîte pro, ton amical pour une boîte perso, 2 à 5 phrases, sans inventer de fait, de date ni de prix, terminée par « [Ton prénom] ») seulement pour les mails qui attendent vraiment une réponse, sinon chaîne vide. Ne cite que ce qui est dans les mails.
-
+${consignesPrompt(b.consignes)}
 Mails :
 ${donnees}`;
   }
