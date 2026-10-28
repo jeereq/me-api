@@ -10,6 +10,7 @@ import { prisma } from '../utils/prisma.js';
 import { EmailsCompte, emailsActifs } from './comptes/emails.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
+import { StockJustificatifs } from './justificatifs/stock.js';
 
 type Compte = { id: string; email: string; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null } & ChampsAbonnement;
 
@@ -194,6 +195,7 @@ export const AuthService = {
     }
     // Les paiements restent pour la comptabilité, sans le numéro de téléphone (le lien au compte disparaît avec lui).
     await prisma.paiement.updateMany({ where: { userId }, data: { telephone: '' } });
+    await StockJustificatifs.purgerCompte(userId);
     await prisma.user.delete({ where: { id: userId } });
     return { ok: true };
   },

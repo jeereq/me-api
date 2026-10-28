@@ -9,7 +9,8 @@ Le backend de « Me », ton assistant personnel. Il sert l'app mobile [me-mobile
 - **assistant IA** : relais vers OpenAI, la clé API reste sur le serveur ;
 - **rappels** : calculés par le serveur selon le mode de chaque élément, visibles dans l'app et envoyés par email avec SendGrid ;
 - **comptes connectés** : Google Agenda et Gmail, Outlook et Microsoft To Do, Trello, Slack, synchronisés toutes les 15 minutes ;
-- **abonnements** : essai Pro de 14 jours, offre gratuite et Pro prépayé par mobile money avec FlexPaie.
+- **abonnements** : essai Pro de 14 jours, offre gratuite et Pro prépayé par mobile money avec FlexPaie ;
+- **justificatifs de dépenses** : photos de reçus et PDF de factures, stockés chez Cloudinary (la clé reste sur le serveur).
 
 Stack : Node 20+, Express, TypeScript, Prisma et PostgreSQL, JWT, zod, helmet, express-rate-limit.
 
@@ -110,6 +111,8 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/abonnement/paiement` | compte | `{ periode: "mensuel" \| "annuel", telephone, accepteCgv: true, accesImmediat: true }` → `{ paiement }` en attente de validation sur le téléphone |
 | GET | `/api/abonnement/paiements/:reference` | compte | Revérifie le paiement chez FlexPaie → `{ paiement, abonnement, paiements }` |
 | POST | `/api/abonnement/flexpaie/retour` | public | Retour de FlexPaie ; la commande est toujours revérifiée chez FlexPaie |
+| GET | `/api/justificatifs` | compte | `{ disponible, tailleMax }` : Cloudinary configuré, taille maximale d'un fichier |
+| POST | `/api/justificatifs` | compte (membre sauf lecteur pour `equipe`) | Formulaire `multipart/form-data` : `fichier` (JPEG, PNG, WebP, HEIC ou PDF, 10 Mo au plus), `equipe?` → **201** `{ justificatif: { id, url, apercu?, nom, sorte, taille, pages?, ajouteLe } }` à ranger dans la dépense ; 60 fichiers / heure |
 
 Les erreurs ont la forme `{ "error": "message lisible" }`.
 
@@ -246,6 +249,17 @@ src/utils/crypto.ts      chiffrement des jetons
 ## Prochaines étapes
 
 D'autres services (Notion, Asana, Todoist, iCloud), et, si les données grossissent, sortir de l'espace JSON unique les listes qui s'allongent (dépenses, relances, journal) vers des tables SQL.
+
+## Justificatifs de dépenses (Cloudinary)
+
+Une dépense peut porter des photos de reçus et des PDF de factures. L'app envoie le fichier à `POST /api/justificatifs`, me-api le dépose chez Cloudinary avec sa clé secrète et renvoie une fiche que l'app range dans la dépense (`justificatifs`), donc dans l'espace synchronisé.
+
+- **Configurer** : sur [cloudinary.com](https://cloudinary.com) (l'offre gratuite suffit), copie l'« API environment variable » du tableau de bord dans `CLOUDINARY_URL` (`cloudinary://<clé>:<secret>@<cloud>`), ou remplis `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` et `CLOUDINARY_API_SECRET`. Sans elles, `GET /api/justificatifs` répond `disponible: false` et l'app cache le bouton.
+- **PDF** : sur un compte gratuit, Cloudinary bloque l'ouverture des PDF tant que *Settings > Security > « Allow delivery of PDF and ZIP files »* n'est pas coché. Les vignettes (première page en JPEG) marchent sans.
+- **Rangement** : un dossier par compte (`me/justificatifs/<userId>`) et un par équipe (`me/justificatifs/equipe-<id>`) ; `CLOUDINARY_DOSSIER` change la racine.
+- **Ménage** : la table `Justificatif` garde chaque dépôt. Chaque nuit, un fichier déposé il y a plus de 7 jours qu'aucune dépense de son espace ne mentionne plus (retiré, dépense supprimée, ajout abandonné) est effacé de Cloudinary. Supprimer un compte efface ses justificatifs, supprimer une équipe ceux de son espace.
+- Les adresses des fichiers sont publiques mais impossibles à deviner (identifiant aléatoire), comme un lien de partage.
+- Le code est dans `src/services/justificatifs/` (`cloudinary.ts` : appels REST signés sans SDK ; `fichiers.ts` : types acceptés, vignettes ; `stock.ts` : ménage), testé dans `tests/justificatifs.test.ts`.
 
 ## Abonnements
 

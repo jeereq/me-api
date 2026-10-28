@@ -28,3 +28,13 @@ export const assistantLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Beaucoup de demandes à l'IA d'un coup, réessaie dans quelques minutes." },
 });
+
+/** Justificatifs : 60 fichiers / heure par compte, pour garder le stockage Cloudinary sous contrôle. */
+export const justificatifLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 60,
+  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? ''),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Beaucoup de justificatifs d’un coup, réessaie dans un moment.' },
+});

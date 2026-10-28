@@ -1,6 +1,8 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 
+import { StockJustificatifs } from './justificatifs/stock.js';
+
 const select = { id: true, email: true, nom: true, role: true, createdAt: true } as const;
 
 /** Garde au moins un admin : sans lui, plus personne ne pourrait toucher à la configuration. */
@@ -23,6 +25,7 @@ export const MembreService = {
     await assertPasDernierAdmin(id);
     // Les paiements restent pour la comptabilité, sans le numéro de téléphone.
     await prisma.paiement.updateMany({ where: { userId: id }, data: { telephone: '' } });
+    await StockJustificatifs.purgerCompte(id);
     await prisma.user.delete({ where: { id } });
   },
 };

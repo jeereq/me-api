@@ -12,8 +12,10 @@ import equipeRoutes from './routes/equipe.routes.js';
 import espaceRoutes from './routes/espace.routes.js';
 import membreRoutes from './routes/membre.routes.js';
 import { initRappelsCron } from './cron/rappels.js';
+import { initJustificatifsCron } from './cron/justificatifs.js';
 import { initSynchronisationCron } from './cron/synchronisation.js';
 import integrationRoutes from './routes/integration.routes.js';
+import justificatifRoutes from './routes/justificatif.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
 import { assurerAdmin } from './services/AdminSeed.js';
@@ -51,6 +53,7 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/abonnement', abonnementRoutes);
+app.use('/api/justificatifs', justificatifRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });
@@ -89,4 +92,5 @@ app.listen(port, () => {
   }
   initSynchronisationCron();
   initRappelsCron();
+  initJustificatifsCron();
 });

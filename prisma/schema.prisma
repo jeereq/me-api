@@ -252,3 +252,25 @@ model Paiement {
 
   @@index([userId, createdAt])
 }
+
+/// Un justificatif de dépense (photo de reçu, PDF de facture) déposé chez Cloudinary par me-api.
+/// La fiche affichée vit dans la dépense de l'espace ; cette ligne sert au ménage : un fichier qu'aucun espace
+/// ne mentionne plus est effacé de Cloudinary (voir src/services/justificatifs/stock.ts).
+/// Sans relation au compte : à sa suppression, ses fichiers sont effacés avant les lignes.
+model Justificatif {
+  /// Identifiant Cloudinary (public_id), repris dans la dépense.
+  publicId  String    @id
+  /// Type de ressource Cloudinary : image (photos et PDF) ou raw.
+  genre     String    @default("image")
+  /// Qui l'a déposé.
+  userId    String
+  /// Espace d'équipe où vit la dépense ; absent = espace privé de `userId`.
+  equipeId  String?
+  /// Dernière fois que le ménage l'a trouvé encore utilisé.
+  verifieLe DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([equipeId])
+  @@index([createdAt])
+}
