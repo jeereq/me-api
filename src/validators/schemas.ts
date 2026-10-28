@@ -38,6 +38,8 @@ export const assistantSchema = z.object({
     /** Pour « lot » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
     perimetre: z.string().max(300).optional(),
     ton: z.string().max(40).optional(),
+    /** Pour « mails » et « lot » : les consignes de l'utilisateur sur la façon d'analyser (angle, priorités, ce qu'il cherche). */
+    consignes: z.string().max(1000).optional(),
     donnees: z.string().max(200_000).optional(),
     question: z.string().max(2000).optional(),
     heure: z.string().max(20).optional(),
