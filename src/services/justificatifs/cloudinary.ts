@@ -1,5 +1,7 @@
 import { createHash } from 'crypto';
 
+import { DELAI_FICHIER_MS, delai, estDelai } from '../../utils/delai.js';
+
 /**
  * Stockage des justificatifs chez Cloudinary, sans SDK : deux appels REST signés (dépôt, suppression).
  * La clé secrète reste sur le serveur ; l'app n'envoie que le fichier à me-api.
@@ -45,7 +47,14 @@ async function appeler(c: ConfigCloudinary, chemin: string, champs: Record<strin
   form.append('api_key', c.cle);
   form.append('signature', signer(signes, c.secret));
   if (fichier) form.append('file', fichier.contenu, fichier.nom);
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(c.cloud)}/${chemin}`, { method: 'POST', body: form });
+  // Le signal couvre l'envoi du fichier et la lecture de la réponse ; un service qui ne répond plus ne garde pas la requête ouverte.
+  const signal = delai(DELAI_FICHIER_MS);
+  let res: Response;
+  try {
+    res = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(c.cloud)}/${chemin}`, { method: 'POST', body: form, signal });
+  } catch (e) {
+    throw new Error(estDelai(e) ? 'Cloudinary met trop de temps à répondre.' : 'Cloudinary est injoignable.');
+  }
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string } };
   if (!res.ok) throw new Error(`Cloudinary ${res.status} : ${data.error?.message ?? 'réponse illisible'}`);
   return data;

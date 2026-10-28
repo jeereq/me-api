@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 
+import { delai } from '../../utils/delai.js';
 import { HttpError } from '../../utils/http.js';
 import { bearer, form, json } from '../integrations/http.js';
 import { retourAutorise } from '../IntegrationService.js';
@@ -51,6 +52,6 @@ export const ConnexionGoogle = {
 
   /** Révoque l'accès d'un compte Google connecté (Agenda/Gmail) à la suppression du compte me. */
   async revoquer(jeton: string) {
-    await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(jeton)}`, { method: 'POST' }).catch(() => {});
+    await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(jeton)}`, { method: 'POST', signal: delai() }).catch(() => {});
   },
 };

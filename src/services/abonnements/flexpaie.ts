@@ -9,6 +9,8 @@
  * par défaut celle de production). À vérifier avec la documentation FlexPaie fournie au marchand.
  */
 
+import { delai, estDelai } from '../../utils/delai.js';
+
 export const flexpaieConfigure = (env: Record<string, string | undefined> = process.env) => !!(env.FLEXPAIE_TOKEN && env.FLEXPAIE_MARCHAND);
 
 const base = () => (process.env.FLEXPAIE_URL || 'https://backend.flexpay.cd/api/rest/v1').trim().replace(/\/+$/, '');
@@ -46,9 +48,10 @@ async function appel<T>(chemin: string, corps?: unknown): Promise<T> {
       method: corps ? 'POST' : 'GET',
       headers: { Authorization: `Bearer ${process.env.FLEXPAIE_TOKEN}`, Accept: 'application/json', ...(corps ? { 'Content-Type': 'application/json' } : {}) },
       body: corps ? JSON.stringify(corps) : undefined,
+      signal: delai(),
     });
-  } catch {
-    throw new ErreurFlexpaie('FlexPaie injoignable');
+  } catch (e) {
+    throw new ErreurFlexpaie(estDelai(e) ? 'FlexPaie met trop de temps à répondre' : 'FlexPaie injoignable');
   }
   const data = (await res.json().catch(() => ({}))) as T & { message?: string };
   if (!res.ok) throw new ErreurFlexpaie(data.message || `FlexPaie a répondu ${res.status}`);
