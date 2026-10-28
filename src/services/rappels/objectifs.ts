@@ -14,7 +14,7 @@ export type ObjectifRappel = {
   depart?: number;
   debut: string;
   echeance: string;
-  versements?: { id: string; date: string; montant: number }[];
+  versements?: { id: string; date: string; montant: number; /** Reste de budget versé ici (voir `Report` dans previsions.ts). */ report?: string }[];
   plan?: { cadence?: 'semaine' | 'mois'; versement?: number };
   archive?: boolean;
 };
