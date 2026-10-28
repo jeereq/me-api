@@ -105,7 +105,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/notifications/push` | compte | Abonne ce navigateur aux notifications push |
 | DELETE | `/api/notifications/push` | compte | Désabonne ce navigateur |
 | POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
-| POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance", … }` → `{ text }` |
+| POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance" \| "copilote" \| "mails" \| "lot" \| "compte_rendu", … }` → `{ text }` |
 | GET | `/api/abonnement/offres` | public | Prix, durée de l'essai, ce que Pro débloque, `paiement` : FlexPaie configuré |
 | GET | `/api/abonnement` | compte | `{ abonnement, paiements }` : offre en cours et 10 derniers paiements |
 | POST | `/api/abonnement/paiement` | compte | `{ periode: "mensuel" \| "annuel", telephone, accepteCgv: true, accesImmediat: true }` → `{ paiement }` en attente de validation sur le téléphone |
