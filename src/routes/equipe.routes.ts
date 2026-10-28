@@ -13,6 +13,7 @@ import {
   inviterEquipeSchema,
   jetonInvitationSchema,
   patchEquipeSchema,
+  patchEspaceEquipeSchema,
   putEspaceEquipeSchema,
   roleMembreSchema,
 } from '../validators/schemas.js';
@@ -39,5 +40,6 @@ router.delete('/:id/membres/:membreId', validateRequest(equipeMembreParamsSchema
 
 router.get('/:id/espace', validateRequest(equipeParamsSchema), asyncHandler(EquipeController.getEspace));
 router.put('/:id/espace', validateRequest(putEspaceEquipeSchema), asyncHandler(EquipeController.putEspace));
+router.patch('/:id/espace', validateRequest(patchEspaceEquipeSchema), asyncHandler(EquipeController.patchEspace));
 
 export default router;

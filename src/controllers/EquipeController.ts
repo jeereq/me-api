@@ -64,4 +64,13 @@ export const EquipeController = {
     }
     res.json(r);
   },
+
+  patchEspace: async (req: Request, res: Response) => {
+    const r = await EspaceEquipeService.patch(req.params.id, req.user!.id, req.body.operations, req.body.baseRevision);
+    if ('conflit' in r) {
+      res.status(409).json({ error: "L'espace de l'équipe a été modifié entre-temps.", code: 'CONFLIT', espace: r.espace });
+      return;
+    }
+    res.json(r);
+  },
 };

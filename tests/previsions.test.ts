@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { prevision } from '../src/services/rappels/previsions.js';
+import { prevision } from '../src/commun/previsions.js';
 
 const budgets = [{ id: 'b', nom: 'Total', emoji: '💰', montant: 100, periode: 'jour' as const, global: true }];
 

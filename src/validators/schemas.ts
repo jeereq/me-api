@@ -27,6 +27,15 @@ export const updateMeSchema = z.object({
 const document = z.record(z.unknown(), { invalid_type_error: 'Document JSON attendu' });
 // baseRevision : la version de l'espace lue en dernier par l'appareil (absent pour les anciennes versions de l'app : la dernière écriture gagne).
 export const putEspaceSchema = z.object({ body: z.object({ data: document, baseRevision: z.number().int().min(0).optional() }) });
+// Synchro par différences (`commun/patch.ts`) : la version de départ est obligatoire, les opérations sont vérifiées à l'application.
+const chemin = z.array(z.string().max(200)).max(20);
+const operation = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('mettre'), chemin, valeur: z.unknown() }),
+  z.object({ op: z.literal('retirer'), chemin }),
+  z.object({ op: z.literal('liste'), chemin, maj: z.array(z.record(z.unknown())).max(20000).optional(), retirer: z.array(z.string().max(200)).max(20000).optional(), ordre: z.array(z.string().max(200)).max(50000).optional() }),
+]);
+const differences = z.object({ baseRevision: z.number().int().min(0), operations: z.array(operation).min(1).max(5000) });
+export const patchEspaceSchema = z.object({ body: differences });
 export const putConfigSchema = z.object({ body: z.object({ data: document }) });
 
 export const membreParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
@@ -133,6 +142,7 @@ export const jetonInvitationSchema = z.object({ body: z.object({ jeton }) });
 export const equipeMembreParamsSchema = z.object({ params: equipeParams.extend({ membreId: z.string().min(1) }) });
 export const roleMembreSchema = z.object({ params: equipeParams.extend({ membreId: z.string().min(1) }), body: z.object({ role: roleEquipe }) });
 export const putEspaceEquipeSchema = z.object({ params: equipeParams, body: z.object({ data: document, baseRevision: z.number().int().min(0).optional() }) });
+export const patchEspaceEquipeSchema = z.object({ params: equipeParams, body: differences });
 
 /** S'abonner : la case des CGV et la demande d'accès immédiat (droit de rétractation) sont obligatoires. */
 export const paiementSchema = z.object({

@@ -5,7 +5,7 @@ import { PushService } from './PushService.js';
 import { avisAbonnement, etatAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
-import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from './rappels/calcul.js';
+import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
 const RATTRAPAGE_MIN = 45;

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { rappelsDuJour, type ConfigRappels, type EspaceRappels } from '../src/services/rappels/calcul.js';
-import { decrireMode, heureDe, lireHeure, lireHeures, lireJours, REGLES_DEFAUT, reglesDuMode } from '../src/services/rappels/modes.js';
+import { rappelsDuJour, type ConfigRappels, type EspaceRappels } from '../src/commun/calcul.js';
+import { decrireMode, heureDe, lireHeure, lireHeures, lireJours, REGLES_DEFAUT, reglesDuMode } from '../src/commun/modes.js';
 
 const LUNDI = '2026-10-26';
 const tache = (o: Record<string, unknown>) => ({ id: 't1', titre: 'Payer la facture', echeance: LUNDI, statut: 'a_faire', mode: 'normal', ...o });

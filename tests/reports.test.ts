@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { prevision } from '../src/services/rappels/previsions.js';
+import { prevision } from '../src/commun/previsions.js';
 
 // Les mêmes cas que l'app (me-mobile/tests/reports.test.ts) : le serveur doit donner les mêmes chiffres.
 const parJour = { id: 'g', nom: 'Budget du jour', emoji: '💰', montant: 20, periode: 'jour' as const, global: true };

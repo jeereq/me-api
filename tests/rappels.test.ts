@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { addDays, missionDuJour, rappelsDuJour, serieDuJour, type ConfigRappels, type EspaceRappels } from '../src/services/rappels/calcul.js';
+import { addDays, missionDuJour, rappelsDesElements, rappelsDuJour, serieDuJour, type ConfigRappels, type EspaceRappels } from '../src/commun/calcul.js';
 
 // Le 26 octobre 2026 est un lundi : le 25 est un dimanche, le 1er novembre aussi.
 const LUNDI = '2026-10-26';
@@ -220,5 +220,42 @@ describe('plans importés : tâches de projet', () => {
     assert.ok(!rappelsTitres(e).some((x) => x.includes('Vieille')));
     const simple = { taches: [tache({ id: 's', titre: 'Vieille simple', mode: 'agressif', echeance: addDays(LUNDI, -10) })] };
     assert.ok(rappelsTitres(simple).some((x) => x.includes('Vieille simple')));
+  });
+});
+
+describe('rappelsDesElements : calcul à l’avance (notifications du téléphone)', () => {
+  it('une habitude hebdo d’une semaine à venir n’est pas « en retard » avant son jour', () => {
+    // Habitude du mercredi pas cochée : le mardi suivant (semaine prochaine) on ne la dit pas en retard, on prévient avant.
+    const h = { id: 'h1', nom: 'Sport', frequence: 'hebdo', jour: 3, mode: 'agressif', coches: [] };
+    const mardiSuivant = addDays(LUNDI, 8);
+    const vu = rappelsDesElements(espace({ habitudes: [h] }), cfg, mardiSuivant, LUNDI);
+    assert.ok(!titres(vu).some((t) => t.startsWith('En retard')));
+    // Le jour même (serveur), la règle reste celle d'avant.
+    assert.ok(titres(rappelsDesElements(espace({ habitudes: [h] }), cfg, addDays(LUNDI, 2))).some((t) => t.includes('Sport')));
+  });
+
+  it('donne les mêmes éléments que rappelsDuJour, sans briefing ni coup de pouce du soir', () => {
+    const e = espace({ relances: [relance({})], taches: [tache({ echeance: LUNDI })] });
+    const jour = rappelsDuJour(e, cfg, LUNDI).filter((r) => r.mode !== 'briefing' && !r.cle.includes('|serie'));
+    assert.deepEqual(titres(rappelsDesElements(e, cfg, LUNDI)), titres(jour));
+  });
+});
+
+describe('tâches de projet : chaque projet se calcule seul, comme le planning de l’app', () => {
+  it('un lien vers une tâche simple ou d’un autre projet ne bloque pas', () => {
+    const projets = [{ id: 'p' }, { id: 'q' }];
+    const e = espace({
+      projets,
+      taches: [
+        tache({ id: 'simple', titre: 'Simple' }),
+        tache({ id: 'q1', titre: 'Q1', projet: 'q' }),
+        tache({ id: 'p1', titre: 'P1', projet: 'p', apres: ['simple'], echeance: LUNDI }),
+        tache({ id: 'p2', titre: 'P2', projet: 'p', apres: ['q1'], echeance: LUNDI }),
+        tache({ id: 'p3', titre: 'P3', projet: 'p', apres: ['p1'], echeance: LUNDI }),
+      ],
+    });
+    const vus = titres(rappelsDesElements(e, cfg, LUNDI));
+    assert.ok(vus.includes('P1') && vus.includes('P2'));
+    assert.ok(!vus.includes('P3'), 'P3 attend P1, du même projet');
   });
 });

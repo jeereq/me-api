@@ -1,18 +1,19 @@
 import { type ConfigModes, heureDe, type Mode, reglesDuMode, MODES_LISTE } from './modes.js';
+import { addDays, doneIn, type Frequence, habitDue, habitToday, parse, pastDue, periodKey } from './jours.js';
 import { estTacheDeProjet, resumes, tachesActives, type TacheProjet } from './projets.js';
 import { alertesObjectifs } from './objectifs.js';
 import { alertesFinances, type FinancesRappels } from './previsions.js';
 
 export type { Mode } from './modes.js';
+export { addDays } from './jours.js';
 
 /**
- * Calcul des rappels, repris de l'app (me-mobile/src/lib/reminders.ts) pour les envoyer depuis le serveur.
+ * Calcul des rappels, le même pour le serveur (push et email) et pour l'app (notifications du téléphone).
  * Tout est en heure locale de l'utilisateur, sous forme de texte : « AAAA-MM-JJ » et « AAAA-MM-JJTHH:MM ».
  */
 
-type Frequence = 'quotidien' | 'hebdo' | 'mensuel';
 type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[] };
-type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string; derniereRelance?: string };
+type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string | null; derniereRelance?: string | null };
 /**
  * Une relance qui attend une action à sa date : à faire, ou déjà relancée depuis que l'app reprogramme la suivante
  * (`derniereRelance`). Les anciennes relances « Relancé » sans cette date ne reviennent pas d'un coup en retard.
@@ -25,41 +26,6 @@ export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; projets?: 
 export type ConfigRappels = ConfigModes & { routineHeure?: string; rappelSoir?: string };
 /** canaux : pour couper le push ou l'email d'un rappel précis (alertes de budget) ; absent = selon les réglages du compte. */
 export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string; canaux?: { push: boolean; email: boolean } };
-
-const pad = (n: number) => String(n).padStart(2, '0');
-// Dates calculées en UTC : seules les chaînes comptent, le fuseau du serveur n'intervient pas.
-const parse = (s: string) => new Date(`${s}T00:00:00Z`);
-const ymd = (d: Date) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-export const addDays = (s: string, n: number) => {
-  const d = parse(s);
-  d.setUTCDate(d.getUTCDate() + n);
-  return ymd(d);
-};
-function weekKey(s: string) {
-  const t = parse(s);
-  const day = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - day);
-  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return `${t.getUTCFullYear()}-W${Math.ceil(((t.getTime() - y0.getTime()) / 864e5 + 1) / 7)}`;
-}
-const periodKey = (f: Frequence, s: string) => (f === 'mensuel' ? s.slice(0, 7) : f === 'hebdo' ? weekKey(s) : s);
-function habitDue(h: Habitude, s: string) {
-  const d = parse(s);
-  if (h.frequence === 'hebdo') return d.getUTCDay() === (h.jour ?? 1);
-  if (h.frequence === 'mensuel') {
-    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-    return d.getUTCDate() === Math.min(h.jour || 1, last);
-  }
-  return true;
-}
-function pastDue(h: Habitude, s: string) {
-  const d = parse(s);
-  if (h.frequence === 'mensuel') return d.getUTCDate() > (h.jour || 1);
-  if (h.frequence === 'hebdo') return (d.getUTCDay() || 7) > ((h.jour ?? 1) || 7);
-  return false;
-}
-const doneIn = (h: Habitude, s: string) => (h.coches || []).some((c) => periodKey(h.frequence, c) === periodKey(h.frequence, s));
-const habitToday = (h: Habitude, s: string) => habitDue(h, s) || (!doneIn(h, s) && h.frequence !== 'quotidien' && h.mode === 'agressif' && pastDue(h, s));
 
 // Points de la mission, comme dans l'app (me-mobile/src/lib/jeu.ts et mission.ts).
 const POINTS = { habitude: 10, relance: 15, tache: 15, tacheHaute: 20, ponctuel: 5, parfait: 50 };
@@ -104,10 +70,8 @@ const pluriel = (n: number, un: string, plusieurs: string) => `${n} ${n > 1 ? pl
 /** Rappels d'une journée (heure locale), avec les mêmes règles que les notifications du téléphone. */
 export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string): Rappel[] {
   const out: Rappel[] = [];
-  const actif = (m: Mode) => c.modes?.[m]?.actif !== false;
   const matin = c.routineHeure || '07:00';
   const soir = c.rappelSoir || '19:00';
-  const jMoins = c.agressifJMoins || 3;
   // Une clé « stable » ne dépend pas du titre : le rappel part une seule fois, même si son texte change entre deux passages.
   const add = (heure: string, titre: string, corps: string, mode: Rappel['mode'], id: string, stable = false) =>
     out.push({ quand: `${jour}T${heure}`, titre, corps, mode, cle: `${jour}T${heure}|${id}${stable ? '' : `|${titre}`}` });
@@ -138,10 +102,29 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
   else if (jeu && pointsDuJour && restants.length && restants.length <= 3)
     add(soir, 'Presque une journée parfaite', `Encore ${pluriel(restants.length, 'action', 'actions')} : ${restants.map((m) => m.titre).join(', ')}. Bonus de ${POINTS.parfait} pts à la clé.`, 'coach', 'serie', true);
 
+  for (const x of rappelsDesElements(e, c, jour)) add(x.heure, x.titre, x.corps, x.mode, x.id);
+  return out;
+}
+
+/** Un rappel d'un élément suivi (relance, tâche, habitude, résumé ou bilan d'un mode), sans le jour : l'heure seule. */
+export type RappelElement = { heure: string; titre: string; corps: string; mode: Mode; id: string };
+
+/**
+ * Les rappels des relances, tâches et habitudes pour `jour`, selon le mode de chacun et ses règles (voir `modes.ts`).
+ * `aujourdhui` sert quand on calcule à l'avance (l'app programme trois semaines de notifications) : les vieux retards
+ * de projet et les périodes d'habitude se jugent depuis aujourd'hui. Le serveur, qui calcule le jour même, l'omet.
+ */
+export function rappelsDesElements(e: EspaceRappels, c: ConfigRappels, jour: string, aujourdhui = jour): RappelElement[] {
+  const out: RappelElement[] = [];
+  const actif = (m: Mode) => c.modes?.[m]?.actif !== false;
+  const matin = c.routineHeure || '07:00';
+  const soir = c.rappelSoir || '19:00';
+  const pousser = (heure: string, titre: string, corps: string, mode: Mode, id: string) => out.push({ heure, titre, corps, mode, id });
+
   const dates = [
     ...(e.relances || []).filter((r) => relanceAttendue(r) && r.date).map((r) => ({ id: r.id, titre: titreRelance(r), detail: r.sujet, date: r.date, mode: r.mode })),
     // Tâches de projet : pas les résumés ni les tâches bloquées, et pas de rappel quotidien pour un vieux retard.
-    ...tachesActives(e).filter((t) => t.echeance && (!estTacheDeProjet(t, e.projets) || t.echeance >= addDays(jour, -3))).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
+    ...tachesActives(e).filter((t) => t.echeance && (!estTacheDeProjet(t, e.projets) || t.echeance >= addDays(aujourdhui, -3))).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
   ];
   const heure = (t: string) => heureDe(t, matin, soir);
   for (const x of dates) {
@@ -149,10 +132,10 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     const r = reglesDuMode(c, x.mode);
     if (x.date === jour) {
       // Une seule heure : le titre tel quel ; plusieurs : on insiste (« Aujourd'hui », puis « Pas encore fait »).
-      r.jourJ.forEach((t, i) => add(heure(t), r.jourJ.length === 1 ? x.titre : i === 0 ? `Aujourd'hui : ${x.titre}` : `Pas encore fait : ${x.titre}`, x.detail, x.mode, x.id));
+      r.jourJ.forEach((t, i) => pousser(heure(t), r.jourJ.length === 1 ? x.titre : i === 0 ? `Aujourd'hui : ${x.titre}` : `Pas encore fait : ${x.titre}`, x.detail, x.mode, x.id));
     } else if (jour > x.date) {
-      if (r.retard) add(heure(r.heure), `En retard : ${x.titre}`, `Prévu le ${x.date}. ${x.detail}`, x.mode, x.id);
-    } else for (const j of r.avant) if (addDays(jour, j) === x.date) add(heure(r.heure), `Dans ${j} j : ${x.titre}`, x.detail, x.mode, x.id);
+      if (r.retard) pousser(heure(r.heure), `En retard : ${x.titre}`, `Prévu le ${x.date}. ${x.detail}`, x.mode, x.id);
+    } else for (const j of r.avant) if (addDays(jour, j) === x.date) pousser(heure(r.heure), `Dans ${j} j : ${x.titre}`, x.detail, x.mode, x.id);
   }
 
   // Habitudes : rappel individuel, ou message du soir regroupé pour les modes à « résumé ».
@@ -162,19 +145,20 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
     const r = reglesDuMode(c, h.mode);
     if (habitDue(h, jour)) {
       if (r.resume) (resumes[h.mode] ||= []).push(h.nom);
-      else r.jourJ.forEach((t, i) => (r.jourJ.length === 1 ? add(heure(t), h.nom, "C'est le jour.", h.mode, h.id) : i === 0 ? add(heure(t), `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id) : add(heure(t), `Pas encore fait : ${h.nom}`, 'Coche-le dans Me dès que c’est fait.', h.mode, h.id)));
+      else r.jourJ.forEach((t, i) => (r.jourJ.length === 1 ? pousser(heure(t), h.nom, "C'est le jour.", h.mode, h.id) : i === 0 ? pousser(heure(t), `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id) : pousser(heure(t), `Pas encore fait : ${h.nom}`, 'Coche-le dans Me dès que c’est fait.', h.mode, h.id)));
     } else if (!r.resume && h.frequence !== 'quotidien') {
-      if (pastDue(h, jour)) {
-        if (r.retard) add(heure(r.heure), `En retard : ${h.nom}`, 'Toujours pas coché pour cette période.', h.mode, h.id);
-      } else for (const j of r.avant) if (habitDue(h, addDays(jour, j))) add(heure(r.heure), `Dans ${j} j : ${h.nom}`, 'Prépare-toi.', h.mode, h.id);
+      // Dans la période en cours seulement : un jour d'une période à venir n'est pas encore en retard.
+      if (periodKey(h.frequence, jour) === periodKey(h.frequence, aujourdhui) && pastDue(h, jour)) {
+        if (r.retard) pousser(heure(r.heure), `En retard : ${h.nom}`, 'Toujours pas coché pour cette période.', h.mode, h.id);
+      } else for (const j of r.avant) if (habitDue(h, addDays(jour, j))) pousser(heure(r.heure), `Dans ${j} j : ${h.nom}`, 'Prépare-toi.', h.mode, h.id);
     }
   }
   for (const m of MODES_LISTE) {
     const noms = resumes[m];
     if (!noms?.length) continue;
     const corps = `${noms.length > 1 ? `${noms.length} habitudes` : '1 habitude'} à tenir aujourd'hui : ${noms.slice(0, 3).join(', ')}.`;
-    if (m === 'coach') add(soir, 'Coach Me', `${corps} Ne casse pas ta série.`, 'coach', 'coach');
-    else add(soir, 'Tes habitudes du jour', corps, m, `resume-${m}`);
+    if (m === 'coach') pousser(soir, 'Coach Me', `${corps} Ne casse pas ta série.`, 'coach', 'coach');
+    else pousser(soir, 'Tes habitudes du jour', corps, m, `resume-${m}`);
   }
 
   // Bilan de la semaine : le jour choisi pour le mode (le dimanche soir pour « bilan hebdo »), ce qui est suivi dans ce mode pour la semaine à venir.
@@ -185,7 +169,7 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
       ...dates.filter((x) => x.mode === m && x.date >= jour && x.date <= addDays(jour, 7)).map((x) => x.titre),
       ...(e.habitudes || []).filter((h) => h.mode === m && Array.from({ length: 7 }, (_, i) => addDays(jour, i + 1)).some((d) => habitDue(h, d))).map((h) => h.nom),
     ];
-    if (suivis.length) add(heure(r.bilan.heure), 'Ton bilan de la semaine', `${suivis.length} élément(s) à suivre : ${suivis.slice(0, 4).join(', ')}.`, m, m === 'hebdo' ? 'hebdo' : `bilan-${m}`);
+    if (suivis.length) pousser(heure(r.bilan.heure), 'Ton bilan de la semaine', `${suivis.length} élément(s) à suivre : ${suivis.slice(0, 4).join(', ')}.`, m, m === 'hebdo' ? 'hebdo' : `bilan-${m}`);
   }
   return out;
 }
