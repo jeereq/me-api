@@ -157,3 +157,69 @@ Pour chaque mail, une analyse avec le même id :
 Exemples : une lettre d'information → categorie « newsletter », action « rien », urgence « basse ». « Votre facture de 89 € est à régler avant le 15 » → categorie « facture », action « tache », echeance au 15, montant « 89 € ». Paul répond « OK pour jeudi 10 h » à la relance r:12 sur le devis → relance « r:12 », rdv_date au jeudi qui suit la date du mail, rdv_heure « 10:00 ».
 Ne cite que ce qui est dans les mails et le crm.`;
 }
+
+/* ——— Modèle fort pour les mails importants ——— */
+
+type AnalyseBrute = { id?: unknown; action?: unknown; resume?: unknown };
+const lire = (brut: string): { analyses?: AnalyseBrute[] } | null => {
+  try {
+    const j = JSON.parse(brut);
+    return j && typeof j === 'object' && !Array.isArray(j) ? j : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Les mails qui méritent le modèle fort, d'après le tri du petit modèle : ceux qui attendent une réponse ou un travail.
+ * Les lettres d'information, notifications et mails suspects restent au tri rapide : c'est là que le coût se garde.
+ */
+export function mailsImportants(brut: string): string[] {
+  const j = lire(brut);
+  return (Array.isArray(j?.analyses) ? j.analyses : [])
+    .filter((a) => a && (a.action === 'repondre' || a.action === 'tache') && !/^mail suspect/i.test(String(a.resume ?? '')))
+    .map((a) => String(a.id ?? ''))
+    .filter(Boolean);
+}
+
+/** Les données d'analyse réduites à certains mails (liste ou objet `{ mails, crm, … }`) ; null si rien ne reste ou si ce n'est pas du JSON. */
+export function seulementCes(donnees: string, ids: string[]): string | null {
+  let j: unknown;
+  try {
+    j = JSON.parse(donnees);
+  } catch {
+    return null;
+  }
+  const garder = (l: unknown[]) => l.filter((m) => m && typeof m === 'object' && ids.includes(String((m as { id?: unknown }).id)));
+  if (Array.isArray(j)) {
+    const l = garder(j);
+    return l.length ? JSON.stringify(l) : null;
+  }
+  if (j && typeof j === 'object' && Array.isArray((j as { mails?: unknown }).mails)) {
+    const l = garder((j as { mails: unknown[] }).mails);
+    return l.length ? JSON.stringify({ ...j, mails: l }) : null;
+  }
+  return null;
+}
+
+/** Le tri du petit modèle, où les analyses refaites par le modèle fort remplacent les siennes (même id). Illisible : le tri reste. */
+export function remplacerAnalyses(tri: string, fort: string): string {
+  const a = lire(tri);
+  const b = lire(fort);
+  if (!a || !Array.isArray(a.analyses) || !b || !Array.isArray(b.analyses)) return tri;
+  const parId = new Map(b.analyses.filter((x) => x && x.id !== undefined).map((x) => [String(x.id), x]));
+  return JSON.stringify({ ...a, analyses: a.analyses.map((x) => parId.get(String(x?.id)) ?? x) });
+}
+
+/* ——— Synthèse d'un lot, à partir des analyses mail par mail ——— */
+
+export const SCHEMA_SYNTHESE = {
+  name: 'synthese_lot',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['synthese', 'points', 'actions'],
+    properties: { synthese: texte, points: SCHEMA_LOT.schema.properties.points, actions: SCHEMA_LOT.schema.properties.actions },
+  },
+} as const;
