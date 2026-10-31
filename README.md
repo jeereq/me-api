@@ -79,7 +79,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | PATCH | `/api/membres/:id` | admin | `{ role: "ADMIN" \| "UTILISATEUR" }` |
 | DELETE | `/api/membres/:id` | admin | Supprime le compte et son espace |
 | GET | `/api/assistant` | compte | `{ disponible }` : clé configurée et IA activée par l'admin |
-| GET | `/api/assistant/modeles` | admin | `{ modeles, actuel }` : modèles OpenAI disponibles avec la clé du serveur |
+| GET | `/api/assistant/modeles` | admin | `{ modeles, actuel, fort }` : modèles OpenAI disponibles avec la clé du serveur |
 | GET | `/api/integrations` | compte | Services configurés sur le serveur et comptes connectés |
 | GET | `/api/integrations/:service/connecter?retour=` | compte | `{ url }` de la page d'autorisation (google, microsoft, trello, slack) |
 | GET | `/api/integrations/:id/agendas` | compte | `{ agendas, choisis }` : agendas du compte (Google, Microsoft) et ceux cochés |
@@ -107,7 +107,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/notifications/push` | compte | Abonne ce navigateur aux notifications push |
 | DELETE | `/api/notifications/push` | compte | Désabonne ce navigateur |
 | POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
-| POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance" \| "copilote" \| "mails" \| "lot" \| "compte_rendu", … }` → `{ text }` ; `consignes` (texte libre, 600 caractères retenus) oriente l'analyse « mails » et « lot » |
+| POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance" \| "copilote" \| "mails" \| "lot" \| "synthese" \| "compte_rendu", … }` → `{ text }` ; `consignes` (texte libre, 600 caractères retenus) oriente l'analyse « mails » et « lot » |
 | GET | `/api/abonnement/offres` | public | Prix, durée de l'essai, ce que Pro débloque, `paiement` : FlexPaie configuré |
 | GET | `/api/abonnement` | compte | `{ abonnement, paiements }` : offre en cours et 10 derniers paiements |
 | POST | `/api/abonnement/paiement` | compte | `{ periode: "mensuel" \| "annuel", telephone, accepteCgv: true, accesImmediat: true }` → `{ paiement }` en attente de validation sur le téléphone |
@@ -125,6 +125,8 @@ Règles :
 - Le modèle OpenAI se choisit dans l'app (Configuration, réservé à l'admin) ; sans choix, c'est `OPENAI_MODEL`, puis `gpt-4o-mini`. Si OpenAI retire le modèle choisi (404, « deprecated »), le serveur essaie les suivants de cette liste et le dit dans les logs ; si aucun n'existe, l'app demande d'en choisir un autre.
 - Le dernier admin ne peut être ni rétrogradé ni supprimé.
 - **Analyse des mails** (`mails`, `lot`) : le serveur retire l'historique cité, la signature et les mentions légales de chaque mail (`src/services/analyse-mails.ts`), place les règles dans un message `system` et les mails, écrits par des tiers, entre balises `<mails>` dans le message `user` : un mail qui donne des ordres à l'IA est signalé comme suspect, sans réponse proposée. La réponse est imposée par un schéma JSON strict (Structured Outputs) ; un modèle qui ne le connaît pas repasse en simple objet JSON. L'app peut envoyer `{ aujourdhui, mails, crm }` : les messages plus anciens du fil, les pièces jointes, et les relances, tâches et projets ouverts, pour reconnaître une relance obtenue ou éviter une tâche en double.
+- **Modèle fort pour les mails importants** : l'admin peut choisir un second modèle (`assistant.modeleFort` dans la configuration, sinon `OPENAI_MODEL_FORT`). Un paquet de mails est d'abord trié par le modèle habituel ; seuls les mails qui attendent une réponse ou un travail sont repris par le modèle fort, dont l'analyse remplace celle du tri. La synthèse d'un lot part au modèle fort. Sans modèle fort, rien ne change. S'il échoue, le tri reste.
+- **Gros lots en deux temps** (`synthese`) : l'app analyse un lot paquet par paquet, mail par mail, puis envoie les analyses (pas les textes) pour la synthèse d'ensemble. `lot` reste accepté pour les anciennes versions de l'app.
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.
 
@@ -237,6 +239,7 @@ Pour ne faire tourner les tâches que sur une instance, mets `RUN_CRONS=false` s
 npm test    # lanceur natif de Node via tsx : rappels (dont plans de projet), prévisions et budgets par catégories, modes, équipes, chiffrement des jetons, JWT, validation
 npm run eval:mails                         # note l'analyse des mails sur le jeu d'essai eval/mails.json (30 mails inventés), avec le vrai modèle : OPENAI_API_KEY requis
 npm run eval:mails -- --modele gpt-4.1     # comparer un autre modèle ; --sans-contexte mesure l'apport du fil et du crm
+npm run eval:mails -- --fort gpt-4.1       # tri par le modèle habituel, mails importants repris par le modèle fort (comme le serveur)
 ```
 
 ## Organisation
