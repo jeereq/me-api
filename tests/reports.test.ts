@@ -41,4 +41,15 @@ describe('restes reportés', () => {
     assert.equal(prevision(f, 'mois', '2026-10-20')?.reste, 0);
     assert.equal(prevision(f, 'mois', '2026-11-02')?.plafond, 340);
   });
+  it('transfère d’un budget à l’autre : Courses du mois comble Repas du jour (me-mobile, transferer)', () => {
+    const repas = { id: 'r', nom: 'Repas', emoji: '🍽️', montant: 20, periode: 'jour' as const };
+    const courses = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
+    const report = { id: 'x1', montant: 5, de: { budget: 'c', periode: 'mois' as const, debut: '2026-10-01' }, vers: { budget: 'r', periode: 'jour' as const, debut: mardi } };
+    const depenses = [{ id: 'a', montant: 25, budget: 'r', date: mardi }, { id: 'b', montant: 100, budget: 'c', date: '2026-10-05' }];
+    const f = { budgets: [repas, courses], depenses, reports: [report] };
+    assert.equal(prevision(f, 'jour', mardi)?.plafond, 25);
+    assert.equal(prevision(f, 'jour', mardi)?.reste, 0);
+    assert.equal(prevision(f, 'jour', mercredi)?.plafond, 20);
+    assert.equal(prevision(f, 'mois', mardi)?.plafond, 295);
+  });
 });
