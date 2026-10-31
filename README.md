@@ -124,6 +124,7 @@ Règles :
 - `SIGNUP_OPEN=false` ferme les inscriptions une fois le premier compte créé ; l'admin crée alors les comptes à la main ou les rouvre.
 - Le modèle OpenAI se choisit dans l'app (Configuration, réservé à l'admin) ; sans choix, c'est `OPENAI_MODEL`, puis `gpt-4o-mini`. Si OpenAI retire le modèle choisi (404, « deprecated »), le serveur essaie les suivants de cette liste et le dit dans les logs ; si aucun n'existe, l'app demande d'en choisir un autre.
 - Le dernier admin ne peut être ni rétrogradé ni supprimé.
+- **Analyse des mails** (`mails`, `lot`) : le serveur retire l'historique cité, la signature et les mentions légales de chaque mail (`src/services/analyse-mails.ts`), place les règles dans un message `system` et les mails, écrits par des tiers, entre balises `<mails>` dans le message `user` : un mail qui donne des ordres à l'IA est signalé comme suspect, sans réponse proposée. La réponse est imposée par un schéma JSON strict (Structured Outputs) ; un modèle qui ne le connaît pas repasse en simple objet JSON. L'app peut envoyer `{ aujourdhui, mails, crm }` : les messages plus anciens du fil, les pièces jointes, et les relances, tâches et projets ouverts, pour reconnaître une relance obtenue ou éviter une tâche en double.
 - Pour nommer un admin depuis le serveur : `npm run promote:admin -- email@exemple.com`.
 - Limites : 10 connexions ratées par 15 min et par email, 30 demandes à l'IA par 10 min et par compte.
 
@@ -234,6 +235,8 @@ Pour ne faire tourner les tâches que sur une instance, mets `RUN_CRONS=false` s
 
 ```bash
 npm test    # lanceur natif de Node via tsx : rappels (dont plans de projet), prévisions et budgets par catégories, modes, équipes, chiffrement des jetons, JWT, validation
+npm run eval:mails                         # note l'analyse des mails sur le jeu d'essai eval/mails.json (30 mails inventés), avec le vrai modèle : OPENAI_API_KEY requis
+npm run eval:mails -- --modele gpt-4.1     # comparer un autre modèle ; --sans-contexte mesure l'apport du fil et du crm
 ```
 
 ## Organisation

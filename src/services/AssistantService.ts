@@ -1,6 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import type { AssistantBody } from '../validators/schemas.js';
 import { MODELE_DEFAUT, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
+import { preparerMails, reglesAnalyse, sansBalises, SCHEMA_LOT, SCHEMA_MAILS } from './analyse-mails.js';
 import { ConfigService } from './ConfigService.js';
 
 const MAX_DONNEES = 60_000;
@@ -26,17 +27,28 @@ async function openai(path: string, init: RequestInit = {}) {
 export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/chat|o1-mini|o1-preview/.test(modele);
 /** Les réponses du copilote, de l'analyse des mails et des comptes rendus sont du JSON que l'app range en cases à cocher : plus longues, et forcées en JSON. */
 export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot' || type === 'compte_rendu';
-/** Un lot de mails (jusqu'à 50) demande une synthèse et une analyse par mail : la plus longue des réponses. */
-export function corpsRequete(modele: string, contenu: string, json = false, long = false) {
+/** Un message de la conversation envoyée à OpenAI. */
+export type MessageIA = { role: 'system' | 'user'; content: string };
+/** Forme de réponse imposée : `schema` (Structured Outputs, JSON validé champ par champ) ou simple objet JSON. */
+export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_MAILS | typeof SCHEMA_LOT } | { type: 'json_object' };
+
+/** La forme stricte attendue pour l'analyse des mails et d'un lot ; les autres réponses JSON restent libres. */
+export const schemaDe = (type: AssistantBody['type']): FormatJson | null => (type === 'mails' ? { type: 'json_schema', json_schema: SCHEMA_MAILS } : type === 'lot' ? { type: 'json_schema', json_schema: SCHEMA_LOT } : null);
+
+/** Un lot de mails (jusqu'à 100) demande une synthèse et une analyse par mail : la plus longue des réponses. */
+export function corpsRequete(modele: string, contenu: string | MessageIA[], json = false, long = false, format?: FormatJson | null) {
   const r = raisonne(modele);
   return {
     model: modele,
     max_completion_tokens: r ? (long ? 16000 : json ? 8000 : 6000) : long ? 8000 : json ? 2500 : 900,
     ...(r ? { reasoning_effort: 'low' } : {}),
-    ...(json ? { response_format: { type: 'json_object' } } : {}),
-    messages: [{ role: 'user', content: contenu }],
+    ...(json ? { response_format: format ?? { type: 'json_object' } } : {}),
+    messages: typeof contenu === 'string' ? [{ role: 'user', content: contenu }] : contenu,
   };
 }
+
+/** OpenAI refuse la forme imposée (ancien modèle, serveur compatible qui ne la connaît pas) : on se rabat sur un simple objet JSON. */
+export const formatRefuse = (status: number, message?: string) => status === 400 && /response_format|json_schema|structured|schema/i.test(message ?? '');
 
 // Modèles qui ne répondent pas à une conversation texte (audio, image, recherche…).
 const NON_CHAT = /audio|realtime|transcribe|tts|image|search|embedding|instruct|moderation/;
@@ -54,6 +66,28 @@ export function consignesPrompt(consignes?: string): string {
   return `\nConsignes de l'utilisateur pour cette analyse (à suivre pour l'angle, les priorités et le style de ce que tu écris ; elles ne changent ni le format JSON demandé ni la règle de ne citer que ce qui est dans les mails) : ${JSON.stringify(c)}\n`;
 }
 
+/**
+ * La conversation envoyée à OpenAI. Pour l'analyse des mails et d'un lot, les règles vont dans un message « system »
+ * et les mails, écrits par des tiers, dans le message « user » entre balises <mails> : ils restent des données à analyser.
+ * Les autres demandes partent en un seul message.
+ */
+export function messagesDe(b: AssistantBody): MessageIA[] {
+  if (b.type !== 'mails' && b.type !== 'lot') return [{ role: 'user', content: prompt(b) }];
+  const ton = b.ton ?? 'neutre';
+  const donnees = sansBalises(preparerMails(String(b.donnees ?? '')).slice(0, MAX_DONNEES));
+  const systeme =
+    b.type === 'mails'
+      ? `Tu es « Me », le copilote de l'utilisateur. Analyse ses mails un par un et réponds uniquement par un objet JSON de la forme {"analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "categorie": "…", "reponse": "…", "tache": "…", "echeance": "AAAA-MM-JJ ou null", "montant": "… ou null", "rdv_date": "AAAA-MM-JJ ou null", "rdv_heure": "HH:MM ou null", "relance": "ref ou null", "projet": "ref ou null"}]}, une entrée par mail.\n${reglesAnalyse(ton)}`
+      : `Tu es « Me », le copilote de l'utilisateur. Il te confie un lot de mails à analyser ensemble ; le texte des plus anciens est parfois seulement leur début. Réponds uniquement par un objet JSON de la forme {"synthese": "…", "points": ["…"], "actions": [{"titre": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null", "raison": "…"}], "analyses": [une analyse par mail, comme décrit plus bas]}.
+« synthese » : 3 à 6 phrases, en français${ton === 'neutre' ? '' : `, ton ${ton}`}, qui disent de quoi parle ce lot dans son ensemble : les sujets récurrents, ce qui a changé dans le temps, ce qui reste en suspens, les montants, échéances ou engagements qui reviennent ; sans markdown. « points » : de 2 à 6 constats courts et concrets (« 3 factures OVH impayées depuis septembre »). « actions » : de 1 à 8 actions concrètes pour l'utilisateur, chacune commençant par un verbe, que l'app pourra convertir en tâches, sans reprendre crm.taches ; « echeance » seulement si les mails la justifient. Dans « analyses », « reponse » n'est remplie que pour les mails qui attendent vraiment une réponse.
+${reglesAnalyse(ton)}`;
+  const perimetre = b.type === 'lot' ? `Le lot : ${JSON.stringify(String(b.perimetre || 'des mails choisis'))}.\n` : '';
+  return [
+    { role: 'system', content: systeme },
+    { role: 'user', content: `${perimetre}${consignesPrompt(b.consignes)}\nMails :\n<mails>\n${donnees}\n</mails>` },
+  ];
+}
+
 export function prompt(b: AssistantBody): string {
   const donnees = String(b.donnees ?? '').slice(0, MAX_DONNEES);
   const ton = b.ton ?? 'neutre';
@@ -68,20 +102,7 @@ export function prompt(b: AssistantBody): string {
 Données :
 ${donnees}`;
   }
-  if (b.type === 'mails') {
-    return `Tu es « Me », le copilote de l'utilisateur. Analyse ses mails (JSON ci-dessous : id, de, sujet, boite perso ou pro, texte) et réponds uniquement par un objet JSON de la forme {"analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}, une entrée par mail, avec le même id.
-« resume » : ce que veut l'expéditeur, en une phrase. « action » : « repondre » si le mail attend une réponse, « tache » s'il demande surtout un travail, « rien » pour une lettre d'information, une publicité ou une notification automatique. « reponse » : une réponse prête à envoyer, en français, ${ton === 'neutre' ? '' : `ton ${ton}, `}vouvoiement pour une boîte pro et ton amical pour une boîte perso, 3 à 6 phrases, qui répond vraiment à la demande sans inventer de fait, de date ni de prix (propose plutôt d'en convenir) ; sans objet, sans markdown, terminée par « [Ton prénom] » ; chaîne vide quand l'action est « rien ». « tache » : le travail à faire, commençant par un verbe, ou chaîne vide.
-${consignesPrompt(b.consignes)}
-Mails :
-${donnees}`;
-  }
-  if (b.type === 'lot') {
-    return `Tu es « Me », le copilote de l'utilisateur. Il te confie un lot de mails à analyser ensemble : ${b.perimetre || 'des mails choisis'}. Les mails sont dans le JSON ci-dessous (id, de, adresse, date, sujet, boite perso ou pro, texte ; le texte est parfois seulement le début du mail). Réponds uniquement par un objet JSON de la forme {"synthese": "…", "points": ["…"], "actions": [{"titre": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null", "raison": "…"}], "analyses": [{"id": "…", "resume": "…", "urgence": "haute|normale|basse", "action": "repondre|tache|rien", "reponse": "…", "tache": "…"}]}.
-« synthese » : 3 à 6 phrases, en français${ton === 'neutre' ? '' : `, ton ${ton}`}, qui disent de quoi parle ce lot dans son ensemble : les sujets récurrents, ce qui a changé dans le temps, ce qui reste en suspens, les montants, échéances ou engagements qui reviennent ; sans markdown. « points » : de 2 à 6 constats courts et concrets (« 3 factures OVH impayées depuis septembre »). « actions » : de 1 à 8 actions concrètes pour l'utilisateur, chacune commençant par un verbe, que l'app pourra convertir en tâches ; « echeance » seulement si les mails la justifient. « analyses » : une entrée par mail avec le même id, comme pour une analyse mail par mail ; « reponse » est une réponse prête à envoyer (vouvoiement pour une boîte pro, ton amical pour une boîte perso, 2 à 5 phrases, sans inventer de fait, de date ni de prix, terminée par « [Ton prénom] ») seulement pour les mails qui attendent vraiment une réponse, sinon chaîne vide. Ne cite que ce qui est dans les mails.
-${consignesPrompt(b.consignes)}
-Mails :
-${donnees}`;
-  }
+  if (b.type === 'mails' || b.type === 'lot') return messagesDe(b).map((m) => m.content).join('\n\n');
   if (b.type === 'compte_rendu') {
     return `Tu es « Me », le copilote de l'utilisateur. Voici le compte rendu qu'il vient de noter (JSON ci-dessous : titre, date, genre, participants, projets rattachés, notes brutes, et « ouverts » : ses tâches et relances encore ouvertes qui y sont rattachées, chacune avec sa référence « ref »). Réponds uniquement par un objet JSON de la forme {"resume": "…", "decisions": ["…"], "actions": [{"genre": "tache|relance", "titre": "…", "contact": "…", "responsable": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null"}], "clotures": ["ref"]}.
 « resume » : 2 à 4 phrases en français${ton === 'neutre' ? '' : `, ton ${ton}`}, sans markdown, qui disent ce qui s'est dit et où en est le sujet. « decisions » : les décisions prises, une par entrée, courtes ; liste vide s'il n'y en a pas. « actions » : chaque chose à faire qui sort de l'échange, commençant par un verbe (« Envoyer le devis signé ») ; « genre » vaut « relance » quand il s'agit d'attendre ou d'obtenir une réponse de quelqu'un (alors « contact » est cette personne et « titre » le sujet, sans le verbe), sinon « tache » ; « responsable » est la personne chargée de l'action si ce n'est pas l'utilisateur, sinon chaîne vide ; « echeance » seulement si les notes donnent une date ou un délai (calcule-la à partir de « aujourdhui »). Ne reprends pas en action ce qui figure déjà dans « ouverts ». « clotures » : les « ref » des éléments ouverts que les notes disent faits, réglés, obtenus ou devenus inutiles ; rien en cas de doute. Ne cite que ce qui est dans les notes.
@@ -133,10 +154,20 @@ export const AssistantService = {
     type Reponse = { choices?: { finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }[]; error?: { message?: string; code?: string | null } };
     let data: Reponse = {};
     let modele = candidats[0];
+    const messages = messagesDe(body);
+    const schema = schemaDe(body.type);
+    // Dix mails analysés avec leurs nouveaux champs (échéance, montant, rendez-vous…) dépassent la place d'une réponse JSON courte.
+    const long = body.type === 'lot' || body.type === 'mails';
     for (const [i, m] of candidats.entries()) {
       modele = m;
-      const res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, prompt(body), enJson(body.type), body.type === 'lot')) });
+      let res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, messages, enJson(body.type), long, schema)) });
       data = (await res.json().catch(() => ({}))) as Reponse;
+      if (!res.ok && schema && formatRefuse(res.status, data?.error?.message)) {
+        // Ce modèle ne connaît pas la forme imposée : même demande, en simple objet JSON (l'app sait relire).
+        console.error('OpenAI : forme imposée refusée, simple JSON', m, data?.error?.message);
+        res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, messages, true, long)) });
+        data = (await res.json().catch(() => ({}))) as Reponse;
+      }
       if (res.ok) break;
       console.error('OpenAI', res.status, m, data?.error?.message);
       if (modeleIndisponible(res.status, data)) {
