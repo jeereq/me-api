@@ -25,8 +25,8 @@ export const connecteur = (nom: string) => {
 
 const textes = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 const prefsCompte = (i: Integration): PrefsCompte => {
-  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown; mails?: { jours?: unknown; max?: unknown } } | null;
-  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees), mails: chargementValide(p?.mails) };
+  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown; mails?: { jours?: unknown; max?: unknown }; analyseAuto?: unknown } | null;
+  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees), mails: chargementValide(p?.mails), analyseAuto: p?.analyseAuto === true };
 };
 const donneesDe = (i: Integration) => (i.donnees ?? vide()) as unknown as Elements;
 
@@ -50,6 +50,8 @@ const publique = (i: Integration) => ({
   libelles: donneesDe(i).libelles ?? [],
   /** Comment la boîte de réception se charge (jours, nombre de fils). */
   chargement: prefsCompte(i).mails,
+  /** Le copilote prépare à l'avance l'analyse des nouveaux mails non lus de ce compte (choisi par l'utilisateur, désactivé par défaut). */
+  analyseAuto: prefsCompte(i).analyseAuto === true,
   /** Ce que le service sait faire de plus avec la boîte : dossiers, règles. */
   dossiers: !!parFournisseur(i.fournisseur).dossiers,
   regles: !!parFournisseur(i.fournisseur).regles,
@@ -131,7 +133,7 @@ export const IntegrationService = {
   },
 
   /** Change le contexte (perso/pro), les agendas synchronisés et/ou les boîtes partagées lues, puis relit le compte. */
-  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[]; chargement?: { jours?: number; max?: number } }) {
+  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[]; chargement?: { jours?: number; max?: number }; analyseAuto?: boolean }) {
     const i = await prisma.integration.findFirst({ where: { id, userId } });
     if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
     if (patch.boitesPartagees?.length && !parFournisseur(i.fournisseur).boitesPartagees)
@@ -142,8 +144,10 @@ export const IntegrationService = {
     if (patch.agendas) prefs.agendas = [...new Set(patch.agendas)].slice(0, 50);
     if (patch.boitesPartagees) prefs.boitesPartagees = boitesValides(patch.boitesPartagees).filter((b) => b !== i.compte.toLowerCase());
     if (patch.chargement) prefs.mails = chargementValide({ ...prefs.mails, ...patch.chargement });
+    if (patch.analyseAuto !== undefined) prefs.analyseAuto = patch.analyseAuto;
     const relire = !!(patch.agendas || patch.boitesPartagees || patch.chargement);
-    if (relire) data.prefs = prefs as Prisma.InputJsonObject;
+    // Choisir d'analyser à l'avance n'a pas besoin de relire le compte.
+    if (relire || patch.analyseAuto !== undefined) data.prefs = prefs as Prisma.InputJsonObject;
     await prisma.integration.update({ where: { id }, data });
     // Les agendas, les boîtes et le chargement choisis ne changent rien tant que le compte n'a pas été relu.
     if (relire) await this.synchroniserUne(id).catch(() => {});
@@ -329,6 +333,17 @@ export const IntegrationService = {
     const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite, garderNonLu }), i, false);
     if (garde?.nonLu && !garderNonLu) await this._majMail(i, mailId, { nonLu: false });
     return { mail: { ...contenu, ...(garde?.boite ? { boite: garde.boite } : {}) } };
+  },
+
+  /**
+   * Lit un mail pour l'analyse du copilote, sans le marquer comme lu : le contenu entier (texte, fil, pièces jointes),
+   * avec la boîte (perso ou pro) et ce que le compte en a gardé (contact, fil, extrait). Utilisé par le serveur lui-même.
+   */
+  async lirePourAnalyse(userId: string, id: string, mailId: string) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'lireMail');
+    const garde = this._mailGarde(i, mailId);
+    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite, garderNonLu: true }), i, false);
+    return { contenu, ctx: i.ctx as Ctx, garde };
   },
 
   /** Pose ou retire des étiquettes sur un mail ; la liste du compte et le mail gardé suivent tout de suite. */

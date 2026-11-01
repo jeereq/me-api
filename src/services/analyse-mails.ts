@@ -87,6 +87,9 @@ export function preparerMails(donnees: string): string {
   return donnees;
 }
 
+/** Les consignes de l'utilisateur, nettoyées comme pour le prompt : espaces réduits, longueur bornée. */
+export const consignesPropres = (consignes?: string, max = 600) => String(consignes ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
 /** Les balises qui entourent les mails dans le prompt ne doivent pas pouvoir être fermées par le contenu d'un mail. */
 export const sansBalises = (s: string) => s.replace(/<\/?\s*mails\s*>/gi, '');
 

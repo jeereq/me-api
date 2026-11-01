@@ -49,6 +49,7 @@ model User {
   jetons       JetonCompte[]
   equipes      EquipeMembre[]
   paiements    Paiement[]
+  analysesMails AnalyseMail[]
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -107,6 +108,7 @@ model Integration {
   derniereSync  DateTime?
   erreur        String?
   createdAt     DateTime    @default(now())
+  analysesMails AnalyseMail[]
 
   @@unique([userId, fournisseur, compte])
   @@index([userId])
@@ -276,4 +278,29 @@ model Justificatif {
   @@index([userId])
   @@index([equipeId])
   @@index([createdAt])
+}
+
+/// L'analyse d'un mail par le copilote (résumé, urgence, réponse proposée…), gardée 30 jours pour ne pas la refaire à chaque
+/// ouverture et pour la préparer à l'avance (voir src/services/AnalyseMailService.ts). Le texte du mail n'est pas gardé.
+/// Supprimée avec le compte connecté ou le compte me, et par le ménage de nuit passé 30 jours.
+model AnalyseMail {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  /// Identifiant du mail chez le service (celui de MailImporte.id).
+  mailId        String
+  /// Empreinte de ce qui a été demandé (ton, consignes, version de l'analyse) : une autre demande refait l'analyse.
+  empreinte     String
+  /// Modèles qui ont répondu (« gpt-4o-mini » ou « gpt-4o-mini+gpt-4.1 »).
+  modele        String
+  /// L'analyse telle que l'IA l'a rendue (un objet de la liste « analyses »).
+  resultat      Json
+  createdAt     DateTime    @default(now())
+  majLe         DateTime    @default(now()) @updatedAt
+
+  @@unique([integrationId, mailId])
+  @@index([userId])
+  @@index([majLe])
 }
