@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { prevision } from '../src/commun/previsions.js';
+import { bilan, prevision } from '../src/commun/previsions.js';
 
 // Les mêmes cas que l'app (me-mobile/tests/reports.test.ts) : le serveur doit donner les mêmes chiffres.
 const parJour = { id: 'g', nom: 'Budget du jour', emoji: '💰', montant: 20, periode: 'jour' as const, global: true };
@@ -50,6 +50,8 @@ describe('restes reportés', () => {
     assert.equal(prevision(f, 'jour', mardi)?.plafond, 25);
     assert.equal(prevision(f, 'jour', mardi)?.reste, 0);
     assert.equal(prevision(f, 'jour', mercredi)?.plafond, 20);
-    assert.equal(prevision(f, 'mois', mardi)?.plafond, 295);
+    assert.equal(bilan(f, 'mois', mardi, mardi).lignes.find((l) => l.budget.id === 'c')?.plafond, 295);
+    // Le total du mois additionne, comme l'écran Finances, les 31 budgets du jour (20 × 31 + 5 reçus) et Courses (295).
+    assert.equal(prevision(f, 'mois', mardi)?.plafond, 920);
   });
 });

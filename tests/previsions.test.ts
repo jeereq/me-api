@@ -106,7 +106,7 @@ describe('alertes et briefing', () => {
   const courses = { id: 'c', nom: 'Courses', emoji: '🛒', montant: 300, periode: 'mois' as const };
   it('annonce le matin le reste des budgets, pas un budget du jour', () => {
     const f = { devise: '$', budgets: [courses], depenses: [{ id: 'a', montant: 120, budget: 'c', date: '2026-11-05' }] };
-    assert.equal(alertesFinances(f, '2026-11-11', '19:00').resteBudgets, 'Reste sur tes budgets : 180 $');
+    assert.equal(alertesFinances(f, '2026-11-11', '19:00').resteBudgets, 'Reste sur tes budgets du mois : 180 $');
   });
   it('n’alerte qu’une fois le budget réellement dépassé', () => {
     const f = { devise: '$', budgets: [courses], depenses: [{ id: 'a', montant: 310, budget: 'c', date: '2026-11-05' }] };
@@ -114,5 +114,35 @@ describe('alertes et briefing', () => {
     assert.equal(a.titre, 'Budget du mois dépassé');
     assert.equal(a.corps, '310 $ dépensés pour 300 $ prévus.');
     assert.equal(alertesFinances({ ...f, depenses: [{ id: 'a', montant: 200, budget: 'c', date: '2026-11-02' }] }, '2026-11-02', '19:00').alertes.length, 0);
+  });
+});
+
+// Mêmes chiffres que l'écran Finances (me-mobile, `bilan`) : un seul calcul pour l'écran, les alertes et le briefing.
+describe('même total que l’écran Finances', () => {
+  const budgets = [
+    { id: 'c', nom: 'Courses', emoji: '🛒', montant: 400, periode: 'mois' as const },
+    { id: 's', nom: 'Sorties', emoji: '🎉', montant: 50, periode: 'semaine' as const },
+    { id: 'v', nom: 'Vacances', emoji: '✈️', montant: 1500, periode: 'annee' as const },
+    { id: 't', nom: 'Travaux', emoji: '🔨', montant: 900, periode: 'mois' as const, debut: '2026-11-01', fin: '2027-01-31', enveloppe: true },
+  ];
+  const f = { budgets, depenses: [{ id: 'd', montant: 100, budget: 'c', date: '2026-11-03' }] };
+  it('additionne les semaines du mois et laisse de côté l’enveloppe qui déborde et le budget annuel', () => {
+    // Courses 400 + Sorties 5 semaines × 50 (celles qui commencent en novembre).
+    assert.equal(prevision(f, 'mois', '2026-11-05')?.plafond, 650);
+    assert.equal(resteDesBudgets(f, '2026-11-05'), 550);
+  });
+  it('ne surveille dans le mois que les budgets au mois', () => {
+    const g = { budgets, depenses: [{ id: 'd', montant: 70, budget: 's', date: '2026-11-03' }] };
+    assert.deepEqual(prevision(g, 'mois', '2026-11-05')?.budgets.map((b) => b.nom), []);
+    assert.deepEqual(prevision(g, 'semaine', '2026-11-05')?.budgets.map((b) => b.nom), ['Sorties']);
+  });
+  it('ne compte pas une dépense versée sur un objectif', () => {
+    const g = {
+      budgets: [{ id: 'g', nom: 'Tout', emoji: '💰', montant: 100, periode: 'mois' as const, global: true }],
+      depenses: [{ id: 'e', montant: 80, budget: null, date: '2026-11-01' }],
+      objectifs: [{ id: 'o', nom: 'Voyage', cible: 500, debut: '2026-10-01', echeance: '2027-06-01', versements: [{ id: 'v', date: '2026-11-01', montant: 80, depense: 'e' }] }],
+    };
+    assert.equal(prevision(g, 'mois', '2026-11-02')?.depense, 0);
+    assert.equal(alertesFinances({ ...g, alertes: { seuil: 0.8 } }, '2026-11-02', '19:00').alertes.length, 0);
   });
 });
