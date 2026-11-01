@@ -253,8 +253,50 @@ describe('validation des demandes', () => {
     assert.equal(ok({ mails: [] }), false);
     assert.equal(ok({ mails: Array.from({ length: 11 }, (_, i) => `ext:c1:${i}`) }), false);
     assert.equal(ok({ mails: ['ext:c1:a'], crm: { relances: [{ ref: 'r:1', contact: 'Paul', sujet: 'x', depuis: '2026-10-20' }], taches: [{ ref: 't:1', titre: 'x', echeance: null }], projets: [] } }), true);
-    assert.equal(ok({ mails: ['ext:c1:a'], crm: { relances: [], taches: [] } }), false);
+    assert.equal(ok({ mails: ['ext:c1:a'], crm: { relances: [], taches: [] } }), true, 'une liste absente vaut une liste vide');
     assert.equal(ok({ mails: ['ext:c1:a'], consignes: 'x'.repeat(1001) }), false);
+  });
+  it('le contexte trop long est coupé, jamais refusé (ids de tâches importées de To Do, titres démesurés)', () => {
+    const long = (n: number) => 'x'.repeat(n);
+    const r = analyseMailsSchema.safeParse({
+      body: {
+        mails: ['ext:c1:a'],
+        crm: {
+          relances: [{ ref: `r:ext:c1:${long(150)}`, contact: long(500), sujet: long(900), depuis: '2026-10-20T10:00:00Z' }],
+          taches: Array.from({ length: 18 }, (_, i) => ({ ref: `t:ext:c1:todo:${long(160)}${i}`, titre: long(900), echeance: '2026-11-03T00:00:00Z' })),
+          projets: [{ ref: `p:${long(120)}`, nom: long(400) }],
+        },
+      },
+    });
+    assert.equal(r.success, true, r.success ? '' : JSON.stringify(r.error.issues));
+    if (!r.success) return;
+    const crm = r.data.body.crm!;
+    assert.equal(crm.relances[0].contact.length, 200);
+    assert.equal(crm.relances[0].sujet.length, 300);
+    assert.equal(crm.relances[0].depuis, '2026-10-20');
+    assert.equal(crm.relances[0].ref, `r:ext:c1:${long(150)}`, 'la ref d’une relance reste entière : l’app la relit');
+    assert.equal(crm.projets[0].ref, `p:${long(120)}`);
+    assert.equal(crm.projets[0].nom.length, 200);
+    assert.equal(crm.taches.length, 18);
+    assert.equal(crm.taches[0].titre.length, 300);
+    assert.equal(crm.taches[0].echeance, '2026-11-03');
+    assert.deepEqual(crm.taches.slice(0, 3).map((t) => t.ref), ['t:1', 't:2', 't:3'], 'la ref d’une tâche ne sert pas : elle est raccourcie');
+  });
+  it('une liste trop longue est raccourcie et un élément inutilisable est ignoré', () => {
+    const r = analyseMailsSchema.safeParse({
+      body: {
+        mails: ['ext:c1:a'],
+        crm: {
+          relances: [{ ref: 'r:1', contact: 'Paul', sujet: 'Devis', depuis: '2026-10-20' }, { ref: 'x'.repeat(501), contact: 'Léa', sujet: 'x', depuis: '2026-10-21' }, { contact: 'sans ref' }, null],
+          taches: Array.from({ length: 60 }, (_, i) => ({ ref: `t:${i}`, titre: `T${i}`, echeance: null })),
+          projets: [{ ref: 'p:1', nom: 'Maison' }],
+        },
+      },
+    });
+    assert.equal(r.success, true);
+    if (!r.success) return;
+    assert.deepEqual(r.data.body.crm!.relances.map((x) => x.ref), ['r:1']);
+    assert.equal(r.data.body.crm!.taches.length, 40);
   });
   it('« analyseAuto » est un réglage de compte à lui seul', () => {
     const ok = (body: unknown) => patchIntegrationSchema.safeParse({ params: { id: 'c1' }, body }).success;
