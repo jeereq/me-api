@@ -60,11 +60,27 @@ export const assistantSchema = z.object({
     deja: z.number().int().min(0).max(50).optional(),
   }),
 });
-/** Ce que l'app sait des relances, tâches et projets de l'utilisateur pour analyser ses mails (voir analyses/regles.ts). */
+/**
+ * Ce que l'app sait des relances, tâches et projets de l'utilisateur pour analyser ses mails (voir analyses/regles.ts).
+ * Ce contexte aide l'IA, il ne doit jamais empêcher l'analyse : un texte trop long est coupé, une liste trop longue est raccourcie
+ * et un élément inutilisable est ignoré, au lieu de refuser toute la demande (un identifiant de tâche importée de To Do fait plus de 150 caractères).
+ */
+const coupe = (max: number) => z.string().transform((s) => s.slice(0, max));
+/** La ref d'une relance ou d'un projet est rendue telle quelle par l'IA puis relue par l'app : on ne la coupe pas, un élément à la ref démesurée est ignoré. */
+const refCrm = z.string().min(1).max(500);
+const liste = <T extends z.ZodTypeAny>(element: T, max: number) =>
+  z
+    .array(z.unknown())
+    .optional()
+    .transform((xs) => (xs ?? []).flatMap((x) => {
+      const r = element.safeParse(x);
+      return r.success ? [r.data as z.output<T>] : [];
+    }).slice(0, max));
 const contexteCrm = z.object({
-  relances: z.array(z.object({ ref: z.string().max(80), contact: z.string().max(200), sujet: z.string().max(300), depuis: z.string().max(10) })).max(30),
-  taches: z.array(z.object({ ref: z.string().max(80), titre: z.string().max(300), echeance: z.string().max(10).nullable() })).max(40),
-  projets: z.array(z.object({ ref: z.string().max(80), nom: z.string().max(200) })).max(30),
+  relances: liste(z.object({ ref: refCrm, contact: coupe(200), sujet: coupe(300), depuis: coupe(10) }), 30),
+  // L'IA ne rend jamais la ref d'une tâche (elle sert seulement à ne pas en reproposer une) : une ref courte suffit et épargne des jetons.
+  taches: liste(z.object({ ref: z.string(), titre: coupe(300), echeance: z.string().nullish().transform((e) => (e ? e.slice(0, 10) : null)) }), 40).transform((ts) => ts.map((t, i) => ({ ...t, ref: `t:${i + 1}` }))),
+  projets: liste(z.object({ ref: refCrm, nom: coupe(200) }), 30),
 });
 /** L'analyse de mails que le serveur lit lui-même : `mails` sont des références `ext:<compte connecté>:<mail>`, dix au plus. */
 export const analyseMailsSchema = z.object({
