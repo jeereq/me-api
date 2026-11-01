@@ -66,3 +66,9 @@ export const justificatifLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Beaucoup de justificatifs d’un coup, réessaie dans un moment.' },
 });
+
+/**
+ * Retour de paiement FlexPaie (adresse publique) : chaque appel déclenche une vérification chez FlexPaie,
+ * donc 60 appels par minute et par IP au plus.
+ */
+export const retourPaiementLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message });

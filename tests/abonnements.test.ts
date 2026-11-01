@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { abonnementsActifs, ajouterMois, avisAbonnement, etatAbonnement, finEssai, prolonger } from '../src/services/abonnements/offres.js';
+import { abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, prolonger } from '../src/services/abonnements/offres.js';
+import { empreintesCompte, normaliserEmail } from '../src/services/abonnements/essai-unique.js';
 import { lireEtat, montantTexte, normaliserTelephone } from '../src/services/abonnements/flexpaie.js';
 
 const T0 = new Date('2026-10-27T12:00:00Z');
@@ -44,6 +45,34 @@ describe('état de l’abonnement', () => {
   });
 });
 
+describe('mise en service des abonnements', () => {
+  it('lit ABONNEMENTS_DEPUIS', () => {
+    assert.equal(debutAbonnements({ ABONNEMENTS_DEPUIS: '2026-11-15' })?.toISOString(), '2026-11-15T00:00:00.000Z');
+    assert.equal(debutAbonnements({}), null);
+    assert.equal(debutAbonnements({ ABONNEMENTS_DEPUIS: 'bientôt' }), null);
+  });
+
+  it('donne au moins 14 jours d’essai à partir de la mise en service', () => {
+    // Essai noté à la migration, expiré depuis longtemps quand on active les abonnements.
+    const ancien = jours(-60);
+    assert.equal(finEssaiEffective(ancien, T0)?.toISOString(), jours(14).toISOString());
+    const e = etatAbonnement({ essaiJusqua: ancien }, jours(10), true, T0);
+    assert.equal(e.offre, 'essai');
+    assert.equal(e.joursRestants, 4);
+    assert.equal(etatAbonnement({ essaiJusqua: ancien }, jours(15), true, T0).offre, 'gratuit');
+    // L'avis de fin d'essai part bien, 3 jours avant la fin repoussée.
+    assert.match(avisAbonnement({ essaiJusqua: ancien }, jours(11), true, T0)!.titre, /3 jours/);
+  });
+
+  it('garde un essai plus long, et ne crée pas d’essai à un compte qui n’en a pas', () => {
+    assert.equal(finEssaiEffective(jours(20), T0)?.toISOString(), jours(20).toISOString());
+    assert.equal(finEssaiEffective(null, T0), null);
+    assert.equal(etatAbonnement({ essaiJusqua: null }, T0, true, T0).offre, 'gratuit');
+    // Sans date de mise en service, rien ne change.
+    assert.equal(finEssaiEffective(jours(-1), null)?.toISOString(), jours(-1).toISOString());
+  });
+});
+
 describe('prolonger Pro après un paiement', () => {
   it('ajoute des mois calendaires sans déborder', () => {
     assert.equal(ajouterMois(new Date('2027-01-31T10:00:00Z'), 1).toISOString(), '2027-02-28T10:00:00.000Z');
@@ -54,6 +83,14 @@ describe('prolonger Pro après un paiement', () => {
     assert.equal(prolonger(null, 'mensuel', T0).toISOString(), '2026-11-27T12:00:00.000Z');
     assert.equal(prolonger(jours(-5), 'mensuel', T0).toISOString(), '2026-11-27T12:00:00.000Z');
     assert.equal(prolonger(new Date('2026-11-10T00:00:00Z'), 'annuel', T0).toISOString(), '2027-11-10T00:00:00.000Z');
+  });
+
+  it('commence après l’essai en cours, sans perdre de jours', () => {
+    assert.equal(prolonger(null, 'mensuel', T0, jours(10)).toISOString(), '2026-12-06T12:00:00.000Z');
+    // Essai fini : la période part de maintenant.
+    assert.equal(prolonger(null, 'mensuel', T0, jours(-2)).toISOString(), '2026-11-27T12:00:00.000Z');
+    // Pro déjà ouvert au-delà de l'essai : on part de la fin de Pro.
+    assert.equal(prolonger(jours(40), 'mensuel', T0, jours(10)).toISOString(), ajouterMois(jours(40), 1).toISOString());
   });
 });
 
@@ -73,6 +110,24 @@ describe('avis d’abonnement', () => {
     assert.match(a1.titre, /demain/);
     assert.notEqual(a7.cle, a1.cle);
     assert.equal(avisAbonnement({ abonnementFinLe: jours(6) }, T0, false), null);
+  });
+});
+
+describe('essai unique par personne', () => {
+  it('ramène une adresse à sa forme canonique', () => {
+    assert.equal(normaliserEmail('  Awa.Diallo+me@GMail.com '), 'awadiallo@gmail.com');
+    assert.equal(normaliserEmail('a.b@googlemail.com'), 'ab@gmail.com');
+    assert.equal(normaliserEmail('jean.paul+essai@exemple.cd'), 'jean.paul@exemple.cd');
+    assert.equal(normaliserEmail('pas-une-adresse'), 'pas-une-adresse');
+  });
+
+  it('donne la même empreinte aux variantes d’une adresse, et ne la révèle pas', () => {
+    const a = empreintesCompte({ email: 'awa.diallo@gmail.com' }, 'secret');
+    const b = empreintesCompte({ email: 'AwaDiallo+2@gmail.com' }, 'secret');
+    assert.deepEqual(a, b);
+    assert.doesNotMatch(a[0], /awa/);
+    assert.notDeepEqual(empreintesCompte({ email: 'awa.diallo@gmail.com' }, 'autre'), a);
+    assert.equal(empreintesCompte({ email: 'x@y.cd', googleId: '123' }, 'secret').length, 2);
   });
 });
 

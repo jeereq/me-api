@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import type { Prisma } from '@prisma/client';
 
 import { dechiffrer } from '../utils/crypto.js';
+import { empreintesCompte } from './abonnements/essai-unique.js';
 import { etatAbonnement, finEssai, type ChampsAbonnement } from './abonnements/offres.js';
 import { HttpError } from '../utils/http.js';
 import { generateToken } from '../utils/jwt.js';
@@ -27,8 +28,9 @@ function creerCompte(data: Omit<Prisma.UserCreateInput, 'role'>) {
       const count = await tx.user.count();
       if (count > 0 && process.env.SIGNUP_OPEN === 'false') throw new HttpError(403, "Les inscriptions sont fermées. Demande à l'admin.");
       if (await tx.user.findUnique({ where: { email: data.email } })) throw new HttpError(409, 'Un compte existe déjà avec cet email.');
-      // Chaque nouveau compte commence par l'essai Pro.
-      return tx.user.create({ data: { ...data, essaiJusqua: finEssai(), role: count === 0 && !process.env.ADMIN_EMAIL ? 'ADMIN' : 'UTILISATEUR' } });
+      // Chaque nouveau compte commence par l'essai Pro, sauf si la même personne l'a déjà eu avec un compte supprimé.
+      const dejaEu = await tx.essaiUtilise.count({ where: { empreinte: { in: empreintesCompte({ email: data.email, googleId: data.googleId }) } } });
+      return tx.user.create({ data: { ...data, essaiJusqua: dejaEu ? null : finEssai(), role: count === 0 && !process.env.ADMIN_EMAIL ? 'ADMIN' : 'UTILISATEUR' } });
     },
     { isolationLevel: 'Serializable' },
   );
@@ -195,6 +197,10 @@ export const AuthService = {
     }
     // Les paiements restent pour la comptabilité, sans le numéro de téléphone (le lien au compte disparaît avec lui).
     await prisma.paiement.updateMany({ where: { userId }, data: { telephone: '' } });
+    // L'essai Pro est unique par personne : on garde seulement une empreinte de l'email et du compte Google.
+    if (user.essaiJusqua) {
+      await prisma.essaiUtilise.createMany({ data: empreintesCompte(user).map((empreinte) => ({ empreinte })), skipDuplicates: true });
+    }
     await StockJustificatifs.purgerCompte(userId);
     await prisma.user.delete({ where: { id: userId } });
     return { ok: true };

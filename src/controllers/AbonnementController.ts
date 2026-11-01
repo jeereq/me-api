@@ -15,6 +15,9 @@ export const AbonnementController = {
   suivre: async (req: Request, res: Response) => {
     res.json(await AbonnementService.suivre(req.user!.id, req.params.reference));
   },
+  abandonner: async (req: Request, res: Response) => {
+    res.json(await AbonnementService.abandonner(req.user!.id, req.params.reference));
+  },
   retour: async (req: Request, res: Response) => {
     res.json(await AbonnementService.retour((req.body ?? {}) as Record<string, unknown>));
   },

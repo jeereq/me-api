@@ -3,16 +3,18 @@
  *
  * - Gratuit : l'espace personnel complet (tâches, relances, habitudes, projets, finances, rappels dans l'app).
  * - Pro : en plus, les fonctions qui coûtent au serveur ou demandent des accès externes (voir FONCTIONS_PRO).
- * - Chaque nouveau compte a un essai Pro de ESSAI_JOURS jours, sans paiement.
+ * - Chaque nouveau compte a un essai Pro de ESSAI_JOURS jours, sans paiement, une fois par personne. Le jour où les
+ *   abonnements sont mis en service (ABONNEMENTS_DEPUIS), chaque compte qui a un essai garde au moins ESSAI_JOURS jours
+ *   à partir de cette date : personne ne perd Pro le jour de l'activation.
  * - Pro est prépayé (FlexPaie, mobile money) : un paiement ouvre un mois ou un an, sans renouvellement automatique.
- *   Payer avant la fin prolonge à partir de la fin en cours, rien n'est perdu.
+ *   Payer avant la fin prolonge à partir de la fin en cours, et payer pendant l'essai commence après l'essai : rien n'est perdu.
  *
  * Les prix doivent rester identiques à ceux des conditions générales de vente (me-mobile/public/cgv.html).
  */
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-10-27';
+export const VERSION_CGV = '2026-11-01';
 
 export type Periode = 'mensuel' | 'annuel';
 
@@ -64,9 +66,31 @@ export type EtatAbonnement = {
 /** Les abonnements sont activés par ABONNEMENTS=true. Sans, le serveur reste ouvert à tous comme avant. */
 export const abonnementsActifs = (env: Record<string, string | undefined> = process.env) => env.ABONNEMENTS?.trim().toLowerCase() === 'true';
 
+/**
+ * Date de mise en service des abonnements (ABONNEMENTS_DEPUIS, ex. 2026-11-15). À poser le jour où l'on passe
+ * ABONNEMENTS à true : les essais comptent alors à partir de cette date au plus tôt. Absente ou illisible : null.
+ */
+export function debutAbonnements(env: Record<string, string | undefined> = process.env): Date | null {
+  const v = env.ABONNEMENTS_DEPUIS?.trim();
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Fin réelle de l'essai : celle notée sur le compte, repoussée à ESSAI_JOURS jours après la mise en service des
+ * abonnements si elle tombe avant. Un compte sans essai (essai déjà utilisé, compte créé par l'admin) n'en reçoit pas.
+ */
+export function finEssaiEffective(essaiJusqua: Date | null | undefined, depuis: Date | null = debutAbonnements()): Date | null {
+  if (!essaiJusqua) return null;
+  if (!depuis) return essaiJusqua;
+  const plancher = finEssai(depuis);
+  return essaiJusqua > plancher ? essaiJusqua : plancher;
+}
+
 const jours = (fin: Date, maintenant: Date) => Math.max(0, Math.ceil((fin.getTime() - maintenant.getTime()) / 86400000));
 
-export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs()): EtatAbonnement {
+export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs(), depuis = debutAbonnements()): EtatAbonnement {
   const toutes = Object.keys(FONCTIONS_PRO) as FonctionPro[];
   const periode: Periode | null = c.abonnementPeriode === 'annuel' || c.abonnementPeriode === 'mensuel' ? c.abonnementPeriode : null;
   const base = { actif, periode };
@@ -76,7 +100,7 @@ export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
 
   if (!actif || c.role === 'ADMIN') return { ...base, offre: 'libre', pro: true, jusqua: null, joursRestants: null, fonctions: toutes };
 
-  const essai = c.essaiJusqua ?? null;
+  const essai = finEssaiEffective(c.essaiJusqua, depuis);
   if (essai && essai > maintenant) return { ...base, offre: 'essai', pro: true, jusqua: essai.toISOString(), joursRestants: jours(essai, maintenant), fonctions: toutes };
 
   return { ...base, offre: 'gratuit', pro: false, jusqua: null, joursRestants: null, fonctions: [] };
@@ -95,9 +119,13 @@ export function ajouterMois(d: Date, mois: number) {
   return r;
 }
 
-/** Nouvelle fin de Pro après un paiement : à partir de la fin en cours si Pro est encore ouvert, sinon de maintenant. */
-export function prolonger(finActuelle: Date | null | undefined, periode: Periode, maintenant = new Date()) {
-  const depart = finActuelle && finActuelle > maintenant ? finActuelle : maintenant;
+/**
+ * Nouvelle fin de Pro après un paiement. La période part de la plus tardive de : la fin de Pro en cours, la fin de
+ * l'essai en cours (les jours d'essai ne sont pas perdus), maintenant.
+ */
+export function prolonger(finActuelle: Date | null | undefined, periode: Periode, maintenant = new Date(), finEssaiEnCours?: Date | null) {
+  let depart = maintenant;
+  for (const d of [finActuelle, finEssaiEnCours]) if (d && d > depart) depart = d;
   return ajouterMois(depart, OFFRES.pro[periode].mois);
 }
 
@@ -113,9 +141,9 @@ const SUITE = "Ensuite, Me reste gratuite pour l'essentiel ; le copilote IA, les
  * - fin d'essai : 3 jours avant, dans l'app ;
  * - fin de la période payée : 7 jours puis 1 jour avant, dans l'app et par email (rien n'est prélevé automatiquement).
  */
-export function avisAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs()): AvisAbonnement | null {
+export function avisAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs(), depuis = debutAbonnements()): AvisAbonnement | null {
   if (!actif) return null;
-  const e = etatAbonnement(c, maintenant, actif);
+  const e = etatAbonnement(c, maintenant, actif, depuis);
   if (e.joursRestants === null || !e.jusqua) return null;
   const jour = e.jusqua.slice(0, 10);
   const quand = e.joursRestants <= 1 ? 'demain' : `dans ${e.joursRestants} jours`;

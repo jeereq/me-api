@@ -247,15 +247,27 @@ model Paiement {
   montant   Int
   devise    String
   telephone String    @default("")
-  /// en_attente, paye ou echoue
+  /// en_attente, paye, echoue (refusé par FlexPaie), expire (pas de réponse en 24 h) ou abandonne (par le client).
+  /// expire et abandonne restent revérifiés pendant 7 jours : un paiement validé en retard ouvre quand même Pro.
   statut    String    @default("en_attente")
   /// Numéro de commande renvoyé par FlexPaie, pour vérifier le paiement chez eux.
   commande  String?
   message   String?
   payeLe    DateTime?
+  /// Version des CGV acceptées et demande d'accès immédiat pour ce paiement : chaque période est un contrat.
+  cgvVersion    String?
+  accesImmediat Boolean @default(false)
   createdAt DateTime  @default(now())
 
   @@index([userId, createdAt])
+  @@index([statut, createdAt])
+}
+
+/// Empreinte (HMAC) de l'email ou de l'identifiant Google d'un compte supprimé qui a eu son essai Pro.
+/// Sert seulement à ne pas redonner l'essai à la même personne. Voir src/services/abonnements/essai-unique.ts.
+model EssaiUtilise {
+  empreinte String   @id
+  createdAt DateTime @default(now())
 }
 
 /// Un justificatif de dépense (photo de reçu, PDF de facture) déposé chez Cloudinary par me-api.
