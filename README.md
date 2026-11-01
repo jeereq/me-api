@@ -113,6 +113,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/abonnement` | compte | `{ abonnement, paiements }` : offre en cours et 10 derniers paiements |
 | POST | `/api/abonnement/paiement` | compte | `{ periode: "mensuel" \| "annuel", telephone, accepteCgv: true, accesImmediat: true }` → `{ paiement }` en attente de validation sur le téléphone |
 | GET | `/api/abonnement/paiements/:reference` | compte | Revérifie le paiement chez FlexPaie → `{ paiement, abonnement, paiements }` |
+| POST | `/api/abonnement/paiements/:reference/abandon` | compte | Abandonne un paiement en attente pour pouvoir en refaire un ; il reste revérifié 7 jours → `{ paiement, abonnement, paiements }` |
 | POST | `/api/abonnement/flexpaie/retour` | public | Retour de FlexPaie ; la commande est toujours revérifiée chez FlexPaie |
 | GET | `/api/justificatifs` | compte | `{ disponible, tailleMax }` : Cloudinary configuré, taille maximale d'un fichier |
 | POST | `/api/justificatifs` | compte (membre sauf lecteur pour `equipe`) | Formulaire `multipart/form-data` : `fichier` (JPEG, PNG, WebP, HEIC ou PDF, 10 Mo au plus), `equipe?` → **201** `{ justificatif: { id, url, apercu?, nom, sorte, taille, pages?, ajouteLe } }` à ranger dans la dépense ; 60 fichiers / heure |
@@ -281,17 +282,18 @@ Une dépense peut porter des photos de reçus et des PDF de factures. L'app envo
 
 ## Abonnements
 
-Activés par `ABONNEMENTS=true` ; sans cette variable, tout reste ouvert comme avant. Le code est dans `src/services/abonnements/` (`offres.ts`, module pur testé dans `tests/abonnements.test.ts`).
+Activés par `ABONNEMENTS=true` ; sans cette variable, tout reste ouvert comme avant. **Le jour de l'activation, pose aussi `ABONNEMENTS_DEPUIS` à la date du jour** (ex. `2026-11-15`) : chaque compte qui a un essai garde au moins 14 jours d'essai à partir de cette date, et reçoit l'avis de fin d'essai. Sans elle, les essais notés à la migration ou à l'inscription peuvent être déjà finis le jour où l'on active. Le code est dans `src/services/abonnements/` (`offres.ts`, module pur testé dans `tests/abonnements.test.ts`).
 
 | Offre | Ce qu'elle donne |
 | --- | --- |
-| **Essai** | Tout Pro pendant 14 jours, sans paiement, à la création du compte. Les comptes existants au moment de la migration commencent leur essai ce jour-là. |
+| **Essai** | Tout Pro pendant 14 jours, sans paiement, à la création du compte, une fois par personne. Au plus tôt 14 jours après `ABONNEMENTS_DEPUIS`. |
 | **Gratuit** | Tout l'espace personnel : tâches, relances, habitudes, projets, finances, statistiques, récompenses, rappels dans l'app. Rejoindre une équipe sur invitation. |
 | **Pro** | En plus : copilote IA, comptes connectés (connexion, lecture, écriture, synchro), création d'équipes et invitations, rappels par email et push. 4,99 $ par mois ou 49,99 $ par an. |
 
 - Une route Pro sans abonnement répond **402** `ABONNEMENT_REQUIS` (avec `fonction`). Les admins ont toujours tout. Sans Pro, on peut encore voir et déconnecter ses comptes connectés ; la synchro planifiée les ignore, et les rappels restent dans l'app.
-- **Paiement prépayé, sans renouvellement automatique** : un paiement FlexPaie (mobile money) ouvre un mois ou un an. Payer avant la fin ajoute la période à la fin en cours. Rien n'est prélevé automatiquement : Me prévient 7 jours puis la veille de la fin (dans l'app et par email), et 3 jours avant la fin de l'essai.
-- **Sécurité du paiement** : le retour de FlexPaie sert seulement à retrouver la commande, qui est toujours revérifiée auprès de FlexPaie (montant et devise compris) ; un paiement ne prolonge Pro qu'une fois, même si le retour arrive deux fois. Les paiements dont le retour s'est perdu sont revérifiés toutes les 5 minutes pendant 24 h.
+- **Paiement prépayé, sans renouvellement automatique** : un paiement FlexPaie (mobile money) ouvre un mois ou un an. Payer avant la fin ajoute la période à la fin en cours ; payer pendant l'essai la fait commencer à la fin de l'essai. Rien n'est prélevé automatiquement : Me prévient 7 jours puis la veille de la fin (dans l'app et par email), et 3 jours avant la fin de l'essai.
+- **Sécurité du paiement** : le retour de FlexPaie sert seulement à retrouver la commande, qui est toujours revérifiée auprès de FlexPaie (montant et devise compris) ; un paiement ne prolonge Pro qu'une fois, même si le retour arrive deux fois. Sans montant confirmé par FlexPaie, Pro ne s'ouvre pas. Les paiements dont le retour s'est perdu sont revérifiés toutes les 5 minutes pendant 24 h, puis passent en `expire` ; un paiement `expire` ou `abandonne` est encore revérifié une fois par heure pendant 7 jours, et s'il est finalement payé, Pro s'ouvre et la personne est prévenue (app et email). On ne peut pas lancer un second paiement tant qu'un premier est `en_attente` : il faut d'abord l'abandonner. L'adresse de retour est limitée à 60 appels par minute et par IP.
+- **Essai unique** : à la suppression d'un compte qui a eu un essai, une empreinte HMAC (avec `JWT_SECRET`) de son email normalisé et de son identifiant Google est gardée dans `EssaiUtilise` ; un nouveau compte avec la même empreinte commence en Gratuit. L'adresse elle-même n'est pas gardée (`src/services/abonnements/essai-unique.ts`).
 - **Suppression du compte** : les paiements restent pour la comptabilité, détachés du compte et sans numéro de téléphone.
-- **CGV** : payer exige `accepteCgv` et `accesImmediat` (demande d'accès immédiat, qui encadre le droit de rétractation). La date et la version des CGV acceptées sont gardées sur le compte (`VERSION_CGV` dans `offres.ts`, à changer avec `cgv.html` de me-mobile).
+- **CGV** : payer exige `accepteCgv` et `accesImmediat` (demande d'accès immédiat, qui encadre le droit de rétractation). La version des CGV et l'accès immédiat sont notés sur chaque paiement (chaque période est un contrat), et les dernières CGV acceptées sur le compte (`VERSION_CGV` dans `offres.ts`, à changer avec `cgv.html` de me-mobile).
 - Les prix de `offres.ts` doivent rester identiques à ceux de `me-mobile/public/cgv.html`.

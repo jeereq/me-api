@@ -2,7 +2,7 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
-import { avisAbonnement, etatAbonnement } from './abonnements/offres.js';
+import { avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
 import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
@@ -101,15 +101,24 @@ export const NotificationService = {
   async avisAbonnements(users: ({ id: string; email: string; nom: string } & Parameters<typeof avisAbonnement>[0])[], maintenant: Date) {
     for (const u of users) {
       const avis = avisAbonnement(u, maintenant);
-      if (!avis) continue;
-      const cree = await prisma.notification.createMany({
-        data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: maintenant.toISOString().slice(0, 16) }],
-        skipDuplicates: true,
-      });
-      if (!cree.count || !avis.parEmail || !EmailService.configure()) continue;
-      const m = email([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
-      if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
+      if (avis) await this.envoyerAvis(u, avis, maintenant);
     }
+  },
+
+  /** Un avis d'abonnement pour un compte (ex. paiement confirmé en retard), envoyé une seule fois grâce à sa clé. */
+  async avisCompte(userId: string, avis: AvisAbonnement, maintenant = new Date()) {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true } });
+    if (u) await this.envoyerAvis(u, avis, maintenant);
+  },
+
+  async envoyerAvis(u: { id: string; email: string; nom: string }, avis: AvisAbonnement, maintenant: Date) {
+    const cree = await prisma.notification.createMany({
+      data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: maintenant.toISOString().slice(0, 16) }],
+      skipDuplicates: true,
+    });
+    if (!cree.count || !avis.parEmail || !EmailService.configure()) return;
+    const m = email([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
+    if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
   },
 
   /**
