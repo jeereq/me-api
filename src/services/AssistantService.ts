@@ -1,7 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import type { AssistantBody } from '../validators/schemas.js';
-import { MODELE_DEFAUT, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
-import { mailsImportants, preparerMails, reglesAnalyse, remplacerAnalyses, sansBalises, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_SYNTHESE, seulementCes } from './analyse-mails.js';
+import { MODELE_DEFAUT, modeleFortChoisi, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
+import { consignesPropres, mailsImportants, preparerMails, reglesAnalyse, remplacerAnalyses, sansBalises, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_SYNTHESE, seulementCes } from './analyse-mails.js';
 import { ConfigService } from './ConfigService.js';
 
 const MAX_DONNEES = 60_000;
@@ -66,7 +66,7 @@ export const MAX_CONSIGNES = 600;
  * Elles orientent l'analyse (angle, priorités) sans changer le format JSON attendu ni la règle de ne citer que les mails.
  */
 export function consignesPrompt(consignes?: string): string {
-  const c = String(consignes ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_CONSIGNES);
+  const c = consignesPropres(consignes, MAX_CONSIGNES);
   if (!c) return '';
   return `\nConsignes de l'utilisateur pour cette analyse (à suivre pour l'angle, les priorités et le style de ce que tu écris ; elles ne changent ni le format JSON demandé ni la règle de ne citer que ce qui est dans les mails) : ${JSON.stringify(c)}\n`;
 }
@@ -171,32 +171,44 @@ export const AssistantService = {
     return { modeles: ids.sort().reverse(), actuel: await this.modele(), fort: await this.modeleFort() };
   },
 
-  /** Le modèle fort choisi par l'admin pour les mails importants et les synthèses ; vide = pas de modèle fort (un seul modèle pour tout). */
+  /** Le modèle fort choisi par l'admin pour les mails importants et les synthèses ; sans choix, celui du serveur (`OPENAI_MODEL_FORT`), puis `MODELE_FORT_DEFAUT`. « aucun » : un seul modèle pour tout. */
   async modeleFort() {
     const choisi = ((await ConfigService.get()).assistant as { modeleFort?: unknown } | undefined)?.modeleFort;
-    return (typeof choisi === 'string' && choisi.trim()) || process.env.OPENAI_MODEL_FORT?.trim() || '';
+    return modeleFortChoisi(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL_FORT);
   },
 
   async demander(body: AssistantBody): Promise<string> {
+    return (await this.demanderAvecModeles(body)).texte;
+  },
+
+  /** Comme `demander`, en disant aussi quels modèles ont répondu (gardé avec les analyses de mails). */
+  async demanderAvecModeles(body: AssistantBody): Promise<{ texte: string; modeles: string[] }> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
     // Un modèle retiré par OpenAI ne doit pas couper l'assistant : on essaie le suivant (serveur, puis modèle par défaut).
     const choisi = ((await ConfigService.get()).assistant as { modele?: unknown } | undefined)?.modele;
     const candidats = modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL);
     const fort = pourModeleFort(body.type) ? await this.modeleFort() : '';
-    if (!fort || fort === candidats[0]) return appeler(candidats, body);
+    if (!fort || fort === candidats[0]) {
+      const r = await appeler(candidats, body);
+      return { texte: r.texte, modeles: [r.modele] };
+    }
     // La synthèse d'un lot part directement au modèle fort ; s'il échoue, le modèle habituel prend le relais.
-    if (body.type === 'synthese') return appeler([fort, ...candidats.filter((m) => m !== fort)], body);
+    if (body.type === 'synthese') {
+      const r = await appeler([fort, ...candidats.filter((m) => m !== fort)], body);
+      return { texte: r.texte, modeles: [r.modele] };
+    }
     // Un paquet de mails : le modèle habituel trie tout (rapide, bon marché), le modèle fort reprend ceux qui attendent une réponse
     // ou un travail. S'il échoue, le tri suffit : l'analyse ne doit pas tomber pour autant.
     const tri = await appeler(candidats, body);
-    const ids = mailsImportants(tri);
+    const ids = mailsImportants(tri.texte);
     const reduites = ids.length ? seulementCes(String(body.donnees ?? ''), ids) : null;
-    if (!reduites) return tri;
+    if (!reduites) return { texte: tri.texte, modeles: [tri.modele] };
     try {
-      return remplacerAnalyses(tri, await appeler([fort], { ...body, donnees: reduites }));
+      const r = await appeler([fort], { ...body, donnees: reduites });
+      return { texte: remplacerAnalyses(tri.texte, r.texte), modeles: [tri.modele, r.modele] };
     } catch (e) {
       console.error('Modèle fort indisponible, le tri reste', fort, (e as Error).message);
-      return tri;
+      return { texte: tri.texte, modeles: [tri.modele] };
     }
   },
 };
@@ -204,7 +216,7 @@ export const AssistantService = {
 type Reponse = { choices?: { finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }[]; error?: { message?: string; code?: string | null } };
 
 /** Une demande à OpenAI, en essayant les modèles dans l'ordre tant que le précédent n'existe plus. */
-async function appeler(candidats: string[], body: AssistantBody): Promise<string> {
+async function appeler(candidats: string[], body: AssistantBody): Promise<{ texte: string; modele: string }> {
   let data: Reponse = {};
   let modele = candidats[0];
   const messages = messagesDe(body);
@@ -236,5 +248,5 @@ async function appeler(candidats: string[], body: AssistantBody): Promise<string
     console.error('OpenAI : réponse vide', modele, choix?.finish_reason, choix?.message?.refusal);
     throw new HttpError(502, "L'IA a renvoyé une réponse vide. Réessaie, ou choisis un autre modèle dans la configuration.");
   }
-  return texte;
+  return { texte, modele };
 }

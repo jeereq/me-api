@@ -13,6 +13,7 @@ import espaceRoutes from './routes/espace.routes.js';
 import membreRoutes from './routes/membre.routes.js';
 import { initRappelsCron } from './cron/rappels.js';
 import { initJustificatifsCron } from './cron/justificatifs.js';
+import { initAnalysesCron } from './cron/analyses.js';
 import { initSynchronisationCron } from './cron/synchronisation.js';
 import integrationRoutes from './routes/integration.routes.js';
 import justificatifRoutes from './routes/justificatif.routes.js';
@@ -96,4 +97,5 @@ app.listen(port, () => {
   initSynchronisationCron();
   initRappelsCron();
   initJustificatifsCron();
+  initAnalysesCron();
 });

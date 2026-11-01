@@ -60,6 +60,23 @@ export const assistantSchema = z.object({
     deja: z.number().int().min(0).max(50).optional(),
   }),
 });
+/** Ce que l'app sait des relances, tâches et projets de l'utilisateur pour analyser ses mails (voir analyses/regles.ts). */
+const contexteCrm = z.object({
+  relances: z.array(z.object({ ref: z.string().max(80), contact: z.string().max(200), sujet: z.string().max(300), depuis: z.string().max(10) })).max(30),
+  taches: z.array(z.object({ ref: z.string().max(80), titre: z.string().max(300), echeance: z.string().max(10).nullable() })).max(40),
+  projets: z.array(z.object({ ref: z.string().max(80), nom: z.string().max(200) })).max(30),
+});
+/** L'analyse de mails que le serveur lit lui-même : `mails` sont des références `ext:<compte connecté>:<mail>`, dix au plus. */
+export const analyseMailsSchema = z.object({
+  body: z.object({
+    mails: z.array(z.string().min(1).max(500)).min(1, 'Aucun mail à analyser.').max(10, 'Dix mails au plus par demande.'),
+    ton: z.string().max(40).optional(),
+    consignes: z.string().max(1000).optional(),
+    crm: contexteCrm.optional(),
+  }),
+});
+export type AnalyseMailsBody = z.infer<typeof analyseMailsSchema>['body'];
+
 export type AssistantBody = z.infer<typeof assistantSchema>['body'];
 
 export const integrationParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
@@ -70,8 +87,9 @@ export const patchIntegrationSchema = integrationParamsSchema.extend({
       agendas: z.array(z.string().min(1).max(300)).max(50).optional(),
       boitesPartagees: z.array(z.string().trim().email('Adresse de boîte partagée invalide.').max(320)).max(10, 'Dix boîtes partagées au plus.').optional(),
       chargement: z.object({ jours: z.number().int().min(1).max(90).optional(), max: z.number().int().min(10).max(100).optional() }).optional(),
+      analyseAuto: z.boolean().optional(),
     })
-    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined || b.chargement !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas », « boitesPartagees » ou « chargement ».' }),
+    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined || b.chargement !== undefined || b.analyseAuto !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas », « boitesPartagees », « chargement » ou « analyseAuto ».' }),
 });
 
 const DATE_TXT = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.');

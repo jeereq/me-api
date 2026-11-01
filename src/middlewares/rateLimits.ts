@@ -47,6 +47,15 @@ const assistantMails = rateLimit({
   message: { error: "Beaucoup de mails analysés d'un coup : la suite reprendra dans quelques minutes.", code: 'LIMITE_ANALYSE' },
 });
 export const assistantLimiter = [assistantGeneral, assistantMails];
+/** L'analyse de mails lus par le serveur : même compteur que les paquets de mails envoyés par l'app (60 paquets / 10 min par compte). */
+export const analyseMailsLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 60,
+  keyGenerator: cleCompte,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: "Beaucoup de mails analysés d'un coup : la suite reprendra dans quelques minutes.", code: 'LIMITE_ANALYSE' },
+});
 
 /** Justificatifs : 60 fichiers / heure par compte, pour garder le stockage Cloudinary sous contrôle. */
 export const justificatifLimiter = rateLimit({

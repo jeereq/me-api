@@ -44,6 +44,8 @@ export type PrefsCompte = {
   boitesPartagees?: string[];
   /** Comment la boîte de réception se charge : sur combien de jours, et combien de fils au plus. */
   mails?: ChargementMails;
+  /** Le copilote prépare à l'avance l'analyse des nouveaux mails non lus (voir AnalyseMailService). Choisi par l'utilisateur ; faux par défaut. */
+  analyseAuto?: boolean;
 };
 export type ChargementMails = { jours: number; max: number };
 /** Par défaut : 7 jours, 25 fils, comme avant ce réglage. */
