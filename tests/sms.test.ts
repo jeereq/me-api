@@ -62,7 +62,7 @@ describe('envoi', () => {
   it('poste les paramètres de la documentation, en transactionnel', async () => {
     const s = simuler({ message_id: 4125, status: 'S', remarks: 'ok', uid: 'u1' });
     const r = await Asmsc.envoyer(cfg, { telephone: '243812345678', texte: 'Rappel', uid: 'u1', retour: 'https://me/retour' });
-    assert.equal(s.appels[0].url, 'https://sms.exemple.com/api/SendSMS');
+    assert.equal(s.appels[0].url, 'https://sms.exemple.com/api/SendSms');
     assert.equal(s.appels[0].init.method, 'POST');
     assert.deepEqual(s.corps(), {
       api_id: 'API1', api_password: 'secret@123', sms_type: 'T', encoding: 'T', sender_id: 'ME', phonenumber: '243812345678', textmessage: 'Rappel', ValidityPeriodInSeconds: 21600, uid: 'u1', callback_url: 'https://me/retour',
