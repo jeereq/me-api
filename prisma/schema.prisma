@@ -43,6 +43,8 @@ model User {
   abonnementFinLe    DateTime?
   /// Formule payée : finances ou pro (null = pro, pour les comptes payés avant les trois formules).
   abonnementFormule  String?
+  /// Palier de réunions de Pro : 0 (sans réunions) à 3. Prix = Pro + palier.
+  abonnementPalier   Int      @default(0)
   /// Acceptation des conditions générales de vente au moment du paiement, et leur version.
   cgvAccepteesLe     DateTime?
   cgvVersion         String?
@@ -54,6 +56,19 @@ model User {
   equipes      EquipeMembre[]
   paiements    Paiement[]
   analysesMails AnalyseMail[]
+  usageReunions UsageReunion[]
+}
+
+/// Audio de réunion transcrit par compte et par période de comptage : le mois civil (« 2026-11 ») ou « essai » (les 45 minutes offertes).
+model UsageReunion {
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cle      String
+  /// Secondes d'audio transcrites (arrondies à la minute supérieure à chaque réunion).
+  secondes Int      @default(0)
+  majLe    DateTime @updatedAt
+
+  @@id([userId, cle])
 }
 
 /// L'espace privé d'un compte : relances, tâches, habitudes, contacts, journal, agenda, sources, audio.
@@ -249,6 +264,8 @@ model Paiement {
   periode   String
   /// finances ou pro
   formule   String    @default("pro")
+  /// Palier de réunions de Pro (0 à 3) acheté avec ce paiement.
+  palier    Int       @default(0)
   /// Montant en centimes, et sa devise (USD, CDF).
   montant   Int
   devise    String

@@ -64,6 +64,10 @@ describe('assistant : compte rendu', () => {
     const p = prompt({ type: 'compte_rendu', donnees: '{"transcription":"on fait le point chaque lundi"}' });
     for (const k of ['transcription', 'habitude', 'mail', 'relance', '"frequence"', '"corps"']) assert.ok(p.includes(k), k);
   });
+  it('attribue les actions aux membres, aux projets et aux dates', () => {
+    const p = prompt({ type: 'compte_rendu', donnees: '{"membres":[{"ref":"m:1","nom":"Sophie"}],"projetsConnus":[{"ref":"p:1","nom":"Site"}]}' });
+    for (const k of ['"membre"', '"projet"', 'membres', 'projetsConnus']) assert.ok(p.includes(k), k);
+  });
   it('garde la fin d\'une longue transcription, et laisse de la place à la réponse', () => {
     const fin = 'DERNIERE_PHRASE';
     const p = prompt({ type: 'compte_rendu', donnees: 'a'.repeat(90_000) + fin });

@@ -2,9 +2,10 @@ import { randomBytes } from 'node:crypto';
 
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
-import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_FINANCES, FONCTIONS_PRO, formulePayee, OFFRES, prolonger, VERSION_CGV, type Formule, type Periode } from './abonnements/offres.js';
+import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_FINANCES, FONCTIONS_PRO, FONCTIONS_REUNIONS, formulePayee, OFFRES, palierDe, prixPeriode, prolonger, VERSION_CGV, type Formule, type Palier, type Periode } from './abonnements/offres.js';
 import { ErreurFlexpaie, Flexpaie, flexpaieConfigure, normaliserTelephone, type EtatCommande } from './abonnements/flexpaie.js';
 import { NotificationService } from './NotificationService.js';
+import { ReunionService } from './ReunionService.js';
 
 /** Statuts encore revérifiables chez FlexPaie : un paiement validé en retard ouvre quand même Pro. */
 const REVERIFIABLES = ['en_attente', 'expire', 'abandonne'];
@@ -15,9 +16,12 @@ const RATTRAPAGE_MS = 7 * 86400000;
 const RATTRAPAGE_PAS_MS = 3600000;
 let dernierRattrapageLong = 0;
 
-const CHAMPS = { id: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } as const;
-const VUE_PAIEMENT = { reference: true, formule: true, periode: true, montant: true, devise: true, statut: true, message: true, payeLe: true, createdAt: true } as const;
+const CHAMPS = { id: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPalier: true, abonnementPeriode: true, abonnementFinLe: true } as const;
+const VUE_PAIEMENT = { reference: true, formule: true, palier: true, periode: true, montant: true, devise: true, statut: true, message: true, payeLe: true, createdAt: true } as const;
 type APayer = { id: string; commande: string | null; statut: string; montant: number; devise: string };
+
+/** « Pro », « Pro 2 » ou « Finances ». */
+const nomFormule = (f: Formule, palier: number) => (f === 'pro' && palier ? `Pro ${palier}` : OFFRES.formules[f].nom);
 
 const adresseServeur = () => (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
 
@@ -38,22 +42,23 @@ async function conclure(id: string, etat: EtatCommande, message = '') {
     const avant = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { statut: true } });
     const fait = await tx.paiement.updateMany({ where: { id, statut: { in: REVERIFIABLES } }, data: { statut: etat, message: message || null, ...(etat === 'paye' ? { payeLe: new Date() } : {}) } });
     if (!fait.count || etat !== 'paye') return null;
-    const p = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { userId: true, periode: true, formule: true, reference: true } });
+    const p = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { userId: true, periode: true, formule: true, palier: true, reference: true } });
     // Compte supprimé entre-temps : le paiement reste noté, il n'y a plus d'abonnement à ouvrir.
     if (!p.userId) return null;
-    const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId }, select: { abonnementFinLe: true, abonnementFormule: true, essaiJusqua: true } });
+    const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId }, select: { abonnementFinLe: true, abonnementFormule: true, abonnementPalier: true, essaiJusqua: true } });
     const periode = p.periode as Periode;
     const formule: Formule = p.formule === 'finances' ? 'finances' : 'pro';
-    const fin = prolonger({ fin: u.abonnementFinLe, formule: formulePayee(u) }, periode, new Date(), finEssaiEffective(u.essaiJusqua), formule);
-    await tx.user.update({ where: { id: p.userId }, data: { abonnementFormule: formule, abonnementPeriode: periode, abonnementFinLe: fin } });
-    return avant.statut === 'en_attente' ? null : { userId: p.userId, reference: p.reference, fin, formule };
+    const palier: Palier = formule === 'pro' ? palierDe(p.palier) : 0;
+    const fin = prolonger({ fin: u.abonnementFinLe, formule: formulePayee(u), palier: formulePayee(u) === 'pro' ? palierDe(u.abonnementPalier) : 0 }, periode, new Date(), finEssaiEffective(u.essaiJusqua), formule, palier);
+    await tx.user.update({ where: { id: p.userId }, data: { abonnementFormule: formule, abonnementPalier: palier, abonnementPeriode: periode, abonnementFinLe: fin } });
+    return avant.statut === 'en_attente' ? null : { userId: p.userId, reference: p.reference, fin, formule, palier };
   });
   if (tardif) {
     const jour = tardif.fin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
     await NotificationService.avisCompte(tardif.userId, {
       cle: `abonnement:paiement:${tardif.reference}`,
-      titre: `Ton paiement est arrivé : ${OFFRES.formules[tardif.formule].nom} est ouvert`,
-      corps: `Ton opérateur a confirmé le paiement ${tardif.reference} avec du retard. ${OFFRES.formules[tardif.formule].nom} est ouvert jusqu'au ${jour}.`,
+      titre: `Ton paiement est arrivé : ${nomFormule(tardif.formule, tardif.palier)} est ouvert`,
+      corps: `Ton opérateur a confirmé le paiement ${tardif.reference} avec du retard. ${nomFormule(tardif.formule, tardif.palier)} est ouvert jusqu'au ${jour}.`,
       parEmail: true,
     }).catch((e) => console.error('Avis de paiement tardif', e));
   }
@@ -92,20 +97,22 @@ export const AbonnementService = {
    * versions de l'app, qui ne connaissent que Pro.
    */
   offres() {
-    return { actif: abonnementsActifs(), paiement: abonnementsActifs() && flexpaieConfigure(), versionCgv: VERSION_CGV, ...OFFRES, fonctions: FONCTIONS_PRO, fonctionsFinances: FONCTIONS_FINANCES };
+    return { actif: abonnementsActifs(), paiement: abonnementsActifs() && flexpaieConfigure(), versionCgv: VERSION_CGV, ...OFFRES, fonctions: FONCTIONS_PRO, fonctionsFinances: FONCTIONS_FINANCES, fonctionsReunions: FONCTIONS_REUNIONS };
   },
 
   async etat(userId: string) {
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: CHAMPS });
     const paiements = await prisma.paiement.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10, select: VUE_PAIEMENT });
-    return { abonnement: etatAbonnement(u), paiements };
+    const abonnement = etatAbonnement(u);
+    return { abonnement, reunions: await ReunionService.compteur(userId, abonnement), paiements };
   },
 
   /**
    * Demande un paiement mobile money pour une période d'une formule (Finances ou Pro). Le compte a accepté les CGV et demandé l'accès immédiat
    * (noté avec la version des CGV). Le client valide ensuite sur son téléphone.
    */
-  async payer(userId: string, periode: Periode, telephoneBrut: string, formule: Formule = 'pro') {
+  async payer(userId: string, periode: Periode, telephoneBrut: string, formule: Formule = 'pro', palierDemande: number = 0) {
+    const palier: Palier = formule === 'pro' ? palierDe(palierDemande) : 0;
     pretPourPayer();
     const telephone = normaliserTelephone(telephoneBrut);
     if (!telephone) throw new HttpError(400, 'Numéro de téléphone invalide. Écris-le avec l’indicatif, par exemple 243 81 234 5678.');
@@ -115,10 +122,9 @@ export const AbonnementService = {
       throw new HttpError(409, 'Un paiement est déjà en attente : valide-le sur ton téléphone, ou abandonne cette demande avant d’en faire une autre.', 'PAIEMENT_EN_COURS');
     }
 
-    const offre = OFFRES.formules[formule][periode];
     const p = await prisma.paiement.create({
       data: {
-        userId, formule, periode, montant: offre.prix, devise: OFFRES.devise, telephone, cgvVersion: VERSION_CGV, accesImmediat: true,
+        userId, formule, palier, periode, montant: prixPeriode(formule, periode, palier), devise: OFFRES.devise, telephone, cgvVersion: VERSION_CGV, accesImmediat: true,
         reference: `ME${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`,
       },
     });
