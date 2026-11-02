@@ -1,9 +1,11 @@
 import type { Prisma } from '@prisma/client';
 
-import type { AnalyseMailsBody } from '../validators/schemas.js';
+import type { AnalyseBoucleBody, AnalyseMailsBody } from '../validators/schemas.js';
+import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
+import { donneesBoucle, lireBoucle, type AnalyseBoucle } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -92,6 +94,36 @@ export const AnalyseMailService = {
       },
     );
     return { ...r, illisibles: [...r.illisibles, ...b.mails.filter((x) => !permises.includes(x))] };
+  },
+
+  /**
+   * Comprendre une boucle de mails : de quoi il s'agit, ce qui s'est passé, qui doit agir, et une réponse prête s'il en faut une.
+   * Gardée 30 jours comme les autres analyses, sous sa propre clé : un nouveau message de la boucle est un autre mail, donc une nouvelle lecture.
+   */
+  async analyserBoucle(userId: string, b: AnalyseBoucleBody): Promise<AnalyseBoucle & { messages: number; enCache: boolean }> {
+    const ref = lireRef(b.mail);
+    if (!ref) throw new HttpError(400, 'Ce mail ne vient pas d’un compte connecté.');
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
+    const ton = b.ton ?? tonDe(user.espace?.data);
+    const cle = empreinte(ton, b.consignes);
+    const mailId = `boucle:${ref.mailId}`;
+    const gardee = await prisma.analyseMail.findFirst({ where: { userId, integrationId: ref.integrationId, mailId, empreinte: cle, majLe: { gte: limiteAge() } } });
+    if (gardee) return { ...(gardee.resultat as AnalyseBoucle & { messages: number }), enCache: true };
+
+    const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
+    const donnees = donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait });
+    if (!donnees.messages.length) throw new HttpError(422, 'Ce mail ne contient pas de texte à analyser.');
+    const r = await AssistantService.demanderAvecModeles({ type: 'boucle', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
+    const lu = lireBoucle(r.texte);
+    if (!lu) throw new HttpError(502, "L'IA n'a pas pu lire cette boucle. Réessaie dans un instant.");
+    const resultat = { ...lu, messages: donnees.messages.length };
+    const json = jsonPropre(resultat) as unknown as Prisma.InputJsonObject;
+    await prisma.analyseMail.upsert({
+      where: { integrationId_mailId: { integrationId: ref.integrationId, mailId } },
+      create: { userId, integrationId: ref.integrationId, mailId, empreinte: cle, modele: r.modeles.join('+'), resultat: json },
+      update: { empreinte: cle, modele: r.modeles.join('+'), resultat: json },
+    });
+    return { ...resultat, enCache: false };
   },
 
   /**

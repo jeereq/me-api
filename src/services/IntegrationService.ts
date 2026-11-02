@@ -274,7 +274,7 @@ export const IntegrationService = {
    * Les mails d'une personne, d'un domaine, d'un dossier ou d'une boîte partagée, sur une période : le lot que le copilote
    * analyse d'un coup. Gardés avec les mails vus (200 au plus), pour pouvoir les lire et y répondre ensuite.
    */
-  async chercherMails(userId: string, id: string, r: { de?: string; domaine?: string; dossier?: string; boite?: string; depuis?: string; jusqua?: string; suivant?: string; max?: number }) {
+  async chercherMails(userId: string, id: string, r: { de?: string; domaine?: string; dossier?: string; boite?: string; depuis?: string; jusqua?: string; nonLus?: boolean; pj?: boolean; objet?: string; suivant?: string; max?: number }) {
     const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'chercherMails');
     if (r.boite && !(prefsCompte(i).boitesPartagees ?? []).includes(r.boite)) throw new HttpError(400, 'Ajoute d’abord cette boîte partagée dans Agendas & outils.');
     const page = await this._ecrire(() => c.chercherMails!(jetons, { ...r, max: Math.min(100, r.max ?? 50), fuseau }), i, false);
@@ -347,7 +347,7 @@ export const IntegrationService = {
     const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'lireMail');
     const garde = this._mailGarde(i, mailId);
     const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite, garderNonLu: true }), i, false);
-    return { contenu, ctx: i.ctx as Ctx, garde };
+    return { contenu, ctx: i.ctx as Ctx, garde, compte: i.compte ?? undefined };
   },
 
   /** Pose ou retire des étiquettes sur un mail ; la liste du compte et le mail gardé suivent tout de suite. */
