@@ -128,9 +128,13 @@ export const AbonnementService = {
       // Dernières CGV acceptées, gardées aussi sur le compte (la preuve de chaque période est sur son paiement).
       await prisma.user.update({ where: { id: userId }, data: { cgvAccepteesLe: new Date(), cgvVersion: VERSION_CGV } });
     } catch (e) {
-      await prisma.paiement.update({ where: { id: p.id }, data: { statut: 'echoue', message: (e as Error).message } });
+      // Un problème de nos identifiants FlexPaie ne regarde pas le client : il voit un message simple, l'admin le détail dans les journaux.
+      const config = e instanceof ErreurFlexpaie && e.configuration;
+      const message = config ? 'Le paiement mobile money est momentanément indisponible.' : (e as Error).message;
+      await prisma.paiement.update({ where: { id: p.id }, data: { statut: 'echoue', message } });
       if (e instanceof ErreurFlexpaie) {
         console.error('FlexPaie', e.message);
+        if (config) throw new HttpError(503, 'Le paiement mobile money est momentanément indisponible. Réessaie plus tard.');
         throw new HttpError(502, "La demande de paiement n'a pas pu partir. Vérifie le numéro et réessaie.");
       }
       throw e;
