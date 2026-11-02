@@ -14,7 +14,7 @@
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-11-01';
+export const VERSION_CGV = '2026-11-02';
 
 export type Periode = 'mensuel' | 'annuel';
 
