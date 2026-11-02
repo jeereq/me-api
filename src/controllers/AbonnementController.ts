@@ -10,7 +10,7 @@ export const AbonnementController = {
     res.json(await AbonnementService.etat(req.user!.id));
   },
   payer: async (req: Request, res: Response) => {
-    res.json(await AbonnementService.payer(req.user!.id, req.body.periode, req.body.telephone));
+    res.json(await AbonnementService.payer(req.user!.id, req.body.periode, req.body.telephone, req.body.formule));
   },
   suivre: async (req: Request, res: Response) => {
     res.json(await AbonnementService.suivre(req.user!.id, req.params.reference));

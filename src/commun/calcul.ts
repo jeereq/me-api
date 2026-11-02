@@ -3,6 +3,7 @@ import { addDays, doneIn, type Frequence, habitDue, habitToday, parse, pastDue, 
 import { estTacheDeProjet, resumes, tachesActives, type TacheProjet } from './projets.js';
 import { alertesObjectifs } from './objectifs.js';
 import { alertesFinances, type FinancesRappels } from './previsions.js';
+import { alerteBilan, alertesEcheances, alertesPrets, type FinancesAvancees } from './prets.js';
 
 export type { Mode } from './modes.js';
 export { addDays } from './jours.js';
@@ -22,10 +23,15 @@ export const relanceAttendue = (r: Pick<Relance, 'statut' | 'derniereRelance'>) 
 const titreRelance = (r: Relance) => `${r.statut === 'relance' ? 'Relancer à nouveau' : 'Relancer'} ${r.contact}`;
 type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null } & Partial<TacheProjet>;
 type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
-export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; projets?: { id: string }[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels };
+export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; projets?: { id: string }[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels & FinancesAvancees };
 export type ConfigRappels = ConfigModes & { routineHeure?: string; rappelSoir?: string };
-/** canaux : pour couper le push ou l'email d'un rappel précis (alertes de budget) ; absent = selon les réglages du compte. */
-export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string; canaux?: { push: boolean; email: boolean } };
+/**
+ * canaux : pour couper le push ou l'email d'un rappel précis (alertes de budget) ; absent = selon les réglages du compte.
+ * famille « finances » : alerte des finances, envoyée en push et par email avec la formule Finances (les autres rappels demandent Pro).
+ */
+export type Rappel = { quand: string; titre: string; corps: string; mode: Mode | 'briefing'; cle: string; canaux?: { push: boolean; email: boolean }; famille?: 'finances' };
+/** `financesAvancees` : prêts, paiements à venir et bilan du mois (formule Finances ou Pro). Vrai par défaut. */
+export type OptionsRappels = { financesAvancees?: boolean };
 
 // Points de la mission, comme dans l'app (me-mobile/src/lib/jeu.ts et mission.ts).
 const POINTS = { habitude: 10, relance: 15, tache: 15, tacheHaute: 20, ponctuel: 5, parfait: 50 };
@@ -68,7 +74,7 @@ export function serieDuJour(e: EspaceRappels, jour: string) {
 const pluriel = (n: number, un: string, plusieurs: string) => `${n} ${n > 1 ? plusieurs : un}`;
 
 /** Rappels d'une journée (heure locale), avec les mêmes règles que les notifications du téléphone. */
-export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string): Rappel[] {
+export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string, options: OptionsRappels = {}): Rappel[] {
   const out: Rappel[] = [];
   const matin = c.routineHeure || '07:00';
   const soir = c.rappelSoir || '19:00';
@@ -91,9 +97,13 @@ export function rappelsDuJour(e: EspaceRappels, c: ConfigRappels, jour: string):
   } else add(matin, 'Ton briefing Me est prêt', `Agenda, relances, tâches et habitudes du jour.${budget}`, 'briefing', 'briefing', true);
 
   // Alertes de budget : une seule fois par période et par niveau, d'où une clé sans date du jour.
-  for (const a of fin.alertes) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux });
+  for (const a of fin.alertes) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux, famille: 'finances' });
   // Objectifs : versement du jour, retard, échéance passée, objectif atteint (clé sans date du jour, sauf le versement).
-  for (const a of alertesObjectifs(e.finances, jour, soir)) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux });
+  for (const a of alertesObjectifs(e.finances, jour, soir)) out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux, famille: 'finances' });
+  // Finances avancées : prêts à rendre, paiements de demain, bilan du mois écoulé (le 1er au matin).
+  if (options.financesAvancees !== false)
+    for (const a of [...alertesPrets(e.finances, jour, soir), ...alertesEcheances(e.finances, jour, soir), ...alerteBilan(e.finances, jour, matin)])
+      out.push({ quand: `${jour}T${a.heure}`, titre: a.titre, corps: a.corps, mode: a.mode, cle: a.id, canaux: a.canaux, famille: 'finances' });
 
   // Soir : un coup de pouce seulement s'il change quelque chose (série en danger, journée parfaite toute proche).
   if (jeu && !pointsDuJour && serie)

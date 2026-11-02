@@ -6,6 +6,7 @@
     "modes.ts",
     "objectifs.ts",
     "patch.ts",
+    "prets.ts",
     "previsions.ts",
     "projets.ts"
   ]

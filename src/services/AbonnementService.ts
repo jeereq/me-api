@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
-import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_PRO, OFFRES, prolonger, VERSION_CGV, type Periode } from './abonnements/offres.js';
+import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_FINANCES, FONCTIONS_PRO, formulePayee, OFFRES, prolonger, VERSION_CGV, type Formule, type Periode } from './abonnements/offres.js';
 import { ErreurFlexpaie, Flexpaie, flexpaieConfigure, normaliserTelephone, type EtatCommande } from './abonnements/flexpaie.js';
 import { NotificationService } from './NotificationService.js';
 
@@ -15,8 +15,8 @@ const RATTRAPAGE_MS = 7 * 86400000;
 const RATTRAPAGE_PAS_MS = 3600000;
 let dernierRattrapageLong = 0;
 
-const CHAMPS = { id: true, role: true, essaiJusqua: true, abonnementPeriode: true, abonnementFinLe: true } as const;
-const VUE_PAIEMENT = { reference: true, periode: true, montant: true, devise: true, statut: true, message: true, payeLe: true, createdAt: true } as const;
+const CHAMPS = { id: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } as const;
+const VUE_PAIEMENT = { reference: true, formule: true, periode: true, montant: true, devise: true, statut: true, message: true, payeLe: true, createdAt: true } as const;
 type APayer = { id: string; commande: string | null; statut: string; montant: number; devise: string };
 
 const adresseServeur = () => (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
@@ -38,21 +38,22 @@ async function conclure(id: string, etat: EtatCommande, message = '') {
     const avant = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { statut: true } });
     const fait = await tx.paiement.updateMany({ where: { id, statut: { in: REVERIFIABLES } }, data: { statut: etat, message: message || null, ...(etat === 'paye' ? { payeLe: new Date() } : {}) } });
     if (!fait.count || etat !== 'paye') return null;
-    const p = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { userId: true, periode: true, reference: true } });
+    const p = await tx.paiement.findUniqueOrThrow({ where: { id }, select: { userId: true, periode: true, formule: true, reference: true } });
     // Compte supprimé entre-temps : le paiement reste noté, il n'y a plus d'abonnement à ouvrir.
     if (!p.userId) return null;
-    const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId }, select: { abonnementFinLe: true, essaiJusqua: true } });
+    const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId }, select: { abonnementFinLe: true, abonnementFormule: true, essaiJusqua: true } });
     const periode = p.periode as Periode;
-    const fin = prolonger(u.abonnementFinLe, periode, new Date(), finEssaiEffective(u.essaiJusqua));
-    await tx.user.update({ where: { id: p.userId }, data: { abonnementPeriode: periode, abonnementFinLe: fin } });
-    return avant.statut === 'en_attente' ? null : { userId: p.userId, reference: p.reference, fin };
+    const formule: Formule = p.formule === 'finances' ? 'finances' : 'pro';
+    const fin = prolonger({ fin: u.abonnementFinLe, formule: formulePayee(u) }, periode, new Date(), finEssaiEffective(u.essaiJusqua), formule);
+    await tx.user.update({ where: { id: p.userId }, data: { abonnementFormule: formule, abonnementPeriode: periode, abonnementFinLe: fin } });
+    return avant.statut === 'en_attente' ? null : { userId: p.userId, reference: p.reference, fin, formule };
   });
   if (tardif) {
     const jour = tardif.fin.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
     await NotificationService.avisCompte(tardif.userId, {
       cle: `abonnement:paiement:${tardif.reference}`,
-      titre: 'Ton paiement est arrivé : Pro est ouvert',
-      corps: `Ton opérateur a confirmé le paiement ${tardif.reference} avec du retard. Pro est ouvert jusqu'au ${jour}.`,
+      titre: `Ton paiement est arrivé : ${OFFRES.formules[tardif.formule].nom} est ouvert`,
+      corps: `Ton opérateur a confirmé le paiement ${tardif.reference} avec du retard. ${OFFRES.formules[tardif.formule].nom} est ouvert jusqu'au ${jour}.`,
       parEmail: true,
     }).catch((e) => console.error('Avis de paiement tardif', e));
   }
@@ -86,9 +87,12 @@ async function verifier(p: APayer) {
 }
 
 export const AbonnementService = {
-  /** Catalogue public : prix, essai et ce que Pro débloque. */
+  /**
+   * Catalogue public : prix, essai et ce que chaque formule débloque. `pro` et `fonctions` restent pour les anciennes
+   * versions de l'app, qui ne connaissent que Pro.
+   */
   offres() {
-    return { actif: abonnementsActifs(), paiement: abonnementsActifs() && flexpaieConfigure(), versionCgv: VERSION_CGV, ...OFFRES, fonctions: FONCTIONS_PRO };
+    return { actif: abonnementsActifs(), paiement: abonnementsActifs() && flexpaieConfigure(), versionCgv: VERSION_CGV, ...OFFRES, fonctions: FONCTIONS_PRO, fonctionsFinances: FONCTIONS_FINANCES };
   },
 
   async etat(userId: string) {
@@ -98,10 +102,10 @@ export const AbonnementService = {
   },
 
   /**
-   * Demande un paiement mobile money pour une période Pro. Le compte a accepté les CGV et demandé l'accès immédiat
+   * Demande un paiement mobile money pour une période d'une formule (Finances ou Pro). Le compte a accepté les CGV et demandé l'accès immédiat
    * (noté avec la version des CGV). Le client valide ensuite sur son téléphone.
    */
-  async payer(userId: string, periode: Periode, telephoneBrut: string) {
+  async payer(userId: string, periode: Periode, telephoneBrut: string, formule: Formule = 'pro') {
     pretPourPayer();
     const telephone = normaliserTelephone(telephoneBrut);
     if (!telephone) throw new HttpError(400, 'Numéro de téléphone invalide. Écris-le avec l’indicatif, par exemple 243 81 234 5678.');
@@ -111,10 +115,10 @@ export const AbonnementService = {
       throw new HttpError(409, 'Un paiement est déjà en attente : valide-le sur ton téléphone, ou abandonne cette demande avant d’en faire une autre.', 'PAIEMENT_EN_COURS');
     }
 
-    const offre = OFFRES.pro[periode];
+    const offre = OFFRES.formules[formule][periode];
     const p = await prisma.paiement.create({
       data: {
-        userId, periode, montant: offre.prix, devise: OFFRES.devise, telephone, cgvVersion: VERSION_CGV, accesImmediat: true,
+        userId, formule, periode, montant: offre.prix, devise: OFFRES.devise, telephone, cgvVersion: VERSION_CGV, accesImmediat: true,
         reference: `ME${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`,
       },
     });

@@ -39,6 +39,8 @@ model User {
   /// Abonnement Pro prépayé : période choisie au dernier paiement, et fin de la période payée (sans renouvellement automatique).
   abonnementPeriode  String?
   abonnementFinLe    DateTime?
+  /// Formule payée : finances ou pro (null = pro, pour les comptes payés avant les trois formules).
+  abonnementFormule  String?
   /// Acceptation des conditions générales de vente au moment du paiement, et leur version.
   cgvAccepteesLe     DateTime?
   cgvVersion         String?
@@ -243,6 +245,8 @@ model Paiement {
   reference String    @unique
   /// mensuel ou annuel
   periode   String
+  /// finances ou pro
+  formule   String    @default("pro")
   /// Montant en centimes, et sa devise (USD, CDF).
   montant   Int
   devise    String

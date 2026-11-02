@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, prolonger } from '../src/services/abonnements/offres.js';
+import { aDroit, abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, formuleDe, messageReserve, OFFRES, prolonger } from '../src/services/abonnements/offres.js';
 import { empreintesCompte, normaliserEmail } from '../src/services/abonnements/essai-unique.js';
 import { lireEtat, montantTexte, normaliserTelephone } from '../src/services/abonnements/flexpaie.js';
 
@@ -150,5 +150,62 @@ describe('FlexPaie', () => {
     assert.equal(lireEtat({ code: '0', transaction: { status: 1 } }), 'echoue');
     assert.equal(lireEtat({ code: '0', transaction: { status: '2' } }), 'en_attente');
     assert.equal(lireEtat({ code: '1', transaction: null }), 'en_attente');
+  });
+});
+
+describe('trois formules : Gratuit, Finances, Pro', () => {
+  it('garde le prix le plus haut à 4,99 $ par mois', () => {
+    assert.equal(OFFRES.formules.finances.mensuel.prix, 199);
+    assert.equal(OFFRES.formules.finances.annuel.prix, 1999);
+    assert.equal(OFFRES.formules.pro.mensuel.prix, 499);
+    assert.ok(Math.max(OFFRES.formules.finances.mensuel.prix, OFFRES.formules.pro.mensuel.prix) <= 499);
+    // Les anciennes versions de l'app lisent toujours `pro`.
+    assert.equal(OFFRES.pro.annuel.prix, 4999);
+  });
+
+  it('ouvre les finances avancées, sans les fonctions Pro, avec Finances', () => {
+    const e = etatAbonnement({ abonnementFormule: 'finances', abonnementFinLe: jours(20), abonnementPeriode: 'mensuel' }, T0, true);
+    assert.equal(e.offre, 'finances');
+    assert.equal(e.finances, true);
+    assert.equal(e.pro, false);
+    assert.equal(aDroit(e, 'justificatifs'), true);
+    assert.equal(aDroit(e, 'assistant'), false);
+    assert.equal(formuleDe('releves'), 'finances');
+    assert.equal(formuleDe('equipes'), 'pro');
+  });
+
+  it('donne tout à Pro, et lit un ancien abonnement sans formule comme Pro', () => {
+    const e = etatAbonnement({ abonnementFinLe: jours(20), abonnementPeriode: 'mensuel' }, T0, true);
+    assert.equal(e.offre, 'pro');
+    assert.equal(e.finances, true);
+    assert.equal(aDroit(e, 'prets'), true);
+    assert.equal(aDroit(etatAbonnement({}, T0, true), 'justificatifs'), false);
+  });
+
+  it('garde l’essai complet quand Finances est payé pendant l’essai', () => {
+    const e = etatAbonnement({ essaiJusqua: jours(5), abonnementFormule: 'finances', abonnementFinLe: jours(35) }, T0, true);
+    assert.equal(e.offre, 'essai');
+    assert.equal(e.pro, true);
+    assert.equal(e.ensuite?.formule, 'finances');
+    // L'avis de fin d'essai dit que Finances prend le relais.
+    assert.match(avisAbonnement({ essaiJusqua: jours(2), abonnementFormule: 'finances', abonnementFinLe: jours(32) }, T0, true)!.corps, /Finances prend le relais/);
+    assert.equal(etatAbonnement({ essaiJusqua: jours(5), abonnementFormule: 'finances', abonnementFinLe: jours(35) }, jours(6), true).offre, 'finances');
+  });
+
+  it('convertit le temps restant au prorata des prix quand on change de formule', () => {
+    // 30 jours de Finances restants valent 30 × 1,99 / 4,99 ≈ 11,96 jours de Pro, puis le mois payé.
+    const fin = prolonger({ fin: jours(30), formule: 'finances' }, 'mensuel', T0, null, 'pro');
+    const attendu = ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 199) / 499)), 1);
+    assert.equal(fin.toISOString(), attendu.toISOString());
+    // Même formule : on prolonge simplement à partir de la fin.
+    assert.equal(prolonger({ fin: jours(30), formule: 'finances' }, 'mensuel', T0, null, 'finances').toISOString(), ajouterMois(jours(30), 1).toISOString());
+    // Passer de Pro à Finances : les jours de Pro valent plus de jours de Finances.
+    assert.ok(prolonger({ fin: jours(10), formule: 'pro' }, 'mensuel', T0, null, 'finances') > ajouterMois(jours(10), 1));
+  });
+
+  it('dit quelle formule choisir quand une fonction est réservée', () => {
+    assert.match(messageReserve('justificatifs'), /Finances/);
+    assert.match(messageReserve('assistant'), /Pro/);
+    assert.match(avisAbonnement({ abonnementFormule: 'finances', abonnementFinLe: jours(6) }, T0, true)!.titre, /Finances/);
   });
 });

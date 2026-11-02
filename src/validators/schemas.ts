@@ -182,9 +182,11 @@ export const patchEspaceEquipeSchema = z.object({ params: equipeParams, body: di
 export const paiementSchema = z.object({
   body: z.object({
     periode: z.enum(['mensuel', 'annuel'], { errorMap: () => ({ message: 'Choisis mensuel ou annuel.' }) }),
+    /** Absente pour les anciennes versions de l'app, qui ne vendaient que Pro. */
+    formule: z.enum(['finances', 'pro'], { errorMap: () => ({ message: 'Choisis la formule Finances ou Pro.' }) }).default('pro'),
     telephone: z.string({ required_error: 'Numéro de téléphone requis' }).trim().min(8, 'Numéro de téléphone requis').max(20),
     accepteCgv: z.literal(true, { errorMap: () => ({ message: 'Accepte les conditions générales de vente pour continuer.' }) }),
-    accesImmediat: z.literal(true, { errorMap: () => ({ message: "Demande l'accès immédiat à Pro pour continuer." }) }),
+    accesImmediat: z.literal(true, { errorMap: () => ({ message: "Demande l'accès immédiat à ta formule pour continuer." }) }),
   }),
 });
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });
