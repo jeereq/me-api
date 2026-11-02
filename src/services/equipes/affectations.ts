@@ -8,7 +8,7 @@
  */
 
 export type GenreAffecte = 'tache' | 'relance' | 'rdv';
-export type Affectation = { genre: GenreAffecte; id: string; titre: string; /** Échéance de la tâche, jour de la relance ou du rendez-vous. */ echeance: string | null; userId: string };
+export type Affectation = { genre: GenreAffecte; id: string; titre: string; /** Échéance de la tâche, jour de la relance ou du rendez-vous. */ echeance: string | null; /** Heure précise de la tâche ou de la relance (« HH:MM »), ou début du rendez-vous. */ heure?: string | null; userId: string };
 
 /** Au plus ce nombre d'avis par enregistrement : un import ou un client qui s'emballe ne doit pas inonder une boîte mail. */
 export const MAX_AVIS_PAR_ENREGISTREMENT = 20;
@@ -18,24 +18,26 @@ const estObjet = (v: unknown): v is Brut => typeof v === 'object' && v !== null 
 
 const JOUR = /^\d{4}-\d{2}-\d{2}$/;
 const jourOuNull = (v: unknown) => (typeof v === 'string' && JOUR.test(v) ? v : null);
+const HEURE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const heureOuNull = (v: unknown) => (typeof v === 'string' && HEURE.test(v) ? v : null);
 
-type Element = { genre: GenreAffecte; id: string; titre: string; echeance: string | null; fait: boolean; affecteA: unknown };
+type Element = { genre: GenreAffecte; id: string; titre: string; echeance: string | null; heure: string | null; fait: boolean; affecteA: unknown };
 
 /** Tout ce qui peut être confié dans ce document : tâches, relances, rendez-vous, dans cet ordre. */
 function elementsDe(espace: unknown): Element[] {
   if (!estObjet(espace)) return [];
   const liste = (v: unknown): Brut[] => (Array.isArray(v) ? v.filter(estObjet) : []);
   const sortie: Element[] = [];
-  for (const t of liste(espace.taches)) if (typeof t.id === 'string' && typeof t.titre === 'string') sortie.push({ genre: 'tache', id: t.id, titre: t.titre, echeance: jourOuNull(t.echeance), fait: t.statut === 'fait', affecteA: t.affecteA });
+  for (const t of liste(espace.taches)) if (typeof t.id === 'string' && typeof t.titre === 'string') sortie.push({ genre: 'tache', id: t.id, titre: t.titre, echeance: jourOuNull(t.echeance), heure: heureOuNull(t.heure), fait: t.statut === 'fait', affecteA: t.affecteA });
   for (const r of liste(espace.relances)) {
     if (typeof r.id !== 'string') continue;
     const contact = typeof r.contact === 'string' ? r.contact.trim() : '';
     const sujet = typeof r.sujet === 'string' ? r.sujet.trim() : '';
-    sortie.push({ genre: 'relance', id: r.id, titre: [contact, sujet].filter(Boolean).join(' · ') || 'Relance', echeance: jourOuNull(r.date), fait: r.statut === 'repondu', affecteA: r.affecteA });
+    sortie.push({ genre: 'relance', id: r.id, titre: [contact, sujet].filter(Boolean).join(' · ') || 'Relance', echeance: jourOuNull(r.date), heure: heureOuNull(r.heure), fait: r.statut === 'repondu', affecteA: r.affecteA });
   }
   if (estObjet(espace.agenda))
     for (const [jour, evenements] of Object.entries(espace.agenda))
-      for (const e of liste(evenements)) if (typeof e.id === 'string' && typeof e.titre === 'string') sortie.push({ genre: 'rdv', id: e.id, titre: e.titre, echeance: jourOuNull(jour), fait: false, affecteA: e.affecteA });
+      for (const e of liste(evenements)) if (typeof e.id === 'string' && typeof e.titre === 'string') sortie.push({ genre: 'rdv', id: e.id, titre: e.titre, echeance: jourOuNull(jour), heure: heureOuNull(e.debut), fait: false, affecteA: e.affecteA });
   return sortie;
 }
 
@@ -57,7 +59,7 @@ export function nouvellesAffectations(avant: unknown, apres: unknown, acteurId: 
     if (x.affecteA === acteurId || !membres.has(x.affecteA)) continue;
     if (anciennes.get(cle(x)) === x.affecteA) continue;
     vues.add(cle(x));
-    sortie.push({ genre: x.genre, id: x.id, titre: x.titre.trim().slice(0, 200), echeance: x.echeance, userId: x.affecteA });
+    sortie.push({ genre: x.genre, id: x.id, titre: x.titre.trim().slice(0, 200), echeance: x.echeance, ...(x.heure && x.echeance ? { heure: x.heure } : {}), userId: x.affecteA });
     if (sortie.length >= MAX_AVIS_PAR_ENREGISTREMENT) break;
   }
   return sortie;

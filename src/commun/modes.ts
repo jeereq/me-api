@@ -44,6 +44,8 @@ const normaliserHeure = (s: string) => {
   const m = HEURE.exec(s.trim());
   return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null;
 };
+/** L'heure précise d'un élément (tâche, relance, habitude, dépense) : « HH:MM » normalisé, null si absente ou invalide. */
+export const heureExacte = (s: unknown): string | null => (typeof s === 'string' ? normaliserHeure(s) : null);
 /** Une heure valide : « matin », « soir » ou « HH:MM » ; null sinon. */
 export const lireHeure = (s: unknown): string | null => {
   if (typeof s !== 'string') return null;
