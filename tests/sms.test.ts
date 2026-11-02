@@ -43,6 +43,7 @@ describe('adresse du service', () => {
     assert.equal(adresseService('http://sms.exemple.com:8080/'), 'http://sms.exemple.com:8080');
   });
   it('reste vide sans valeur', () => {
+    assert.equal(adresseService('SMS_API_URL=https://sms.exemple.com'), 'https://sms.exemple.com');
     assert.equal(adresseService(undefined), '');
     assert.equal(adresseService('  '), '');
   });
@@ -52,6 +53,7 @@ describe('raison d’une panne', () => {
   const panne = (code: string) => Object.assign(new TypeError('fetch failed'), { cause: { code } });
   it('dit ce qui bloque, avec le code d’origine', () => {
     assert.match(raisonPanne(panne('ENOTFOUND')), /ne trouve pas l’adresse.*ENOTFOUND/);
+    assert.match(raisonPanne(panne('ENOTFOUND'), 'sms.exemple.com'), /adresse sms\.exemple\.com \(ENOTFOUND\)/);
     assert.match(raisonPanne(panne('ECONNREFUSED')), /refuse la connexion.*ECONNREFUSED/);
     assert.match(raisonPanne(panne('UND_ERR_CONNECT_TIMEOUT')), /refuse la connexion/);
     assert.match(raisonPanne(panne('UNABLE_TO_VERIFY_LEAF_SIGNATURE')), /certificat.*UNABLE_TO_VERIFY_LEAF_SIGNATURE/);
