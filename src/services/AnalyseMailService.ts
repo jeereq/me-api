@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 
 import type { AnalyseMailsBody } from '../validators/schemas.js';
+import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
 import { AssistantService } from './AssistantService.js';
@@ -81,7 +82,7 @@ export const AnalyseMailService = {
         demander: (donnees) => AssistantService.demanderAvecModeles({ type: 'mails', ton, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees }),
         garder: async (ref, analyse, modeles) => {
           const { integrationId, mailId } = lireRef(ref)!;
-          const resultat = analyse as unknown as Prisma.InputJsonObject;
+          const resultat = jsonPropre(analyse) as unknown as Prisma.InputJsonObject;
           await prisma.analyseMail.upsert({
             where: { integrationId_mailId: { integrationId, mailId } },
             create: { userId, integrationId, mailId, empreinte: cle, modele: modeles.join('+'), resultat },

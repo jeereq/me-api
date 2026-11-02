@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 
 import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
+import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { boitesValides, chargementValide, choixValides, type MailImporte } from './integrations/choix.js';
 import { adresses, ErreurSaisie } from './integrations/ecriture.js';
@@ -190,7 +191,7 @@ export const IntegrationService = {
       });
       // Les mails vus dans les dossiers restent : ils ne viennent pas de cet import.
       const vus = donneesDe(i).vus;
-      await prisma.integration.update({ where: { id }, data: { donnees: { ...donnees, ...(vus?.length ? { vus } : {}) } as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
+      await prisma.integration.update({ where: { id }, data: { donnees: jsonPropre({ ...donnees, ...(vus?.length ? { vus } : {}) }) as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
     } catch (e) {
       const message = e instanceof ErreurExterne ? e.message : 'Synchronisation impossible pour l’instant.';
       if (!(e instanceof ErreurExterne)) console.error('Synchro', i.fournisseur, e);
@@ -208,7 +209,10 @@ export const IntegrationService = {
       select: { id: true, user: { select: { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } } },
     });
     // Les comptes connectés font partie de Pro : sans abonnement (ni essai), ils ne sont plus relus.
-    for (const { id, user } of liste) if (etatAbonnement(user).pro) await this.synchroniserUne(id);
+    // Un compte en échec ne doit pas empêcher la lecture des suivants.
+    for (const { id, user } of liste) {
+      if (etatAbonnement(user).pro) await this.synchroniserUne(id).catch((e) => console.error('Synchro', id, e));
+    }
   },
 
   /* ---------- Écrire dans le compte ---------- */
@@ -262,7 +266,7 @@ export const IntegrationService = {
     const d = donneesDe(i);
     const neufs = new Set(page.mails.map((m) => m.id));
     const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
     return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
   },
 
@@ -277,7 +281,7 @@ export const IntegrationService = {
     const d = donneesDe(i);
     const neufs = new Set(page.mails.map((m) => m.id));
     const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
     return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
   },
 
@@ -298,7 +302,7 @@ export const IntegrationService = {
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans la boîte : il a peut-être été supprimé.");
     const d = donneesDe(i);
     const vus = [m, ...(d.vus ?? []).filter((x) => x.id !== m.id)].slice(0, 200);
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, vus } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
     return { mail: { ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte } };
   },
 
@@ -369,7 +373,7 @@ export const IntegrationService = {
     const vus = maj(d.vus);
     const connues = d.libelles ?? [];
     const libelles = [...connues, ...nouvelles.filter((n) => !connues.some((l) => l.nom.toLowerCase() === n.toLowerCase())).map((nom) => ({ nom }))];
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: { ...d, mails, ...(vus ? { vus } : {}), libelles } as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, mails, ...(vus ? { vus } : {}), libelles }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
   },
 
   /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */
