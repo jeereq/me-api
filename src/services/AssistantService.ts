@@ -42,8 +42,8 @@ export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_MAILS
 /** La forme stricte attendue pour l'analyse des mails et d'un lot ; les autres réponses JSON restent libres. */
 export const schemaDe = (type: AssistantBody['type']): FormatJson | null =>
   type === 'mails' ? { type: 'json_schema', json_schema: SCHEMA_MAILS } : type === 'lot' ? { type: 'json_schema', json_schema: SCHEMA_LOT } : type === 'synthese' ? { type: 'json_schema', json_schema: SCHEMA_SYNTHESE } : null;
-/** Les réponses longues : un paquet de mails analysés, un lot, sa synthèse. */
-export const longue = (type: AssistantBody['type']) => type === 'lot' || type === 'mails' || type === 'synthese';
+/** Les réponses longues : un paquet de mails analysés, un lot, sa synthèse, le compte rendu d'une réunion entière. */
+export const longue = (type: AssistantBody['type']) => type === 'lot' || type === 'mails' || type === 'synthese' || type === 'compte_rendu';
 /** Ce qui passe au modèle fort quand l'admin en a choisi un : la synthèse d'un lot, et les mails importants d'un paquet. */
 export const pourModeleFort = (type: AssistantBody['type']) => type === 'mails' || type === 'synthese';
 
@@ -120,8 +120,11 @@ ${reglesAnalyse(ton)}`;
   ];
 }
 
+/** La transcription d'une réunion d'une heure tient dans ~60 000 caractères : un compte rendu en accepte le double. */
+export const MAX_DONNEES_COMPTE_RENDU = 120_000;
+
 export function prompt(b: AssistantBody): string {
-  const donnees = String(b.donnees ?? '').slice(0, MAX_DONNEES);
+  const donnees = String(b.donnees ?? '').slice(0, b.type === 'compte_rendu' ? MAX_DONNEES_COMPTE_RENDU : MAX_DONNEES);
   const ton = b.ton ?? 'neutre';
   if (b.type === 'plan') {
     return `Tu es « ${nomIA(b)} », le copilote personnel de l'utilisateur. Il est ${b.heure ?? ''}. À partir de ses données (JSON ci-dessous), propose un plan pour le reste de sa journée, réaliste, en français, ton ${ton} : d'abord les 3 priorités, puis un déroulé par créneaux à partir de maintenant (jamais avant ${b.heure ?? "l'heure actuelle"}) qui respecte les rendez-vous de l'agenda et place les relances dues, les tâches urgentes et les habitudes du jour ; les factures proches passent en premier. Ne cite que des éléments présents dans les données, et s'il reste du temps, propose des tâches de la semaine. Si tout est vide, dis-le simplement et propose une journée légère. 12 lignes au maximum, une idée par ligne, phrases courtes, sans markdown ni émojis.\n\nDonnées :\n${donnees}`;
@@ -152,7 +155,43 @@ ${donnees}`;
   return `Tu es « ${nomIA(b)} », l'assistant personnel de l'utilisateur. Réponds en français, ton ${ton}, en 2 à 5 phrases courtes faites pour être lues à voix haute : pas de listes, pas de markdown, pas d'émojis. Appuie-toi uniquement sur ses données ci-dessous (JSON) ; si l'information n'y est pas, dis-le simplement.\n\nDonnées :\n${donnees}\n\nQuestion : ${b.question ?? ''}`;
 }
 
+/** Modèle de transcription (OpenAI) ; `OPENAI_MODEL_TRANSCRIPTION` pour en changer. */
+export const modeleTranscription = () => process.env.OPENAI_MODEL_TRANSCRIPTION || 'gpt-4o-mini-transcribe';
+/** Une réunion d'une heure ou deux : la transcription peut prendre plusieurs minutes. */
+const DELAI_TRANSCRIPTION_MS = 10 * 60_000;
+
 export const AssistantService = {
+  /** Transcrit un enregistrement audio en français (réunion, appel). `contexte` : noms propres et sujet, pour aider la reconnaissance. */
+  async transcrire(audio: File, contexte?: string): Promise<{ texte: string; modele: string }> {
+    if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.", 'IA_INDISPONIBLE');
+    const modele = modeleTranscription();
+    const form = new FormData();
+    form.append('file', audio, audio.name || 'reunion.m4a');
+    form.append('model', modele);
+    form.append('language', 'fr');
+    form.append('response_format', 'json');
+    const aide = (contexte ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    if (aide) form.append('prompt', aide);
+    let res: Response;
+    try {
+      res = await fetch(`${OPENAI_URL()}/audio/transcriptions`, { method: 'POST', signal: AbortSignal.timeout(DELAI_TRANSCRIPTION_MS), headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form });
+    } catch (e) {
+      console.error('OpenAI injoignable (transcription)', e);
+      if ((e as Error)?.name === 'TimeoutError') throw new HttpError(504, 'La transcription met trop de temps, réessaie avec un enregistrement plus court.');
+      throw new HttpError(502, "OpenAI est injoignable pour l'instant, réessaie dans un moment.");
+    }
+    const data = (await res.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
+    if (!res.ok) {
+      console.error('OpenAI (transcription)', res.status, modele, data?.error?.message);
+      if (res.status === 400 || res.status === 415) throw new HttpError(422, "Cet enregistrement n'a pas pu être lu. Réessaie, ou colle le texte de la réunion dans les notes.", 'AUDIO_ILLISIBLE');
+      if (res.status === 413) throw new HttpError(413, 'Enregistrement trop long : 25 Mo au plus.', 'TROP_LOURD');
+      throw new HttpError(502, "La transcription n'a pas pu se faire, réessaie dans un instant.");
+    }
+    const texte = (data.text ?? '').trim();
+    if (!texte) throw new HttpError(422, "Je n'ai rien entendu dans cet enregistrement.", 'AUDIO_VIDE');
+    return { texte, modele };
+  },
+
   async disponible() {
     if (!process.env.OPENAI_API_KEY) return false;
     const cfg = await ConfigService.get();
