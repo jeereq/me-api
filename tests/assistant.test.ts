@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { consignesPrompt, corpsRequete, enJson, MAX_CONSIGNES, prompt, raisonne } from '../src/services/AssistantService.js';
+import { consignesPrompt, corpsRequete, enJson, longue, MAX_CONSIGNES, MAX_DONNEES_COMPTE_RENDU, modeleTranscription, prompt, raisonne } from '../src/services/AssistantService.js';
 
 describe('assistant : requête OpenAI', () => {
   it('reconnaît les modèles qui raisonnent', () => {
@@ -59,6 +59,22 @@ describe('assistant : compte rendu', () => {
     const p = prompt({ type: 'compte_rendu', donnees: '{"notes":"Devis envoyé","ouverts":[{"ref":"t:1"}]}' });
     for (const k of ['"resume"', '"decisions"', '"actions"', '"clotures"', '"ref"', 't:1']) assert.ok(p.includes(k), k);
     assert.equal(enJson('compte_rendu'), true);
+  });
+  it('sait lire une transcription et en tirer tâches, mails, relances et habitudes', () => {
+    const p = prompt({ type: 'compte_rendu', donnees: '{"transcription":"on fait le point chaque lundi"}' });
+    for (const k of ['transcription', 'habitude', 'mail', 'relance', '"frequence"', '"corps"']) assert.ok(p.includes(k), k);
+  });
+  it('garde la fin d\'une longue transcription, et laisse de la place à la réponse', () => {
+    const fin = 'DERNIERE_PHRASE';
+    const p = prompt({ type: 'compte_rendu', donnees: 'a'.repeat(90_000) + fin });
+    assert.ok(p.includes(fin));
+    assert.ok(MAX_DONNEES_COMPTE_RENDU > 60_000);
+    assert.equal(longue('compte_rendu'), true);
+    assert.ok(corpsRequete('gpt-4o-mini', 'x', true, true).max_completion_tokens >= 8000);
+  });
+  it('transcrit avec gpt-4o-mini-transcribe sauf réglage du serveur', () => {
+    delete process.env.OPENAI_MODEL_TRANSCRIPTION;
+    assert.equal(modeleTranscription(), 'gpt-4o-mini-transcribe');
   });
 });
 

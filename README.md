@@ -108,6 +108,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | DELETE | `/api/notifications/push` | compte | Désabonne ce navigateur |
 | POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
 | POST | `/api/assistant/mails` | compte, Pro | `{ mails: ["ext:<compte>:<mail>", …] (1 à 10), ton?, consignes?, crm? }` → `{ analyses, enCache, fraiches, illisibles }` : le serveur lit les mails, analyse ceux qui n'ont pas d'analyse de moins de 30 jours et garde le résultat |
+| POST | `/api/assistant/transcription` | compte, Pro | Formulaire `audio` (m4a, webm, mp3… 25 Mo au plus, environ 90 minutes en AAC mono 32 kbit/s) + `contexte?` (noms, sujet) → `{ texte, modele }` : transcription en français par OpenAI (`OPENAI_MODEL_TRANSCRIPTION`, `gpt-4o-mini-transcribe` par défaut). L'enregistrement n'est jamais gardé. 10 par heure et par compte |
 | POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance" \| "copilote" \| "mails" \| "lot" \| "synthese" \| "compte_rendu", … }` → `{ text }` ; `consignes` (texte libre, 600 caractères retenus) oriente l'analyse « mails » et « lot » |
 | GET | `/api/abonnement/offres` | public | Prix, durée de l'essai, `formules` (Finances, Pro), `fonctionsFinances` et `fonctions` (Pro), `paiement` : FlexPaie configuré |
 | GET | `/api/abonnement` | compte | `{ abonnement, paiements }` : offre en cours et 10 derniers paiements |
