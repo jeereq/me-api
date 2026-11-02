@@ -259,3 +259,38 @@ describe('tâches de projet : chaque projet se calcule seul, comme le planning d
     assert.ok(!vus.includes('P3'), 'P3 attend P1, du même projet');
   });
 });
+
+describe('heure précise des tâches, relances et habitudes', () => {
+  const habitude = (o: Record<string, unknown>) => ({ id: 'h1', nom: 'Sport', frequence: 'quotidien', jour: null, mode: 'normal', coches: [] as string[], ...o });
+  const quand = (r: { quand: string }[]) => r.map((x) => x.quand.slice(11));
+
+  it('mode normal : le rappel du jour J part à l’heure de la tâche, et la rappelle', () => {
+    const r = rappelsDesElements(espace({ taches: [tache({ echeance: LUNDI, heure: '14:30' })] }), cfg, LUNDI);
+    assert.deepEqual(r.map((x) => [x.heure, x.titre, x.corps]), [['14:30', 'Payer la facture', 'À 14 h 30. Tâche à faire']]);
+  });
+
+  it('mode ferme : l’heure de la relance, puis le rappel du soir s’il tombe après', () => {
+    const tot = rappelsDesElements(espace({ relances: [relance({ mode: 'agressif', heure: '10:00' })] }), cfg, LUNDI);
+    assert.deepEqual(tot.map((x) => x.heure), ['10:00', '19:00']);
+    assert.equal(tot[0].corps, 'À 10 h. Devis');
+    const tard = rappelsDesElements(espace({ relances: [relance({ mode: 'agressif', heure: '20:15' })] }), cfg, LUNDI);
+    assert.deepEqual(tard.map((x) => x.heure), ['20:15']);
+  });
+
+  it('mode doux : toujours aucune notification, même avec une heure', () => {
+    assert.equal(rappelsDesElements(espace({ taches: [tache({ echeance: LUNDI, heure: '08:00', mode: 'passif' })] }), cfg, LUNDI).length, 0);
+  });
+
+  it('une heure invalide est ignorée, et le jour d’avant ne change pas', () => {
+    assert.deepEqual(quand(rappelsDuJour(espace({ taches: [tache({ echeance: LUNDI, heure: '25:00' })] }), cfg, LUNDI).filter((x) => x.mode === 'normal')), ['09:00']);
+    assert.equal(rappelsDesElements(espace({ taches: [tache({ echeance: LUNDI, heure: '14:30' })] }), cfg, addDays(LUNDI, -1)).length, 0);
+  });
+
+  it('habitude à heure fixe : son rappel part à l’heure, même en mode coach qui regroupe les autres', () => {
+    assert.deepEqual(rappelsDesElements(espace({ habitudes: [habitude({ heure: '06:45' })] }), cfg, LUNDI).map((x) => [x.heure, x.titre]), [['06:45', 'Sport']]);
+    const coach = rappelsDesElements(espace({ habitudes: [habitude({ mode: 'coach', heure: '18:00' }), habitude({ id: 'h2', nom: 'Lire', mode: 'coach' })] }), cfg, LUNDI);
+    assert.deepEqual(coach.map((x) => [x.heure, x.titre]), [['18:00', 'Sport'], ['19:00', 'Coach Me']]);
+    assert.match(coach[1].corps, /Lire/);
+    assert.doesNotMatch(coach[1].corps, /Sport/);
+  });
+});

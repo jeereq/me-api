@@ -77,10 +77,10 @@ test('une relance confiée à un membre prévient ce membre, sauf si elle est d�
   assert.deepEqual(nouvellesAffectations(null, { relances: [relance('r1', { affecteA: 'alice' })] }, 'alice', membres), []);
 });
 
-test('un rendez-vous affecté prévient ce membre, avec son jour', () => {
+test('un rendez-vous affecté prévient ce membre, avec son jour et son heure', () => {
   const agenda = (extra: Record<string, unknown> = {}) => ({ agenda: { '2026-11-04': [{ id: 'me:1', debut: '09:00', titre: 'Point client', ...extra }], '2026-11-05': [] } });
   const r = nouvellesAffectations(agenda(), agenda({ affecteA: 'chloe' }), 'alice', membres);
-  assert.deepEqual(r, [{ genre: 'rdv', id: 'me:1', titre: 'Point client', echeance: '2026-11-04', userId: 'chloe' }]);
+  assert.deepEqual(r, [{ genre: 'rdv', id: 'me:1', titre: 'Point client', echeance: '2026-11-04', heure: '09:00', userId: 'chloe' }]);
   assert.deepEqual(nouvellesAffectations(agenda({ affecteA: 'chloe' }), agenda({ affecteA: 'chloe' }), 'alice', membres), []);
   // Un rendez-vous sans identifiant (importé d'un agenda) ne peut pas être suivi : il est ignoré.
   assert.deepEqual(nouvellesAffectations(null, { agenda: { '2026-11-04': [{ titre: 'X', affecteA: 'bob' }] } }, 'alice', membres), []);
@@ -92,4 +92,15 @@ test('une tâche, une relance et un rendez-vous de même identifiant ne se confo
   assert.equal(aDesAffectations({ relances: apres.relances }), true);
   assert.equal(aDesAffectations({ agenda: apres.agenda }), true);
   assert.equal(aDesAffectations({ agenda: { '2026-11-04': [{ id: 'x', titre: 'RDV' }] } }), false);
+});
+
+test('l’heure précise d’une tâche ou d’une relance suit l’avis, seulement avec un jour', () => {
+  const apres = {
+    taches: [tache('a', { affecteA: 'bob', echeance: '2026-11-04', heure: '14:30' }), tache('b', { affecteA: 'bob', heure: '10:00' })],
+    relances: [{ id: 'r', contact: 'Marie', sujet: 'Devis', date: '2026-11-05', heure: '9h', statut: 'a_faire', affecteA: 'bob' }],
+  };
+  const r = nouvellesAffectations(null, apres, 'alice', membres);
+  assert.equal(r.find((x) => x.id === 'a')?.heure, '14:30');
+  assert.equal(r.find((x) => x.id === 'b')?.heure, undefined);
+  assert.equal(r.find((x) => x.id === 'r')?.heure, undefined);
 });

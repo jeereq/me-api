@@ -5,7 +5,7 @@ import { PushService } from './PushService.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
-import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
+import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
 const RATTRAPAGE_MIN = 45;
@@ -145,7 +145,7 @@ export const NotificationService = {
         // La clé d'une tâche garde sa forme d'origine : un avis déjà envoyé n'est pas renvoyé après une mise à jour.
         cle: `affectation|${a.genre === 'tache' ? '' : `${a.genre}|`}${a.id}|${userId}|${revision}`,
         titre: `${qui} ${PHRASE_AFFECTATION[a.genre]}`,
-        corps: `« ${a.titre} »${a.echeance ? ` · ${a.genre === 'tache' ? 'pour le' : 'le'} ${dateFr(a.echeance)}` : ''} · équipe ${equipe.nom}`,
+        corps: `« ${a.titre} »${a.echeance ? ` · ${a.genre === 'tache' ? 'pour le' : 'le'} ${dateFr(a.echeance)}${a.heure ? ` à ${heureLisible(a.heure)}` : ''}` : ''} · équipe ${equipe.nom}`,
         mode: 'normal',
         quand,
       }));

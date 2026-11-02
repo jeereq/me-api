@@ -1,4 +1,4 @@
-import { type ConfigModes, heureDe, type Mode, reglesDuMode, MODES_LISTE } from './modes.js';
+import { type ConfigModes, heureDe, heureExacte, type Mode, reglesDuMode, MODES_LISTE } from './modes.js';
 import { addDays, doneIn, type Frequence, habitDue, habitToday, parse, pastDue, periodKey } from './jours.js';
 import { estTacheDeProjet, resumes, tachesActives, type TacheProjet } from './projets.js';
 import { alertesObjectifs } from './objectifs.js';
@@ -13,15 +13,16 @@ export { addDays } from './jours.js';
  * Tout est en heure locale de l'utilisateur, sous forme de texte : « AAAA-MM-JJ » et « AAAA-MM-JJTHH:MM ».
  */
 
-type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[] };
-type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string | null; derniereRelance?: string | null };
+/** `heure` (« HH:MM », facultative) : l'heure précise choisie pour l'élément ; le rappel du jour J part alors à cette heure. */
+type Habitude = { id: string; nom: string; frequence: Frequence; jour: number | null; mode: Mode; coches: string[]; heure?: string | null };
+type Relance = { id: string; contact: string; sujet: string; date: string; statut: string; mode: Mode; reponduLe?: string | null; derniereRelance?: string | null; heure?: string | null };
 /**
  * Une relance qui attend une action à sa date : à faire, ou déjà relancée depuis que l'app reprogramme la suivante
  * (`derniereRelance`). Les anciennes relances « Relancé » sans cette date ne reviennent pas d'un coup en retard.
  */
 export const relanceAttendue = (r: Pick<Relance, 'statut' | 'derniereRelance'>) => r.statut === 'a_faire' || (r.statut === 'relance' && !!r.derniereRelance);
 const titreRelance = (r: Relance) => `${r.statut === 'relance' ? 'Relancer à nouveau' : 'Relancer'} ${r.contact}`;
-type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null } & Partial<TacheProjet>;
+type Tache = { id: string; titre: string; echeance: string | null; statut: string; mode: Mode; priorite?: string; faitLe?: string | null; heure?: string | null } & Partial<TacheProjet>;
 type Jeu = { gains?: Record<string, { d: string; p: number }>; joursSauves?: string[]; jokers?: number };
 export type EspaceRappels = { relances?: Relance[]; taches?: Tache[]; projets?: { id: string }[]; habitudes?: Habitude[]; jeu?: Jeu; notifs?: { recompenses?: boolean }; finances?: FinancesRappels & FinancesAvancees };
 export type ConfigRappels = ConfigModes & { routineHeure?: string; rappelSoir?: string };
@@ -71,6 +72,20 @@ export function serieDuJour(e: EspaceRappels, jour: string) {
   }
   return { serie, pointsDuJour: gains.reduce((s, g) => s + (g.d === jour ? g.p : 0), 0), jokers: e.jeu?.jokers || 0 };
 }
+/** « 14:30 » → « 14 h 30 », « 09:00 » → « 9 h ». */
+export const heureLisible = (h: string) => h.replace(/^0(?=\d)/, '').replace(':00', ' h').replace(':', ' h ');
+
+/**
+ * Les heures du rappel du jour J d'un élément. Sans heure précise : celles du mode. Avec une heure : elle d'abord,
+ * puis les heures du mode qui tombent après (un mode qui insiste insiste encore le soir). Un mode sans rappel le jour J
+ * (Doux, Bilan hebdo) reste silencieux, même avec une heure.
+ */
+export function heuresJourJ(jourJ: string[], precise: string | null, heure: (h: string) => string): string[] {
+  const duMode = jourJ.map(heure);
+  if (!precise || !duMode.length) return duMode;
+  return [precise, ...duMode.slice(1).filter((h) => h > precise)];
+}
+
 const pluriel = (n: number, un: string, plusieurs: string) => `${n} ${n > 1 ? plusieurs : un}`;
 
 /** Rappels d'une journée (heure locale), avec les mêmes règles que les notifications du téléphone. */
@@ -132,9 +147,9 @@ export function rappelsDesElements(e: EspaceRappels, c: ConfigRappels, jour: str
   const pousser = (heure: string, titre: string, corps: string, mode: Mode, id: string) => out.push({ heure, titre, corps, mode, id });
 
   const dates = [
-    ...(e.relances || []).filter((r) => relanceAttendue(r) && r.date).map((r) => ({ id: r.id, titre: titreRelance(r), detail: r.sujet, date: r.date, mode: r.mode })),
+    ...(e.relances || []).filter((r) => relanceAttendue(r) && r.date).map((r) => ({ id: r.id, titre: titreRelance(r), detail: r.sujet, date: r.date, mode: r.mode, precise: heureExacte(r.heure) })),
     // Tâches de projet : pas les résumés ni les tâches bloquées, et pas de rappel quotidien pour un vieux retard.
-    ...tachesActives(e).filter((t) => t.echeance && (!estTacheDeProjet(t, e.projets) || t.echeance >= addDays(aujourdhui, -3))).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode })),
+    ...tachesActives(e).filter((t) => t.echeance && (!estTacheDeProjet(t, e.projets) || t.echeance >= addDays(aujourdhui, -3))).map((t) => ({ id: t.id, titre: t.titre, detail: 'Tâche à faire', date: t.echeance as string, mode: t.mode, precise: heureExacte(t.heure) })),
   ];
   const heure = (t: string) => heureDe(t, matin, soir);
   for (const x of dates) {
@@ -142,7 +157,10 @@ export function rappelsDesElements(e: EspaceRappels, c: ConfigRappels, jour: str
     const r = reglesDuMode(c, x.mode);
     if (x.date === jour) {
       // Une seule heure : le titre tel quel ; plusieurs : on insiste (« Aujourd'hui », puis « Pas encore fait »).
-      r.jourJ.forEach((t, i) => pousser(heure(t), r.jourJ.length === 1 ? x.titre : i === 0 ? `Aujourd'hui : ${x.titre}` : `Pas encore fait : ${x.titre}`, x.detail, x.mode, x.id));
+      // Avec une heure précise, le premier rappel part à cette heure et la rappelle.
+      const heures = heuresJourJ(r.jourJ, x.precise, heure);
+      const corps = x.precise ? `À ${heureLisible(x.precise)}. ${x.detail}` : x.detail;
+      heures.forEach((h, i) => pousser(h, heures.length === 1 ? x.titre : i === 0 ? `Aujourd'hui : ${x.titre}` : `Pas encore fait : ${x.titre}`, i === 0 ? corps : x.detail, x.mode, x.id));
     } else if (jour > x.date) {
       if (r.retard) pousser(heure(r.heure), `En retard : ${x.titre}`, `Prévu le ${x.date}. ${x.detail}`, x.mode, x.id);
     } else for (const j of r.avant) if (addDays(jour, j) === x.date) pousser(heure(r.heure), `Dans ${j} j : ${x.titre}`, x.detail, x.mode, x.id);
@@ -154,8 +172,20 @@ export function rappelsDesElements(e: EspaceRappels, c: ConfigRappels, jour: str
     if (!actif(h.mode) || doneIn(h, jour)) continue;
     const r = reglesDuMode(c, h.mode);
     if (habitDue(h, jour)) {
-      if (r.resume) (resumes[h.mode] ||= []).push(h.nom);
-      else r.jourJ.forEach((t, i) => (r.jourJ.length === 1 ? pousser(heure(t), h.nom, "C'est le jour.", h.mode, h.id) : i === 0 ? pousser(heure(t), `Aujourd'hui : ${h.nom}`, 'À faire avant ce soir.', h.mode, h.id) : pousser(heure(t), `Pas encore fait : ${h.nom}`, 'Coche-le dans Me dès que c’est fait.', h.mode, h.id)));
+      const precise = heureExacte(h.heure);
+      // Une habitude à heure fixe a son propre rappel à cette heure, même dans un mode qui regroupe les autres le soir.
+      if (precise && r.resume) pousser(precise, h.nom, `C'est l'heure : ${heureLisible(precise)}.`, h.mode, h.id);
+      else if (r.resume) (resumes[h.mode] ||= []).push(h.nom);
+      else {
+        const heures = heuresJourJ(r.jourJ, precise, heure);
+        heures.forEach((t, i) =>
+          heures.length === 1
+            ? pousser(t, h.nom, precise ? `C'est l'heure : ${heureLisible(precise)}.` : "C'est le jour.", h.mode, h.id)
+            : i === 0
+              ? pousser(t, `Aujourd'hui : ${h.nom}`, precise ? `À ${heureLisible(precise)}.` : 'À faire avant ce soir.', h.mode, h.id)
+              : pousser(t, `Pas encore fait : ${h.nom}`, 'Coche-le dans Me dès que c’est fait.', h.mode, h.id),
+        );
+      }
     } else if (!r.resume && h.frequence !== 'quotidien') {
       // Dans la période en cours seulement : un jour d'une période à venir n'est pas encore en retard.
       if (periodKey(h.frequence, jour) === periodKey(h.frequence, aujourdhui) && pastDue(h, jour)) {
