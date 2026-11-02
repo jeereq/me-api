@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { aDroit, etatAbonnement, FONCTIONS_PRO } from '../src/services/abonnements/offres.js';
-import { Asmsc, cleValide, configSms, ErreurSms, preparerTexte, statutLivraison, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
+import { Asmsc, cleValide, configSms, ErreurSms, preparerTexte, rappelsParSms, statutLivraison, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
 
 const fetchOrigine = globalThis.fetch;
 afterEach(() => {
@@ -55,6 +55,21 @@ describe('texte d’un SMS', () => {
   it('un rappel seul donne son titre et son texte, plusieurs leur nombre et leurs titres', () => {
     assert.equal(texteRappels([{ titre: 'A', corps: 'détail' }]), 'A. détail');
     assert.equal(texteRappels([{ titre: 'A', corps: 'x' }, { titre: 'B', corps: 'y' }]), '2 rappels : A ; B');
+  });
+});
+
+describe('rappels envoyés par SMS', () => {
+  const r = (mode: string, cle: string, canaux?: { push: boolean; email: boolean }) => ({ mode, cle, canaux });
+  it('garde ce qui est à faire, quel que soit son mode', () => {
+    const l = [r('agressif', '2026-11-03|relance|r1|jour'), r('normal', '2026-11-03|tache|t1|jour'), r('coach', '2026-11-03|tache|t2|soir')];
+    assert.deepEqual(rappelsParSms(l), l);
+  });
+  it('écarte les discrets, le briefing et les encouragements de la série', () => {
+    assert.deepEqual(rappelsParSms([r('passif', 'a'), r('briefing', 'b'), r('coach', '2026-11-03|serie')]), []);
+  });
+  it('écarte une alerte dont le push et l’email sont coupés', () => {
+    assert.deepEqual(rappelsParSms([r('hebdo', 'a', { push: false, email: false })]), []);
+    assert.equal(rappelsParSms([r('hebdo', 'a', { push: false, email: true })]).length, 1);
   });
 });
 

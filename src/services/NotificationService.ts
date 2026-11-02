@@ -2,7 +2,7 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
-import { texteRappels } from './sms/asmsc.js';
+import { rappelsParSms, texteRappels } from './sms/asmsc.js';
 import { SmsService } from './SmsService.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
@@ -98,8 +98,8 @@ export const NotificationService = {
           await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });
         }
       }
-      // Un seul SMS par passage. Ni les rappels discrets ni le briefing : chaque SMS coûte.
-      const parSms = parSmsPossible && aDroit(etat, 'sms') ? nouveaux.filter((r) => r.mode !== 'passif' && r.mode !== 'briefing' && (r.canaux?.push !== false || r.canaux?.email !== false)) : [];
+      // Un seul SMS par passage : chaque SMS coûte.
+      const parSms = parSmsPossible && aDroit(etat, 'sms') ? rappelsParSms(nouveaux) : [];
       if (parSms.length) await SmsService.envoyer(u.id, u.telephone!, texteRappels(parSms));
     }
     await SmsService.purger(maintenant);
