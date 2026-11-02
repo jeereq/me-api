@@ -102,7 +102,7 @@ export const AnalyseMailService = {
     if (!(await AssistantService.disponible())) return { comptes: 0, mails: 0 };
     const comptes = await prisma.integration.findMany({
       where: { fournisseur: { in: ['GOOGLE', 'MICROSOFT'] }, ...prefsAuto },
-      select: { id: true, userId: true, donnees: true, user: { select: { role: true, essaiJusqua: true, abonnementPeriode: true, abonnementFinLe: true } } },
+      select: { id: true, userId: true, donnees: true, user: { select: { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } } },
     });
     if (essais.size > 5000) essais.clear();
     let mails = 0;

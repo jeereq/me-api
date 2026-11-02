@@ -9,6 +9,7 @@ Ce dossier est la **seule source** du code qui doit donner le même résultat da
 | `jours.ts` | Jours en texte « AAAA-MM-JJ » : décalage, semaine, habitude prévue, en retard, cochée |
 | `projets.ts` | Tâches de projet à rappeler (ni résumés ni tâches bloquées) |
 | `previsions.ts`, `objectifs.ts` | Alertes de budget, prévisions et rappels des objectifs |
+| `prets.ts` | Finances avancées : prêts entre personnes, paiements à venir, bilan du mois, et leurs rappels |
 | `patch.ts` | Synchro par différences : `differences(base, local)` côté app, `appliquer(doc, operations)` côté serveur |
 
 ## Règles

@@ -2,7 +2,7 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
-import { avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
+import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
 import { rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
@@ -52,7 +52,7 @@ export const NotificationService = {
     const users = await prisma.user.findMany({
       select: {
         id: true, email: true, nom: true, fuseau: true, espace: { select: { data: true } },
-        role: true, essaiJusqua: true, abonnementPeriode: true, abonnementFinLe: true,
+        role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true,
       },
     });
     await this.avisAbonnements(users, maintenant);
@@ -67,26 +67,27 @@ export const NotificationService = {
       const depuis = local(new Date(maintenant.getTime() - RATTRAPAGE_MIN * 60000), u.fuseau);
       const borne = `${depuis.date}T${depuis.heure}`;
       const jours = depuis.date === date ? [date] : [depuis.date, date];
-      const dus = jours.flatMap((j) => rappelsDuJour(e, cfg, j)).filter((r) => r.quand > borne && r.quand <= nowLocal);
+      const etat = etatAbonnement(u, maintenant);
+      const dus = jours.flatMap((j) => rappelsDuJour(e, cfg, j, { financesAvancees: aDroit(etat, 'prets') })).filter((r) => r.quand > borne && r.quand <= nowLocal);
 
       if (!dus.length) continue;
       // Un rappel déjà créé lors d'un passage précédent n'est pas renvoyé.
       const deja = new Set((await prisma.notification.findMany({ where: { userId: u.id, cle: { in: dus.map((r) => r.cle) } }, select: { cle: true } })).map((n) => n.cle));
       const nouveaux = dus.filter((r) => !deja.has(r.cle));
-      // Email et push font partie de Pro : sans abonnement (ni essai), les rappels restent dans l'app.
-      const pro = etatAbonnement(u, maintenant).pro;
+      // Email et push font partie de Pro, et de Finances pour les alertes des finances : sinon, les rappels restent dans l'app.
+      const horsApp = (r: Rappel) => etat.pro || (r.famille === 'finances' && aDroit(etat, 'alertes'));
       await prisma.notification.createMany({
         data: nouveaux.map((r) => ({ userId: u.id, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: prefs.app === false })),
         skipDuplicates: true,
       });
-      const enPush = nouveaux.filter((r) => r.canaux?.push !== false);
-      if (pro && enPush.length && prefs.app !== false) {
+      const enPush = nouveaux.filter((r) => r.canaux?.push !== false && horsApp(r));
+      if (enPush.length && prefs.app !== false) {
         // Un seul push par passage : le rappel s'il est seul, sinon un résumé.
         const m = enPush.length === 1 ? { titre: enPush[0].titre, corps: enPush[0].corps, mode: enPush[0].mode } : { titre: `${enPush.length} rappels`, corps: enPush.map((r) => r.titre).join(' · '), mode: enPush[0].mode };
         await PushService.envoyer(u.id, { ...m, tag: enPush[0].cle });
       }
-      const parMail = nouveaux.filter((r) => r.canaux?.email !== false);
-      if (pro && parMail.length && mailActif && prefs.email !== false) {
+      const parMail = nouveaux.filter((r) => r.canaux?.email !== false && horsApp(r));
+      if (parMail.length && mailActif && prefs.email !== false) {
         const m = email(parMail, u.nom);
         if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) {
           await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });

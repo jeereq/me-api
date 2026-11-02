@@ -205,7 +205,7 @@ export const IntegrationService = {
 
   async synchroniserTout() {
     const liste = await prisma.integration.findMany({
-      select: { id: true, user: { select: { role: true, essaiJusqua: true, abonnementPeriode: true, abonnementFinLe: true } } },
+      select: { id: true, user: { select: { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } } },
     });
     // Les comptes connectés font partie de Pro : sans abonnement (ni essai), ils ne sont plus relus.
     for (const { id, user } of liste) if (etatAbonnement(user).pro) await this.synchroniserUne(id);

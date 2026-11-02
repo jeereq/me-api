@@ -1,36 +1,62 @@
 /**
  * Offres d'abonnement et droits d'un compte. Module pur (sans base ni réseau), testé dans tests/abonnements.test.ts.
  *
- * - Gratuit : l'espace personnel complet (tâches, relances, habitudes, projets, finances, rappels dans l'app).
- * - Pro : en plus, les fonctions qui coûtent au serveur ou demandent des accès externes (voir FONCTIONS_PRO).
- * - Chaque nouveau compte a un essai Pro de ESSAI_JOURS jours, sans paiement, une fois par personne. Le jour où les
- *   abonnements sont mis en service (ABONNEMENTS_DEPUIS), chaque compte qui a un essai garde au moins ESSAI_JOURS jours
- *   à partir de cette date : personne ne perd Pro le jour de l'activation.
- * - Pro est prépayé (FlexPaie, mobile money) : un paiement ouvre un mois ou un an, sans renouvellement automatique.
- *   Payer avant la fin prolonge à partir de la fin en cours, et payer pendant l'essai commence après l'essai : rien n'est perdu.
+ * Trois formules :
+ * - Gratuit : l'espace personnel (tâches, relances, habitudes, projets) et les finances de base (budgets, dépenses,
+ *   revenus, objectifs, statistiques, export), avec les rappels dans l'app.
+ * - Finances : en plus, les finances avancées (voir FONCTIONS_FINANCES), avec leurs alertes en push et par email.
+ * - Pro : tout Finances, plus les fonctions qui coûtent au serveur ou demandent des accès externes (voir FONCTIONS_PRO).
+ *
+ * - Chaque nouveau compte a un essai de ESSAI_JOURS jours de tout Pro, sans paiement, une fois par personne. Le jour où
+ *   les abonnements sont mis en service (ABONNEMENTS_DEPUIS), chaque compte qui a un essai garde au moins ESSAI_JOURS
+ *   jours à partir de cette date : personne ne perd Pro le jour de l'activation.
+ * - Les formules sont prépayées (FlexPaie, mobile money) : un paiement ouvre un mois ou un an, sans renouvellement
+ *   automatique. Payer avant la fin prolonge à partir de la fin en cours, et payer pendant l'essai commence après
+ *   l'essai : rien n'est perdu. Changer de formule convertit le temps restant au prorata des prix (voir `prolonger`).
  *
  * Les prix doivent rester identiques à ceux des conditions générales de vente (me-mobile/public/cgv.html).
  */
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-11-02';
+export const VERSION_CGV = '2026-11-03';
 
 export type Periode = 'mensuel' | 'annuel';
+export type Formule = 'finances' | 'pro';
+
+const FORMULE_FINANCES = {
+  nom: 'Finances',
+  /** Prix TTC en centimes de la devise. */
+  mensuel: { prix: 199, libelle: '1,99 $ par mois', mois: 1 },
+  annuel: { prix: 1999, libelle: '19,99 $ par an', mois: 12, economie: '2 mois offerts' },
+} as const;
+const FORMULE_PRO = {
+  nom: 'Pro',
+  mensuel: { prix: 499, libelle: '4,99 $ par mois', mois: 1 },
+  annuel: { prix: 4999, libelle: '49,99 $ par an', mois: 12, economie: '2 mois offerts' },
+} as const;
 
 export const OFFRES = {
   devise: 'USD',
   essaiJours: ESSAI_JOURS,
   gratuit: { nom: 'Gratuit', prix: 0 },
-  pro: {
-    nom: 'Pro',
-    /** Prix TTC en centimes de la devise. */
-    mensuel: { prix: 499, libelle: '4,99 $ par mois', mois: 1 },
-    annuel: { prix: 4999, libelle: '49,99 $ par an', mois: 12, economie: '2 mois offerts' },
-  },
+  formules: { finances: FORMULE_FINANCES, pro: FORMULE_PRO },
+  /** Gardé pour les anciennes versions de l'app, qui ne connaissent que Pro. */
+  pro: FORMULE_PRO,
 } as const;
 
-/** Ce que Pro débloque. Le reste de l'app est inclus dans l'offre gratuite. */
+/** Ce que Finances débloque (Pro le comprend). Le reste des finances est inclus dans l'offre gratuite. */
+export const FONCTIONS_FINANCES = {
+  justificatifs: 'Les reçus et factures joints aux dépenses',
+  releves: 'L’import des relevés bancaires et mobile money',
+  comptes: 'Plusieurs comptes et plusieurs devises',
+  prets: 'Les prêts et dettes entre personnes, avec leurs rappels',
+  echeances: 'Les paiements à venir, prévenus la veille',
+  bilan: 'Le bilan du mois, à l’écran et par email',
+  alertes: 'Les alertes de budget et d’objectifs en push et par email',
+} as const;
+
+/** Ce que Pro ajoute à Finances. */
 export const FONCTIONS_PRO = {
   assistant: 'Le copilote IA (questions, plans, brouillons de relance)',
   integrations: 'Les comptes connectés : Gmail, Outlook, Google Agenda, To Do, Trello, Slack',
@@ -39,29 +65,49 @@ export const FONCTIONS_PRO = {
   push: 'Les notifications push sur tes appareils',
 } as const;
 
+export type FonctionFinances = keyof typeof FONCTIONS_FINANCES;
 export type FonctionPro = keyof typeof FONCTIONS_PRO;
+export type Fonction = FonctionFinances | FonctionPro;
+
+const TOUT_FINANCES = Object.keys(FONCTIONS_FINANCES) as FonctionFinances[];
+const TOUT = [...TOUT_FINANCES, ...(Object.keys(FONCTIONS_PRO) as FonctionPro[])];
+
+/** La formule qui débloque une fonction. */
+export const formuleDe = (f: Fonction): Formule => (f in FONCTIONS_FINANCES ? 'finances' : 'pro');
 
 /** Champs du compte qui décrivent son abonnement (colonnes de User). */
 export type ChampsAbonnement = {
   role?: 'ADMIN' | 'UTILISATEUR';
   essaiJusqua?: Date | null;
+  abonnementFormule?: string | null;
   abonnementPeriode?: string | null;
   abonnementFinLe?: Date | null;
 };
+
+/** Colonnes à lire pour calculer l'état d'un abonnement (select Prisma). */
+export const SELECT_ABONNEMENT = { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } as const;
 
 export type EtatAbonnement = {
   /** Les abonnements sont-ils en service sur ce serveur ? Sinon tout est ouvert. */
   actif: boolean;
   /** `libre` : abonnements coupés ou compte admin. */
-  offre: 'gratuit' | 'essai' | 'pro' | 'libre';
+  offre: 'gratuit' | 'essai' | 'finances' | 'pro' | 'libre';
+  /** Les fonctions Pro sont ouvertes (essai, Pro, libre). */
   pro: boolean;
+  /** Les finances avancées sont ouvertes (Finances, et tout ce qui ouvre Pro). */
+  finances: boolean;
   periode: Periode | null;
-  /** Fin de l'essai (offre essai) ou de la période payée (offre pro), ISO. */
+  /** Fin de l'essai (offre essai) ou de la période payée (offres finances et pro), ISO. */
   jusqua: string | null;
   /** Jours restants avant `jusqua`, arrondis au supérieur. */
   joursRestants: number | null;
-  fonctions: FonctionPro[];
+  fonctions: Fonction[];
+  /** Formule payée qui prend le relais à la fin de l'essai (payée pendant l'essai), et sa fin. */
+  ensuite?: { formule: Formule; jusqua: string } | null;
 };
+
+/** Formule payée notée sur le compte. Un compte payé avant les trois formules avait Pro. */
+export const formulePayee = (c: ChampsAbonnement): Formule => (c.abonnementFormule === 'finances' ? 'finances' : 'pro');
 
 /** Les abonnements sont activés par ABONNEMENTS=true. Sans, le serveur reste ouvert à tous comme avant. */
 export const abonnementsActifs = (env: Record<string, string | undefined> = process.env) => env.ABONNEMENTS?.trim().toLowerCase() === 'true';
@@ -91,20 +137,28 @@ export function finEssaiEffective(essaiJusqua: Date | null | undefined, depuis: 
 const jours = (fin: Date, maintenant: Date) => Math.max(0, Math.ceil((fin.getTime() - maintenant.getTime()) / 86400000));
 
 export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs(), depuis = debutAbonnements()): EtatAbonnement {
-  const toutes = Object.keys(FONCTIONS_PRO) as FonctionPro[];
   const periode: Periode | null = c.abonnementPeriode === 'annuel' || c.abonnementPeriode === 'mensuel' ? c.abonnementPeriode : null;
   const base = { actif, periode };
+  const tout = { pro: true, finances: true, fonctions: TOUT };
 
-  const fin = c.abonnementFinLe ?? null;
-  if (fin && fin > maintenant) return { ...base, offre: 'pro', pro: true, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant), fonctions: toutes };
+  const fin = c.abonnementFinLe && c.abonnementFinLe > maintenant ? c.abonnementFinLe : null;
+  const formule = formulePayee(c);
+  if (fin && formule === 'pro') return { ...base, offre: 'pro', ...tout, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
 
-  if (!actif || c.role === 'ADMIN') return { ...base, offre: 'libre', pro: true, jusqua: null, joursRestants: null, fonctions: toutes };
+  if (!actif || c.role === 'ADMIN') return { ...base, offre: 'libre', ...tout, jusqua: null, joursRestants: null };
 
+  // L'essai ouvre tout : une formule Finances payée pendant l'essai prend le relais à sa fin.
   const essai = finEssaiEffective(c.essaiJusqua, depuis);
-  if (essai && essai > maintenant) return { ...base, offre: 'essai', pro: true, jusqua: essai.toISOString(), joursRestants: jours(essai, maintenant), fonctions: toutes };
+  if (essai && essai > maintenant)
+    return { ...base, offre: 'essai', ...tout, jusqua: essai.toISOString(), joursRestants: jours(essai, maintenant), ensuite: fin ? { formule, jusqua: fin.toISOString() } : null };
 
-  return { ...base, offre: 'gratuit', pro: false, jusqua: null, joursRestants: null, fonctions: [] };
+  if (fin) return { ...base, offre: 'finances', pro: false, finances: true, fonctions: TOUT_FINANCES, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
+
+  return { ...base, offre: 'gratuit', pro: false, finances: false, jusqua: null, joursRestants: null, fonctions: [] };
 }
+
+/** Le compte a-t-il droit à cette fonction ? */
+export const aDroit = (e: Pick<EtatAbonnement, 'fonctions'>, f: Fonction) => e.fonctions.includes(f);
 
 export const finEssai = (depuis = new Date()) => new Date(depuis.getTime() + ESSAI_JOURS * 86400000);
 
@@ -119,26 +173,44 @@ export function ajouterMois(d: Date, mois: number) {
   return r;
 }
 
+/** Prix d'un mois d'une formule, en centimes : sert à convertir le temps restant quand on change de formule. */
+const prixMois = (f: Formule) => OFFRES.formules[f].mensuel.prix;
+
 /**
- * Nouvelle fin de Pro après un paiement. La période part de la plus tardive de : la fin de Pro en cours, la fin de
- * l'essai en cours (les jours d'essai ne sont pas perdus), maintenant.
+ * Nouvelle fin de l'abonnement après un paiement. La période part de la plus tardive de : la fin de l'essai en cours
+ * (les jours d'essai ne sont pas perdus), maintenant. Le temps payé qui reste après ce départ s'y ajoute ; s'il était
+ * payé pour une autre formule, il est converti au prorata des prix mensuels (un mois de Finances restant vaut
+ * 1,99 / 4,99 mois de Pro, et inversement) : rien de ce qui est payé n'est perdu.
  */
-export function prolonger(finActuelle: Date | null | undefined, periode: Periode, maintenant = new Date(), finEssaiEnCours?: Date | null) {
-  let depart = maintenant;
-  for (const d of [finActuelle, finEssaiEnCours]) if (d && d > depart) depart = d;
-  return ajouterMois(depart, OFFRES.pro[periode].mois);
+export function prolonger(
+  actuel: { fin?: Date | null; formule?: Formule | null } | Date | null | undefined,
+  periode: Periode,
+  maintenant = new Date(),
+  finEssaiEnCours?: Date | null,
+  formule: Formule = 'pro',
+) {
+  const a = actuel instanceof Date || actuel == null ? { fin: actuel ?? null, formule: 'pro' as Formule } : actuel;
+  const depart = finEssaiEnCours && finEssaiEnCours > maintenant ? finEssaiEnCours : maintenant;
+  let reste = a.fin && a.fin > depart ? a.fin.getTime() - depart.getTime() : 0;
+  const avant = a.formule ?? 'pro';
+  if (reste && avant !== formule) reste = Math.round((reste * prixMois(avant)) / prixMois(formule));
+  return ajouterMois(new Date(depart.getTime() + reste), OFFRES.formules[formule][periode].mois);
 }
 
-/** Message renvoyé (402) quand une fonction Pro est demandée sans abonnement. */
-export const messageReserve = (f: FonctionPro) => `${FONCTIONS_PRO[f]} : c'est inclus dans Me Pro. Passe à Pro depuis Mon compte › Abonnement.`;
+/** Message renvoyé (402) quand une fonction est demandée sans la formule qui l'inclut. */
+export const messageReserve = (f: Fonction) =>
+  formuleDe(f) === 'finances'
+    ? `${FONCTIONS_FINANCES[f as FonctionFinances]} : c'est inclus dans Me Finances (et Pro). Choisis une formule dans Mon compte › Abonnement.`
+    : `${FONCTIONS_PRO[f as FonctionPro]} : c'est inclus dans Me Pro. Passe à Pro depuis Mon compte › Abonnement.`;
 
 export type AvisAbonnement = { cle: string; titre: string; corps: string; parEmail: boolean };
 
-const SUITE = "Ensuite, Me reste gratuite pour l'essentiel ; le copilote IA, les comptes connectés, les équipes et les rappels par email et push demandent Pro.";
+const SUITE =
+  "Ensuite, Me reste gratuite pour l'essentiel. Finances (1,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push.";
 
 /**
  * Messages liés à l'abonnement, envoyés une seule fois grâce à leur clé :
- * - fin d'essai : 3 jours avant, dans l'app ;
+ * - fin d'essai : 3 jours avant, dans l'app (rien si une formule payée prend le relais) ;
  * - fin de la période payée : 7 jours puis 1 jour avant, dans l'app et par email (rien n'est prélevé automatiquement).
  */
 export function avisAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs(), depuis = debutAbonnements()): AvisAbonnement | null {
@@ -148,13 +220,18 @@ export function avisAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
   const jour = e.jusqua.slice(0, 10);
   const quand = e.joursRestants <= 1 ? 'demain' : `dans ${e.joursRestants} jours`;
   if (e.offre === 'essai' && e.joursRestants <= 3) {
-    return { cle: `abonnement:essai:${jour}`, titre: `Ton essai Pro se termine ${quand}`, corps: `${SUITE} Pour garder Pro : Mon compte › Abonnement.`, parEmail: false };
+    if (e.ensuite?.formule === 'pro') return null;
+    const corps = e.ensuite
+      ? `Ta formule Finances prend le relais : tes finances avancées restent ouvertes. Le copilote IA, les comptes connectés, les équipes et les rappels par email et push demandent Pro.`
+      : `${SUITE} Pour choisir : Mon compte › Abonnement.`;
+    return { cle: `abonnement:essai:${jour}`, titre: `Ton essai se termine ${quand}`, corps, parEmail: false };
   }
-  if (e.offre === 'pro' && e.joursRestants <= 7) {
+  if ((e.offre === 'pro' || e.offre === 'finances') && e.joursRestants <= 7) {
     const palier = e.joursRestants <= 1 ? 1 : 7;
+    const nom = e.offre === 'pro' ? 'Pro' : 'Finances';
     return {
       cle: `abonnement:fin:${jour}:${palier}`,
-      titre: `Ton abonnement Pro se termine ${quand}`,
+      titre: `Ton abonnement ${nom} se termine ${quand}`,
       corps: `Il n'est pas renouvelé automatiquement : rien ne sera prélevé. Pour continuer, paie une nouvelle période dans Mon compte › Abonnement ; elle s'ajoutera à la fin de la période en cours. ${SUITE}`,
       parEmail: true,
     };
