@@ -73,6 +73,14 @@ export function texteRappels(rappels: { titre: string; corps: string }[]): strin
   return `${rappels.length} rappels : ${rappels.map((r) => r.titre).join(' ; ')}`;
 }
 
+/**
+ * Les rappels qui méritent un SMS payé : ce qui est à faire. Ni les rappels discrets, ni le briefing, ni les encouragements
+ * de la série, ni une alerte dont le push et l'email sont tous deux coupés.
+ */
+export function rappelsParSms<R extends { mode: string; cle: string; canaux?: { push: boolean; email: boolean } }>(rappels: R[]): R[] {
+  return rappels.filter((r) => r.mode !== 'passif' && r.mode !== 'briefing' && !/\|serie(\||$)/.test(r.cle) && (r.canaux?.push !== false || r.canaux?.email !== false));
+}
+
 /** L'état d'un SMS d'après le statut de livraison d'aSMSC. */
 export function statutLivraison(dlr: unknown): StatutSms {
   const s = String(dlr ?? '').toLowerCase();

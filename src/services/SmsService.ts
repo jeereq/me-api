@@ -79,7 +79,8 @@ export const SmsService = {
     const cfg = configSms();
     if (!cfg) return false;
     const depuis = new Date(Date.now() - JOUR_MS);
-    if ((await prisma.envoiSms.count({ where: { userId, createdAt: { gte: depuis } } })) >= maxParJour()) return false;
+    // Un envoi refusé par le service (sans identifiant de message) n'a rien coûté : il ne compte pas dans la limite.
+    if ((await prisma.envoiSms.count({ where: { userId, createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } })) >= maxParJour()) return false;
     const envoi = await prisma.envoiSms.create({ data: { userId } });
     try {
       const r = await Asmsc.envoyer(cfg, { telephone, texte, uid: envoi.id, retour: adresseRetour() });
