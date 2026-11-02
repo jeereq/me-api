@@ -17,6 +17,7 @@ import { initAnalysesCron } from './cron/analyses.js';
 import { initSynchronisationCron } from './cron/synchronisation.js';
 import integrationRoutes from './routes/integration.routes.js';
 import justificatifRoutes from './routes/justificatif.routes.js';
+import smsRoutes from './routes/sms.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
 import { assurerAdmin } from './services/AdminSeed.js';
@@ -58,6 +59,7 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/abonnement', abonnementRoutes);
 app.use('/api/justificatifs', justificatifRoutes);
+app.use('/api/sms', smsRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });

@@ -2,6 +2,8 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
+import { texteRappels } from './sms/asmsc.js';
+import { SmsService } from './SmsService.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
@@ -11,7 +13,7 @@ import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, ty
 const RATTRAPAGE_MIN = 45;
 const COULEURS: Record<string, string> = { agressif: '#FF6474', normal: '#62AEFF', coach: '#3EF0B0', hebdo: '#FFCB5C', briefing: '#38D9FF', passif: '#7F98A6' };
 
-type Prefs = { app?: boolean; email?: boolean };
+type Prefs = { app?: boolean; email?: boolean; sms?: boolean };
 /** Ce que dit l'avis selon ce qui est confié, au singulier, au pluriel, et où il mène. */
 const PHRASE_AFFECTATION: Record<Affectation['genre'], string> = { tache: "t'a confié une tâche", relance: "t'a confié une relance", rdv: "t'a affecté un rendez-vous" };
 const PLURIEL_AFFECTATION: Record<Affectation['genre'], string> = { tache: 'tâches', relance: 'relances', rdv: 'rendez-vous' };
@@ -47,11 +49,12 @@ function email(rappels: Rappel[], nom: string, pied = PIED_RAPPELS) {
 export const NotificationService = {
   /** Crée les rappels arrivés à échéance pour chaque compte, puis les envoie par email si activé. */
   async generer(maintenant = new Date()) {
-    const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as ConfigRappels & { canaux?: { mail?: boolean } };
+    const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as ConfigRappels & { canaux?: { mail?: boolean; sms?: boolean } };
     const mailActif = cfg.canaux?.mail !== false && EmailService.configure();
+    const smsActif = cfg.canaux?.sms !== false && SmsService.configure();
     const users = await prisma.user.findMany({
       select: {
-        id: true, email: true, nom: true, fuseau: true, espace: { select: { data: true } },
+        id: true, email: true, nom: true, fuseau: true, telephone: true, espace: { select: { data: true } },
         role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true,
       },
     });
@@ -61,7 +64,9 @@ export const NotificationService = {
       if (!u.espace) continue;
       const e = u.espace.data as EspaceRappels & { notifs?: Prefs };
       const prefs = e.notifs ?? {};
-      if (prefs.app === false && !(mailActif && prefs.email !== false)) continue;
+      // Le SMS se demande : il coûte, et il faut un numéro vérifié.
+      const parSmsPossible = smsActif && prefs.sms === true && !!u.telephone;
+      if (prefs.app === false && !(mailActif && prefs.email !== false) && !parSmsPossible) continue;
       const { date, heure } = local(maintenant, u.fuseau);
       const nowLocal = `${date}T${heure}`;
       const depuis = local(new Date(maintenant.getTime() - RATTRAPAGE_MIN * 60000), u.fuseau);
@@ -93,7 +98,11 @@ export const NotificationService = {
           await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });
         }
       }
+      // Un seul SMS par passage. Ni les rappels discrets ni le briefing : chaque SMS coûte.
+      const parSms = parSmsPossible && aDroit(etat, 'sms') ? nouveaux.filter((r) => r.mode !== 'passif' && r.mode !== 'briefing' && (r.canaux?.push !== false || r.canaux?.email !== false)) : [];
+      if (parSms.length) await SmsService.envoyer(u.id, u.telephone!, texteRappels(parSms));
     }
+    await SmsService.purger(maintenant);
     // On garde 60 jours d'historique.
     await prisma.notification.deleteMany({ where: { createdAt: { lt: new Date(maintenant.getTime() - 60 * 86400000) } } });
   },
@@ -174,7 +183,7 @@ export const NotificationService = {
       prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 50, select: { id: true, titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true } }),
       prisma.notification.count({ where: { userId, lu: false } }),
     ]);
-    return { notifications, nonLues, email: EmailService.configure(), push: PushService.configure() };
+    return { notifications, nonLues, email: EmailService.configure(), push: PushService.configure(), sms: SmsService.configure() };
   },
 
   async marquerLues(userId: string, ids?: string[]) {

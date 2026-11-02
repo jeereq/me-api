@@ -57,6 +57,27 @@ model User {
   paiements    Paiement[]
   analysesMails AnalyseMail[]
   usageReunions UsageReunion[]
+  /// Numéro vérifié par code, pour les rappels par SMS (indicatif sans « + »).
+  telephone          String?
+  /// Numéro à vérifier, identifiant de la demande chez aSMSC et date d'envoi du code.
+  telephoneEnAttente String?
+  smsVerificationId  String?
+  smsVerificationLe  DateTime?
+  envoisSms          EnvoiSms[]
+}
+
+/// Un SMS envoyé à un compte : sert à limiter les envois par jour. Ni le texte ni le numéro ne sont gardés.
+model EnvoiSms {
+  /// Renvoyé par aSMSC (« uid ») sur l'adresse de retour.
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId String?
+  /// soumis, delivre ou echec
+  statut    String   @default("soumis")
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 /// Audio de réunion transcrit par compte et par période de comptage : le mois civil (« 2026-11 ») ou « essai » (les 45 minutes offertes).

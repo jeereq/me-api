@@ -107,6 +107,13 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/notifications/push` | compte | Abonne ce navigateur aux notifications push |
 | DELETE | `/api/notifications/push` | compte | Désabonne ce navigateur |
 | POST | `/api/notifications/test` | compte | Envoie un rappel d'essai dans l'app et par email |
+| GET | `/api/sms` | compte | `{ disponible, telephone, enAttente }` |
+| POST | `/api/sms/telephone` | Pro | `{ telephone }` : envoie un code à ce numéro (3 par heure) |
+| POST | `/api/sms/telephone/code` | Pro | `{ code }` : confirme le numéro (5 essais par 15 min) |
+| DELETE | `/api/sms/telephone` | compte | Retire le numéro |
+| POST | `/api/sms/test` | Pro | Envoie un SMS d'essai (3 par heure) |
+| GET | `/api/sms/solde` | admin | `{ montant, devise }` : solde du compte aSMSC |
+| POST | `/api/sms/retour?cle=` | clé | État de livraison envoyé par aSMSC |
 | POST | `/api/assistant/mails` | compte, Pro | `{ mails: ["ext:<compte>:<mail>", …] (1 à 10), ton?, consignes?, crm? }` → `{ analyses, enCache, fraiches, illisibles }` : le serveur lit les mails, analyse ceux qui n'ont pas d'analyse de moins de 30 jours et garde le résultat |
 | POST | `/api/assistant/transcription` | compte, Pro | Formulaire `audio` (m4a, webm, mp3… 25 Mo au plus, environ 90 minutes en AAC mono 32 kbit/s) + `contexte?` (noms, sujet) → `{ texte, modele }` : transcription en français par OpenAI (`OPENAI_MODEL_TRANSCRIPTION`, `gpt-4o-mini-transcribe` par défaut). L'enregistrement n'est jamais gardé. 10 par heure et par compte |
 | POST | `/api/assistant` | compte, Pro | `{ type: "question" \| "plan" \| "relance" \| "copilote" \| "mails" \| "lot" \| "synthese" \| "compte_rendu", … }` → `{ text }` ; `consignes` (texte libre, 600 caractères retenus) oriente l'analyse « mails » et « lot » |
@@ -168,6 +175,17 @@ Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son f
 - Si SendGrid est configuré (`SENDGRID_API_KEY`, `SENDGRID_FROM`) et que l'admin n'a pas coupé le canal « Mail à moi-même », les rappels d'un même passage partent en un seul email.
 - Si les clés VAPID sont configurées (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, générées par `npx web-push generate-vapid-keys`), chaque appareil activé dans l'app reçoit aussi une notification push, même app fermée. Sur iPhone, il faut l'app web ajoutée à l'écran d'accueil (iOS 16.4 ou plus).
 - Chacun peut couper les emails ou les notifications dans l'app (Mon compte > Notifications).
+
+## Rappels par SMS (aSMSC)
+
+Fonction de Pro. Renseigne `SMS_API_URL`, `SMS_API_ID`, `SMS_API_PASSWORD` et `SMS_SENDER_ID` (voir `.env.example`), puis applique la migration. Sans elles, l'app n'affiche pas le SMS.
+
+- **Numéro vérifié** : dans Mon compte › Notifications, un code part au numéro ; les rappels n'y partent qu'une fois le code confirmé et l'option activée.
+- **Coût limité** : un SMS au plus par passage des rappels, un seul message (160 caractères), 5 SMS par compte sur 24 h (`SMS_MAX_PAR_JOUR`). Les rappels discrets et le briefing ne partent pas par SMS.
+- **Données** : l'historique (`EnvoiSms`) garde la date et l'état 60 jours, ni le texte ni le numéro.
+- **Livraison** : avec `SMS_CALLBACK_CLE` et un `PUBLIC_URL` en https, aSMSC signale l'état de chaque SMS.
+
+Le code est dans `src/services/sms/asmsc.ts` (testé dans `tests/sms.test.ts`) et `src/services/SmsService.ts`. Les noms mal orthographiés de la documentation (`verfication_id`, `CurrenceCode`) sont volontaires.
 
 ## Comptes connectés
 

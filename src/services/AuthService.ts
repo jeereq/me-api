@@ -161,16 +161,18 @@ export const AuthService = {
         integrations: { select: { fournisseur: true, compte: true, ctx: true, derniereSync: true, donnees: true, createdAt: true } },
         notifications: { select: { titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
         abonnementsPush: { select: { appareil: true, createdAt: true } },
+        envoisSms: { select: { statut: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
         paiements: { select: { reference: true, periode: true, montant: true, devise: true, statut: true, payeLe: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
       },
     });
     return {
       exporteLe: new Date().toISOString(),
-      compte: { email: u.email, nom: u.nom, nomApp: u.nomApp, role: u.role, fuseau: u.fuseau, emailVerifie: u.emailVerifie, connexionGoogle: !!u.googleId, creeLe: u.createdAt },
+      compte: { email: u.email, telephone: u.telephone, nom: u.nom, nomApp: u.nomApp, role: u.role, fuseau: u.fuseau, emailVerifie: u.emailVerifie, connexionGoogle: !!u.googleId, creeLe: u.createdAt },
       espace: u.espace?.data ?? null,
       comptesConnectes: u.integrations,
       notifications: u.notifications,
       appareilsPush: u.abonnementsPush,
+      envoisSms: u.envoisSms,
       abonnement: { ...etatAbonnement(u), cgvAccepteesLe: u.cgvAccepteesLe, cgvVersion: u.cgvVersion },
       paiements: u.paiements,
     };

@@ -217,3 +217,5 @@ export const paiementSchema = z.object({
   }),
 });
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });
+export const smsTelephoneSchema = z.object({ body: z.object({ telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(20) }) });
+export const smsCodeSchema = z.object({ body: z.object({ code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{3,10}$/, 'Code invalide') }) });

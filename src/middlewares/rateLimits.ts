@@ -92,3 +92,5 @@ export const analyseJustificatifLimiter = rateLimit({
  * donc 60 appels par minute et par IP au plus.
  */
 export const retourPaiementLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message });
+/** Retour de livraison d'aSMSC (adresse publique, protégée par sa clé). */
+export const retourSmsLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false, message });
