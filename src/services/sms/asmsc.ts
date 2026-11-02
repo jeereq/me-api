@@ -108,7 +108,7 @@ export const Asmsc = {
   /** Envoie un SMS transactionnel. `uid` revient sur l'adresse de retour. */
   async envoyer(cfg: ConfigSms, m: { telephone: string; texte: string; uid: string; retour?: string }) {
     const { texte, encodage } = preparerTexte(m.texte);
-    const r = await appeler<{ message_id?: unknown; status?: string; remarks?: string }>(cfg, 'SendSMS', {
+    const r = await appeler<{ message_id?: unknown; status?: string; remarks?: string }>(cfg, 'SendSms', {
       ...identifiants(cfg),
       sms_type: 'T',
       encoding: encodage,
