@@ -1,7 +1,7 @@
 /**
  * Offres d'abonnement et droits d'un compte. Module pur (sans base ni réseau), testé dans tests/abonnements.test.ts.
  *
- * Trois formules :
+ * Trois formules (et, pour Pro, quatre paliers de réunions : Pro 0 à Pro 3, voir PALIERS) :
  * - Gratuit : l'espace personnel (tâches, relances, habitudes, projets) et les finances de base (budgets, dépenses,
  *   revenus, objectifs, statistiques, export), avec les rappels dans l'app.
  * - Finances : en plus, les finances avancées (voir FONCTIONS_FINANCES), avec leurs alertes en push et par email.
@@ -19,10 +19,12 @@
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-11-03';
+export const VERSION_CGV = '2026-11-04';
 
 export type Periode = 'mensuel' | 'annuel';
 export type Formule = 'finances' | 'pro';
+/** Palier de réunions de Pro : 0 (sans réunions, le Pro d'origine), 1, 2 ou 3. */
+export type Palier = 0 | 1 | 2 | 3;
 
 const FORMULE_FINANCES = {
   nom: 'Finances',
@@ -36,11 +38,36 @@ const FORMULE_PRO = {
   annuel: { prix: 4999, libelle: '49,99 $ par an', mois: 12, economie: '2 mois offerts' },
 } as const;
 
+/**
+ * Les paliers de Pro qui ajoutent l'enregistrement, la transcription et le résumé des réunions, avec l'attribution des tâches
+ * aux membres, projets et plannings. Le prix d'un palier s'ajoute à celui de Pro (Pro 1 = 4,99 + 1,99 = 6,98 $ par mois).
+ * `heures` : heures d'audio transcrites par mois civil, sans report. Les prix doivent rester ceux des CGV.
+ */
+export const PALIERS = {
+  1: { nom: 'Pro 1', heures: 3, mensuel: { prix: 199, libelle: '+ 1,99 $ par mois' }, annuel: { prix: 1999, libelle: '+ 19,99 $ par an' } },
+  2: { nom: 'Pro 2', heures: 10, mensuel: { prix: 499, libelle: '+ 4,99 $ par mois' }, annuel: { prix: 4999, libelle: '+ 49,99 $ par an' } },
+  3: { nom: 'Pro 3', heures: 25, mensuel: { prix: 999, libelle: '+ 9,99 $ par mois' }, annuel: { prix: 9999, libelle: '+ 99,99 $ par an' } },
+} as const;
+/** Minutes de réunion offertes pendant l'essai de 14 jours (une fois). */
+export const ESSAI_REUNION_MINUTES = 45;
+
+export const estPalier = (n: unknown): n is Palier => n === 0 || n === 1 || n === 2 || n === 3;
+/** Palier lu sur un compte ou un paiement : tout ce qui n'est pas 1, 2 ou 3 est Pro 0. */
+export const palierDe = (n: unknown): Palier => (n === 1 || n === 2 || n === 3 ? n : 0);
+
+/** Prix d'une période, en centimes : celui de la formule, plus celui du palier (Pro seulement). */
+export function prixPeriode(formule: Formule, periode: Periode, palier: Palier = 0): number {
+  return OFFRES.formules[formule][periode].prix + (formule === 'pro' && palier ? PALIERS[palier][periode].prix : 0);
+}
+
 export const OFFRES = {
   devise: 'USD',
   essaiJours: ESSAI_JOURS,
   gratuit: { nom: 'Gratuit', prix: 0 },
   formules: { finances: FORMULE_FINANCES, pro: FORMULE_PRO },
+  /** Paliers de réunions de Pro (1 à 3) et minutes offertes à l'essai. */
+  paliers: PALIERS,
+  essaiReunionMinutes: ESSAI_REUNION_MINUTES,
   /** Gardé pour les anciennes versions de l'app, qui ne connaissent que Pro. */
   pro: FORMULE_PRO,
 } as const;
@@ -65,12 +92,19 @@ export const FONCTIONS_PRO = {
   push: 'Les notifications push sur tes appareils',
 } as const;
 
+/** Ce que les paliers Pro 1 à 3 ajoutent à Pro. */
+export const FONCTIONS_REUNIONS = {
+  reunions: 'L’enregistrement des réunions, leur transcription et leur résumé, avec l’attribution des tâches aux membres, projets et plannings',
+} as const;
+
 export type FonctionFinances = keyof typeof FONCTIONS_FINANCES;
 export type FonctionPro = keyof typeof FONCTIONS_PRO;
-export type Fonction = FonctionFinances | FonctionPro;
+export type FonctionReunions = keyof typeof FONCTIONS_REUNIONS;
+export type Fonction = FonctionFinances | FonctionPro | FonctionReunions;
 
 const TOUT_FINANCES = Object.keys(FONCTIONS_FINANCES) as FonctionFinances[];
-const TOUT = [...TOUT_FINANCES, ...(Object.keys(FONCTIONS_PRO) as FonctionPro[])];
+const TOUT_PRO0 = [...TOUT_FINANCES, ...(Object.keys(FONCTIONS_PRO) as FonctionPro[])];
+const TOUT = [...TOUT_PRO0, ...(Object.keys(FONCTIONS_REUNIONS) as FonctionReunions[])];
 
 /** La formule qui débloque une fonction. */
 export const formuleDe = (f: Fonction): Formule => (f in FONCTIONS_FINANCES ? 'finances' : 'pro');
@@ -80,12 +114,14 @@ export type ChampsAbonnement = {
   role?: 'ADMIN' | 'UTILISATEUR';
   essaiJusqua?: Date | null;
   abonnementFormule?: string | null;
+  /** Palier de réunions de Pro (0 à 3). */
+  abonnementPalier?: number | null;
   abonnementPeriode?: string | null;
   abonnementFinLe?: Date | null;
 };
 
 /** Colonnes à lire pour calculer l'état d'un abonnement (select Prisma). */
-export const SELECT_ABONNEMENT = { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } as const;
+export const SELECT_ABONNEMENT = { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPalier: true, abonnementPeriode: true, abonnementFinLe: true } as const;
 
 export type EtatAbonnement = {
   /** Les abonnements sont-ils en service sur ce serveur ? Sinon tout est ouvert. */
@@ -97,6 +133,10 @@ export type EtatAbonnement = {
   /** Les finances avancées sont ouvertes (Finances, et tout ce qui ouvre Pro). */
   finances: boolean;
   periode: Periode | null;
+  /** Palier de réunions de la formule Pro payée (0 sans réunions). */
+  palier: Palier;
+  /** Réunions : de combien d'audio transcrit par période (clé de comptage), ou null si elles ne sont pas ouvertes. `illimite` : abonnements coupés ou admin. */
+  reunions: { cle: 'essai' | string; secondes: number; illimite?: boolean } | null;
   /** Fin de l'essai (offre essai) ou de la période payée (offres finances et pro), ISO. */
   jusqua: string | null;
   /** Jours restants avant `jusqua`, arrondis au supérieur. */
@@ -136,25 +176,33 @@ export function finEssaiEffective(essaiJusqua: Date | null | undefined, depuis: 
 
 const jours = (fin: Date, maintenant: Date) => Math.max(0, Math.ceil((fin.getTime() - maintenant.getTime()) / 86400000));
 
+/** Clé de comptage des réunions du mois civil (UTC), ex. « 2026-11 ». */
+export const moisReunions = (d: Date) => d.toISOString().slice(0, 7);
+
 export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), actif = abonnementsActifs(), depuis = debutAbonnements()): EtatAbonnement {
   const periode: Periode | null = c.abonnementPeriode === 'annuel' || c.abonnementPeriode === 'mensuel' ? c.abonnementPeriode : null;
-  const base = { actif, periode };
+  const palier = palierDe(c.abonnementPalier);
+  const base = { actif, periode, palier };
   const tout = { pro: true, finances: true, fonctions: TOUT };
 
   const fin = c.abonnementFinLe && c.abonnementFinLe > maintenant ? c.abonnementFinLe : null;
   const formule = formulePayee(c);
-  if (fin && formule === 'pro') return { ...base, offre: 'pro', ...tout, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
+  if (fin && formule === 'pro') {
+    // Pro 0 n'a pas les réunions ; Pro 1 à 3 en ont PALIERS[palier].heures par mois.
+    const reunions = palier ? { cle: moisReunions(maintenant), secondes: PALIERS[palier].heures * 3600 } : null;
+    return { ...base, offre: 'pro', ...tout, fonctions: palier ? TOUT : TOUT_PRO0, reunions, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
+  }
 
-  if (!actif || c.role === 'ADMIN') return { ...base, offre: 'libre', ...tout, jusqua: null, joursRestants: null };
+  if (!actif || c.role === 'ADMIN') return { ...base, offre: 'libre', ...tout, reunions: { cle: moisReunions(maintenant), secondes: 0, illimite: true }, jusqua: null, joursRestants: null };
 
-  // L'essai ouvre tout : une formule Finances payée pendant l'essai prend le relais à sa fin.
+  // L'essai ouvre tout (45 minutes de réunion, une fois) : une formule Finances payée pendant l'essai prend le relais à sa fin.
   const essai = finEssaiEffective(c.essaiJusqua, depuis);
   if (essai && essai > maintenant)
-    return { ...base, offre: 'essai', ...tout, jusqua: essai.toISOString(), joursRestants: jours(essai, maintenant), ensuite: fin ? { formule, jusqua: fin.toISOString() } : null };
+    return { ...base, offre: 'essai', ...tout, reunions: { cle: 'essai', secondes: ESSAI_REUNION_MINUTES * 60 }, jusqua: essai.toISOString(), joursRestants: jours(essai, maintenant), ensuite: fin ? { formule, jusqua: fin.toISOString() } : null };
 
-  if (fin) return { ...base, offre: 'finances', pro: false, finances: true, fonctions: TOUT_FINANCES, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
+  if (fin) return { ...base, offre: 'finances', pro: false, finances: true, fonctions: TOUT_FINANCES, reunions: null, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
 
-  return { ...base, offre: 'gratuit', pro: false, finances: false, jusqua: null, joursRestants: null, fonctions: [] };
+  return { ...base, offre: 'gratuit', pro: false, finances: false, reunions: null, jusqua: null, joursRestants: null, fonctions: [] };
 }
 
 /** Le compte a-t-il droit à cette fonction ? */
@@ -173,8 +221,8 @@ export function ajouterMois(d: Date, mois: number) {
   return r;
 }
 
-/** Prix d'un mois d'une formule, en centimes : sert à convertir le temps restant quand on change de formule. */
-const prixMois = (f: Formule) => OFFRES.formules[f].mensuel.prix;
+/** Prix d'un mois d'une formule (et de son palier), en centimes : sert à convertir le temps restant quand on change de formule ou de palier. */
+const prixMois = (f: Formule, palier: Palier = 0) => prixPeriode(f, 'mensuel', palier);
 
 /**
  * Nouvelle fin de l'abonnement après un paiement. La période part de la plus tardive de : la fin de l'essai en cours
@@ -183,17 +231,20 @@ const prixMois = (f: Formule) => OFFRES.formules[f].mensuel.prix;
  * 1,99 / 4,99 mois de Pro, et inversement) : rien de ce qui est payé n'est perdu.
  */
 export function prolonger(
-  actuel: { fin?: Date | null; formule?: Formule | null } | Date | null | undefined,
+  actuel: { fin?: Date | null; formule?: Formule | null; palier?: Palier } | Date | null | undefined,
   periode: Periode,
   maintenant = new Date(),
   finEssaiEnCours?: Date | null,
   formule: Formule = 'pro',
+  palier: Palier = 0,
 ) {
-  const a = actuel instanceof Date || actuel == null ? { fin: actuel ?? null, formule: 'pro' as Formule } : actuel;
+  const a = actuel instanceof Date || actuel == null ? { fin: actuel ?? null, formule: 'pro' as Formule, palier: 0 as Palier } : actuel;
   const depart = finEssaiEnCours && finEssaiEnCours > maintenant ? finEssaiEnCours : maintenant;
   let reste = a.fin && a.fin > depart ? a.fin.getTime() - depart.getTime() : 0;
   const avant = a.formule ?? 'pro';
-  if (reste && avant !== formule) reste = Math.round((reste * prixMois(avant)) / prixMois(formule));
+  const avantPalier = avant === 'pro' ? (a.palier ?? 0) : 0;
+  const apresPalier = formule === 'pro' ? palier : 0;
+  if (reste && (avant !== formule || avantPalier !== apresPalier)) reste = Math.round((reste * prixMois(avant, avantPalier)) / prixMois(formule, apresPalier));
   return ajouterMois(new Date(depart.getTime() + reste), OFFRES.formules[formule][periode].mois);
 }
 
@@ -201,12 +252,14 @@ export function prolonger(
 export const messageReserve = (f: Fonction) =>
   formuleDe(f) === 'finances'
     ? `${FONCTIONS_FINANCES[f as FonctionFinances]} : c'est inclus dans Me Finances (et Pro). Choisis une formule dans Mon compte › Abonnement.`
-    : `${FONCTIONS_PRO[f as FonctionPro]} : c'est inclus dans Me Pro. Passe à Pro depuis Mon compte › Abonnement.`;
+    : f === 'reunions'
+      ? `${FONCTIONS_REUNIONS.reunions} : c'est inclus dans Pro 1, Pro 2 et Pro 3. Choisis un palier dans Mon compte › Abonnement.`
+      : `${FONCTIONS_PRO[f as FonctionPro]} : c'est inclus dans Me Pro. Passe à Pro depuis Mon compte › Abonnement.`;
 
 export type AvisAbonnement = { cle: string; titre: string; corps: string; parEmail: boolean };
 
 const SUITE =
-  "Ensuite, Me reste gratuite pour l'essentiel. Finances (1,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push.";
+  "Ensuite, Me reste gratuite pour l'essentiel. Finances (1,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (3, 10 ou 25 h par mois).";
 
 /**
  * Messages liés à l'abonnement, envoyés une seule fois grâce à leur clé :
@@ -228,7 +281,7 @@ export function avisAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
   }
   if ((e.offre === 'pro' || e.offre === 'finances') && e.joursRestants <= 7) {
     const palier = e.joursRestants <= 1 ? 1 : 7;
-    const nom = e.offre === 'pro' ? 'Pro' : 'Finances';
+    const nom = e.offre === 'pro' ? (e.palier ? `Pro ${e.palier}` : 'Pro') : 'Finances';
     return {
       cle: `abonnement:fin:${jour}:${palier}`,
       titre: `Ton abonnement ${nom} se termine ${quand}`,

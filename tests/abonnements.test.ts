@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { aDroit, abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, formuleDe, messageReserve, OFFRES, prolonger } from '../src/services/abonnements/offres.js';
+import { PALIERS, ESSAI_REUNION_MINUTES, moisReunions, palierDe, prixPeriode, aDroit, abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, formuleDe, messageReserve, OFFRES, prolonger } from '../src/services/abonnements/offres.js';
 import { empreintesCompte, normaliserEmail } from '../src/services/abonnements/essai-unique.js';
 import { base64Strict, erreurFlexpaie, jetonFlexpaie, lireEtat, montantTexte, normaliserTelephone, problemeJeton } from '../src/services/abonnements/flexpaie.js';
 
@@ -234,5 +234,66 @@ describe('jeton FlexPaie', () => {
     assert.equal(f.configuration, false);
     assert.equal(f.message, 'Numéro invalide');
     assert.equal(erreurFlexpaie(undefined, 'repli').message, 'repli');
+  });
+});
+
+describe('paliers de réunions : Pro 0 à Pro 3', () => {
+  it('additionne le prix du palier à celui de Pro', () => {
+    assert.equal(prixPeriode('pro', 'mensuel', 0), 499);
+    assert.equal(prixPeriode('pro', 'mensuel', 1), 698);
+    assert.equal(prixPeriode('pro', 'mensuel', 2), 998);
+    assert.equal(prixPeriode('pro', 'mensuel', 3), 1498);
+    assert.equal(prixPeriode('pro', 'annuel', 1), 6998);
+    assert.equal(prixPeriode('pro', 'annuel', 3), 14998);
+    // Finances n'a pas de palier.
+    assert.equal(prixPeriode('finances', 'mensuel', 3), 199);
+    assert.deepEqual([1, 2, 3].map((n) => PALIERS[n as 1 | 2 | 3].heures), [3, 10, 25]);
+  });
+  it('lit tout ce qui n’est pas 1, 2 ou 3 comme Pro 0', () => {
+    assert.deepEqual([null, undefined, 0, 4, -1, '2'].map(palierDe), [0, 0, 0, 0, 0, 0]);
+    assert.equal(palierDe(2), 2);
+  });
+  it('n’ouvre pas les réunions avec Pro 0, mais tout le reste de Pro', () => {
+    const e = etatAbonnement({ abonnementFormule: 'pro', abonnementFinLe: jours(20), abonnementPeriode: 'mensuel' }, T0, true);
+    assert.equal(e.palier, 0);
+    assert.equal(e.reunions, null);
+    assert.equal(aDroit(e, 'reunions'), false);
+    assert.equal(aDroit(e, 'assistant'), true);
+    assert.equal(aDroit(e, 'equipes'), true);
+    // Un ancien abonnement sans palier est du Pro 0.
+    assert.equal(aDroit(etatAbonnement({ abonnementFinLe: jours(20) }, T0, true), 'reunions'), false);
+    assert.match(messageReserve('reunions'), /Pro 1/);
+  });
+  it('ouvre les réunions avec Pro 1 à 3 et leurs heures du mois', () => {
+    for (const [palier, heures] of [[1, 3], [2, 10], [3, 25]] as const) {
+      const e = etatAbonnement({ abonnementFormule: 'pro', abonnementPalier: palier, abonnementFinLe: jours(20), abonnementPeriode: 'mensuel' }, T0, true);
+      assert.equal(aDroit(e, 'reunions'), true);
+      assert.deepEqual(e.reunions, { cle: moisReunions(T0), secondes: heures * 3600 });
+    }
+  });
+  it('offre 45 minutes de réunion pendant l’essai, comptées à part du mois', () => {
+    const e = etatAbonnement({ essaiJusqua: jours(5) }, T0, true);
+    assert.equal(aDroit(e, 'reunions'), true);
+    assert.deepEqual(e.reunions, { cle: 'essai', secondes: ESSAI_REUNION_MINUTES * 60 });
+    assert.equal(ESSAI_REUNION_MINUTES, 45);
+  });
+  it('ne donne pas les réunions à Finances, au gratuit, ni après la fin du palier', () => {
+    assert.equal(etatAbonnement({ abonnementFormule: 'finances', abonnementFinLe: jours(20) }, T0, true).reunions, null);
+    assert.equal(etatAbonnement({}, T0, true).reunions, null);
+    assert.equal(etatAbonnement({ abonnementFormule: 'pro', abonnementPalier: 2, abonnementFinLe: jours(-1) }, T0, true).reunions, null);
+  });
+  it('reste ouvert et sans limite quand les abonnements sont coupés', () => {
+    const e = etatAbonnement({}, T0, false);
+    assert.equal(aDroit(e, 'reunions'), true);
+    assert.equal(e.reunions?.illimite, true);
+  });
+  it('convertit le temps restant au prorata quand on change de palier', () => {
+    // 30 jours de Pro 0 (4,99) valent 30 × 4,99 / 6,98 jours de Pro 1.
+    const fin = prolonger({ fin: jours(30), formule: 'pro', palier: 0 }, 'mensuel', T0, null, 'pro', 1);
+    assert.equal(fin.toISOString(), ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 499) / 698)), 1).toISOString());
+    // Même palier : on prolonge à partir de la fin.
+    assert.equal(prolonger({ fin: jours(30), formule: 'pro', palier: 2 }, 'mensuel', T0, null, 'pro', 2).toISOString(), ajouterMois(jours(30), 1).toISOString());
+    // Redescendre de palier rend plus de jours.
+    assert.ok(prolonger({ fin: jours(10), formule: 'pro', palier: 3 }, 'mensuel', T0, null, 'pro', 0) > ajouterMois(jours(10), 1));
   });
 });
