@@ -93,6 +93,17 @@ export const analyseMailsSchema = z.object({
 });
 export type AnalyseMailsBody = z.infer<typeof analyseMailsSchema>['body'];
 
+/** Lecture d'un justificatif par l'IA : son identifiant Cloudinary, et de quoi bien lire (date du jour, devise, catégories). */
+export const analyseJustificatifSchema = z.object({
+  body: z.object({
+    id: z.string().trim().min(1).max(300),
+    aujourdhui: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date du jour attendue (AAAA-MM-JJ)'),
+    devise: z.string().trim().min(1).max(8).default('USD'),
+    categories: z.array(z.object({ id: z.string().min(1).max(80), nom: z.string().trim().min(1).max(80) })).max(80).default([]),
+  }),
+});
+export type AnalyseJustificatifBody = z.infer<typeof analyseJustificatifSchema>['body'];
+
 export type AssistantBody = z.infer<typeof assistantSchema>['body'];
 
 export const integrationParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });

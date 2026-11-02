@@ -3,6 +3,7 @@ import type { AssistantBody } from '../validators/schemas.js';
 import { MODELE_DEFAUT, modeleFortChoisi, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
 import { consignesPropres, mailsImportants, preparerMails, reglesAnalyse, remplacerAnalyses, sansBalises, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_SYNTHESE, seulementCes } from './analyse-mails.js';
 import { ConfigService } from './ConfigService.js';
+import type { SCHEMA_FACTURE } from './justificatifs/lecture-ia.js';
 
 const MAX_DONNEES = 60_000;
 const DELAI_MS = 60_000;
@@ -29,8 +30,10 @@ export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/cha
 export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot' || type === 'synthese' || type === 'compte_rendu';
 /** Un message de la conversation envoyée à OpenAI. */
 export type MessageIA = { role: 'system' | 'user'; content: string };
+/** Un message qui peut porter une image (lecture d'une facture) : texte et image en morceaux. */
+export type MessageVision = { role: 'system' | 'user'; content: string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } })[] };
 /** Forme de réponse imposée : `schema` (Structured Outputs, JSON validé champ par champ) ou simple objet JSON. */
-export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_MAILS | typeof SCHEMA_LOT | typeof SCHEMA_SYNTHESE } | { type: 'json_object' };
+export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_MAILS | typeof SCHEMA_LOT | typeof SCHEMA_SYNTHESE | typeof SCHEMA_FACTURE } | { type: 'json_object' };
 
 /** La forme stricte attendue pour l'analyse des mails et d'un lot ; les autres réponses JSON restent libres. */
 export const schemaDe = (type: AssistantBody['type']): FormatJson | null =>
@@ -41,7 +44,7 @@ export const longue = (type: AssistantBody['type']) => type === 'lot' || type ==
 export const pourModeleFort = (type: AssistantBody['type']) => type === 'mails' || type === 'synthese';
 
 /** Un lot de mails (jusqu'à 100) demande une synthèse et une analyse par mail : la plus longue des réponses. */
-export function corpsRequete(modele: string, contenu: string | MessageIA[], json = false, long = false, format?: FormatJson | null) {
+export function corpsRequete(modele: string, contenu: string | MessageIA[] | MessageVision[], json = false, long = false, format?: FormatJson | null) {
   const r = raisonne(modele);
   return {
     model: modele,
@@ -181,6 +184,35 @@ export const AssistantService = {
     return (await this.demanderAvecModeles(body)).texte;
   },
 
+  /**
+   * Une demande en JSON imposé qui porte une image (lecture d'une facture). Mêmes modèles que l'assistant, dans le même
+   * ordre ; un modèle qui ne lit pas les images (ou ne connaît pas la forme imposée) laisse sa place au suivant.
+   */
+  async lireImage(messages: MessageVision[], format: FormatJson): Promise<{ texte: string; modele: string }> {
+    if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.", 'IA_INDISPONIBLE');
+    const choisi = ((await ConfigService.get()).assistant as { modele?: unknown } | undefined)?.modele;
+    const candidats = modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL);
+    let data: Reponse = {};
+    let modele = candidats[0];
+    for (const [i, m] of candidats.entries()) {
+      modele = m;
+      let res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, messages, true, false, format)) });
+      data = (await res.json().catch(() => ({}))) as Reponse;
+      if (!res.ok && formatRefuse(res.status, data?.error?.message)) {
+        res = await openai('/chat/completions', { method: 'POST', body: JSON.stringify(corpsRequete(m, messages, true)) });
+        data = (await res.json().catch(() => ({}))) as Reponse;
+      }
+      if (res.ok) break;
+      console.error('OpenAI (image)', res.status, m, data?.error?.message);
+      if ((modeleIndisponible(res.status, data) || imageRefusee(res.status, data?.error?.message)) && i < candidats.length - 1) continue;
+      if (imageRefusee(res.status, data?.error?.message)) throw new HttpError(502, `Le modèle « ${m} » ne lit pas les images. Choisis-en un autre dans Configuration (gpt-4o-mini, par exemple).`, 'IMAGE_REFUSEE');
+      throw new HttpError(502, "L'IA n'a pas pu lire ce justificatif, réessaie dans un instant.");
+    }
+    const texte = (data.choices?.[0]?.message?.content ?? '').trim();
+    if (!texte) throw new HttpError(502, "L'IA n'a rien pu lire sur ce justificatif. Réessaie, ou remplis la dépense à la main.");
+    return { texte, modele };
+  },
+
   /** Comme `demander`, en disant aussi quels modèles ont répondu (gardé avec les analyses de mails). */
   async demanderAvecModeles(body: AssistantBody): Promise<{ texte: string; modeles: string[] }> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
@@ -212,6 +244,9 @@ export const AssistantService = {
     }
   },
 };
+
+/** OpenAI refuse l'image : modèle sans vision, ou image illisible pour lui. */
+export const imageRefusee = (status: number, message?: string) => status === 400 && /image|vision|multimodal|content.*type/i.test(message ?? '') && !/response_format|json_schema/i.test(message ?? '');
 
 type Reponse = { choices?: { finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }[]; error?: { message?: string; code?: string | null } };
 
