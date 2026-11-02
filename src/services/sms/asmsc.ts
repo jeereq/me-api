@@ -130,18 +130,29 @@ export function raisonPanne(e: unknown, serveur = ''): string {
   return code ? `Le service SMS est injoignable (${code}).` : 'Le service SMS est injoignable.';
 }
 
+/** La documentation écrit aussi « SendSMS » et « Verfiy » : un 404 n'a rien envoyé, on essaie donc cette autre orthographe. */
+const AUTRE_ORTHOGRAPHE: Record<string, string> = { SendSms: 'SendSMS', Verify: 'Verfiy' };
+
 /** Appelle aSMSC en POST JSON. Une panne ne laisse jamais passer l'adresse ni le corps de la requête. */
 async function appeler<T>(cfg: ConfigSms, chemin: string, corps: Record<string, unknown>): Promise<T> {
+  const poster = (nom: string) => fetch(`${cfg.url}/api/${nom}`, { method: 'POST', signal: delai(), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
   let res: Response;
   try {
-    res = await fetch(`${cfg.url}/api/${chemin}`, { method: 'POST', signal: delai(), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+    res = await poster(chemin);
+    if (res.status === 404 && AUTRE_ORTHOGRAPHE[chemin]) res = await poster(AUTRE_ORTHOGRAPHE[chemin]);
   } catch (e) {
     const raison = raisonPanne(e, nomServeur(cfg.url));
     console.error('SMS', chemin, raison);
     throw new ErreurSms(raison);
   }
   const data = (await res.json().catch(() => null)) as T | null;
-  if (!res.ok || data === null) throw new ErreurSms(`Le service SMS a répondu ${res.status}.`);
+  if (!res.ok || data === null) {
+    // La réponse du service dit souvent la vraie cause (compte, expéditeur) : elle ne contient pas nos identifiants.
+    const precision = (data as { remarks?: unknown } | null)?.remarks;
+    const raison = `Le service SMS a répondu ${res.status} sur ${nomServeur(cfg.url)}/api/${chemin}${typeof precision === 'string' && precision ? ` : ${precision.slice(0, 120)}` : ''}.`;
+    console.error('SMS', raison);
+    throw new ErreurSms(raison);
+  }
   return data;
 }
 

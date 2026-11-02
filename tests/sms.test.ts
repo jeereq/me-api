@@ -70,6 +70,32 @@ describe('raison d’une panne', () => {
   });
 });
 
+describe('réponse 404 du service', () => {
+  const cfg: ConfigSms = { url: 'https://sms.exemple.com', id: 'API1', motDePasse: 'secret', expediteur: 'ME', marque: 'Me' };
+  const repondre = (reponses: Record<string, { statut: number; corps: unknown }>) => {
+    const appels: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      appels.push(url);
+      const r = reponses[url.split('/api/')[1]] ?? { statut: 404, corps: null };
+      return new Response(r.corps === null ? 'introuvable' : JSON.stringify(r.corps), { status: r.statut });
+    }) as typeof fetch;
+    return appels;
+  };
+  it('essaie l’orthographe de la documentation', async () => {
+    const appels = repondre({ SendSMS: { statut: 200, corps: { status: 'S', message_id: 7 } } });
+    assert.deepEqual(await Asmsc.envoyer(cfg, { telephone: '243812345678', texte: 'x', uid: 'u' }), { messageId: '7' });
+    assert.deepEqual(appels.map((u) => u.split('/api/')[1]), ['SendSms', 'SendSMS']);
+  });
+  it('nomme la route en échec, sans le mot de passe', async () => {
+    repondre({});
+    await assert.rejects(Asmsc.demanderVerification(cfg, '243812345678'), (e: Error) => /404 sur sms\.exemple\.com\/api\/Verify\./.test(e.message) && !e.message.includes('secret'));
+  });
+  it('rapporte la précision donnée par le service', async () => {
+    repondre({ CheckBalance: { statut: 404, corps: { remarks: 'Compte inconnu' } } });
+    await assert.rejects(Asmsc.solde(cfg), /CheckBalance : Compte inconnu\./);
+  });
+});
+
 describe('texte d’un SMS', () => {
   it('reste en texte simple malgré la ponctuation et les accents français', () => {
     const r = preparerTexte('Demain : rendre 12 € à l’être « cher » · fête… çà');
