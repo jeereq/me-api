@@ -219,3 +219,18 @@ export const paiementSchema = z.object({
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });
 export const smsTelephoneSchema = z.object({ body: z.object({ telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(20) }) });
 export const smsCodeSchema = z.object({ body: z.object({ code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{3,10}$/, 'Code invalide') }) });
+export const gestionMembresSchema = z.object({
+  query: z.object({
+    filtre: z.enum(['tous', 'abonnes', 'essai', 'sans', 'expirent', 'anciens']).default('tous'),
+    q: z.string().trim().max(120).default(''),
+    page: z.coerce.number().int().min(1).default(1),
+  }),
+});
+const noteAdmin = z.string().trim().max(300).optional();
+export const actionAbonnementSchema = membreParamsSchema.extend({
+  body: z.discriminatedUnion('action', [
+    z.object({ action: z.literal('offrir'), formule: z.enum(['finances', 'pro']), palier: z.number().int().min(0).max(3).default(0), mois: z.number().int().min(1).max(24), note: noteAdmin }),
+    z.object({ action: z.literal('essai'), jours: z.number().int().min(1).max(90), note: noteAdmin }),
+    z.object({ action: z.literal('retirer'), note: noteAdmin }),
+  ]),
+});
