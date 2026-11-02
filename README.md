@@ -183,6 +183,8 @@ Toutes les 5 minutes, le serveur calcule les rappels de chaque compte dans son f
 
 Fonction de Pro. Renseigne `SMS_API_URL`, `SMS_API_ID`, `SMS_API_PASSWORD` et `SMS_SENDER_ID` (voir `.env.example`), puis applique la migration. Sans elles, l'app n'affiche pas le SMS.
 
+Si l'envoi échoue, le message et les journaux (lignes `SMS`) donnent la cause : adresse introuvable (`ENOTFOUND`), connexion refusée, souvent une liste d'adresses IP autorisées chez le fournisseur (`ECONNREFUSED`, `ETIMEDOUT`), certificat refusé (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`), ou délai dépassé.
+
 - **Numéro vérifié** : dans Mon compte › Notifications, un code part au numéro ; les rappels n'y partent qu'une fois le code confirmé et l'option activée.
 - **Coût limité** : un SMS au plus par passage des rappels, un seul message (160 caractères), 5 SMS par compte sur 24 h (`SMS_MAX_PAR_JOUR`). Les rappels discrets et le briefing ne partent pas par SMS.
 - **Données** : l'historique (`EnvoiSms`) garde la date et l'état 60 jours, ni le texte ni le numéro.
