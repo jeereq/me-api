@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { aDroit, abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, formuleDe, messageReserve, OFFRES, prolonger } from '../src/services/abonnements/offres.js';
 import { empreintesCompte, normaliserEmail } from '../src/services/abonnements/essai-unique.js';
-import { lireEtat, montantTexte, normaliserTelephone } from '../src/services/abonnements/flexpaie.js';
+import { base64Strict, erreurFlexpaie, jetonFlexpaie, lireEtat, montantTexte, normaliserTelephone, problemeJeton } from '../src/services/abonnements/flexpaie.js';
 
 const T0 = new Date('2026-10-27T12:00:00Z');
 const jours = (n: number) => new Date(T0.getTime() + n * 86400000);
@@ -207,5 +207,32 @@ describe('trois formules : Gratuit, Finances, Pro', () => {
     assert.match(messageReserve('justificatifs'), /Finances/);
     assert.match(messageReserve('assistant'), /Pro/);
     assert.match(avisAbonnement({ abonnementFormule: 'finances', abonnementFinLe: jours(6) }, T0, true)!.titre, /Finances/);
+  });
+});
+
+describe('jeton FlexPaie', () => {
+  it('jeton FlexPaie : nettoyé, et un jeton abîmé est repéré avant l’appel', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJtZSJ9.c2lnbmF0dXJl';
+    assert.equal(jetonFlexpaie(` "Bearer ${jwt}"\n`), jwt);
+    assert.equal(jetonFlexpaie(`'${jwt}'`), jwt);
+    assert.equal(problemeJeton(jwt), null);
+    // Une signature tronquée, puis une signature dont le dernier caractère a des bits de fin non nuls (l'erreur renvoyée par FlexPaie).
+    assert.match(problemeJeton('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJtZSJ9.c2lnbmF0dXJ') ?? '', /signature/);
+    assert.match(problemeJeton('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJtZSJ9.c2lnbmF0dXJlYR') ?? '', /signature/);
+    assert.match(problemeJeton('') ?? '', /vide/);
+    assert.equal(problemeJeton('jeton-opaque'), null);
+    assert.equal(base64Strict('YQ'), true);
+    assert.equal(base64Strict('YR'), false);
+    assert.equal(base64Strict('YQ=='), true);
+  });
+
+  it('erreur de décodage renvoyée par FlexPaie : problème de configuration, pas du client', () => {
+    const e = erreurFlexpaie('Last encoded character (before the paddings if any) is a valid base 64 alphabet but not a possible value. Expected the discarded bits to be zero.', 'repli');
+    assert.equal(e.configuration, true);
+    assert.match(e.message, /FLEXPAIE_TOKEN/);
+    const f = erreurFlexpaie('Numéro invalide', 'repli');
+    assert.equal(f.configuration, false);
+    assert.equal(f.message, 'Numéro invalide');
+    assert.equal(erreurFlexpaie(undefined, 'repli').message, 'repli');
   });
 });

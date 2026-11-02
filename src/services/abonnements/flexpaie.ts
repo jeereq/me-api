@@ -11,11 +11,61 @@
 
 import { delai, estDelai } from '../../utils/delai.js';
 
-export const flexpaieConfigure = (env: Record<string, string | undefined> = process.env) => !!(env.FLEXPAIE_TOKEN && env.FLEXPAIE_MARCHAND);
+export const flexpaieConfigure = (env: Record<string, string | undefined> = process.env) => !!(jetonFlexpaie(env.FLEXPAIE_TOKEN) && env.FLEXPAIE_MARCHAND);
+
+/**
+ * Le jeton marchand tel qu'il faut l'envoyer : sans espaces ni retours à la ligne, sans guillemets, sans « Bearer »
+ * déjà collé devant (erreurs fréquentes en recopiant la variable dans l'hébergeur).
+ */
+export function jetonFlexpaie(brut?: string): string {
+  let t = (brut ?? '').trim().replace(/^(['"])(.*)\1$/s, '$2').trim();
+  t = t.replace(/^bearer\s+/i, '');
+  return t.replace(/\s+/g, '');
+}
+
+/** Vrai si `s` est du base64url (ou base64) que décoderait un décodeur strict : bons caractères, bonne longueur, bits de fin à zéro. */
+export function base64Strict(s: string): boolean {
+  const sans = s.replace(/=+$/, '');
+  if (!sans || !/^[A-Za-z0-9_+/-]+$/.test(sans) || sans.length % 4 === 1) return false;
+  const url = sans.replace(/\+/g, '-').replace(/\//g, '_');
+  return Buffer.from(url, 'base64url').toString('base64url') === url;
+}
+
+/**
+ * Ce qui cloche dans le jeton FlexPaie, ou null s'il a la forme d'un JWT sain. FlexPaie décode le jeton avec un décodeur
+ * base64 strict : un jeton tronqué ou altéré y fait échouer chaque appel avec « Last encoded character… Expected the
+ * discarded bits to be zero ». On le repère ici, avant l'appel, pour dire clairement quoi corriger.
+ */
+export function problemeJeton(jeton: string): string | null {
+  if (!jeton) return 'FLEXPAIE_TOKEN est vide';
+  const parts = jeton.split('.');
+  // Un jeton qui n'est pas un JWT : on ne sait pas le vérifier, FlexPaie tranchera.
+  if (parts.length !== 3) return null;
+  const noms = ['en-tête', 'contenu', 'signature'];
+  const abime = parts.findIndex((p) => !base64Strict(p));
+  return abime === -1 ? null : `FLEXPAIE_TOKEN est abîmé (partie « ${noms[abime]} » du jeton illisible) : recopie le jeton complet fourni par FlexPaie`;
+}
 
 const base = () => (process.env.FLEXPAIE_URL || 'https://backend.flexpay.cd/api/rest/v1').trim().replace(/\/+$/, '');
 
-export class ErreurFlexpaie extends Error {}
+/** Erreur FlexPaie ; `configuration` : le problème vient de nos identifiants, pas du client ni de son numéro. */
+export class ErreurFlexpaie extends Error {
+  constructor(
+    message: string,
+    public configuration = false,
+  ) {
+    super(message);
+  }
+}
+
+/** Une erreur renvoyée par FlexPaie. Celles du décodage de notre jeton marchand viennent de notre configuration, pas du client. */
+export function erreurFlexpaie(message: string | undefined, repli: string): ErreurFlexpaie {
+  const m = (message ?? '').trim();
+  if (/base ?64|discarded bits|illegal .*character|jwt|malformed|unauthori[sz]ed|invalid token|token (is )?(invalid|expired)/i.test(m)) {
+    return new ErreurFlexpaie(`FlexPaie refuse le jeton marchand (FLEXPAIE_TOKEN), à vérifier : ${m.slice(0, 200)}`, true);
+  }
+  return new ErreurFlexpaie(m || repli);
+}
 
 /**
  * Numéro au format attendu (indicatif sans « + », ex. 243812345678). Un numéro congolais écrit en local
@@ -42,11 +92,14 @@ export function lireEtat(reponse: { code?: string | number; transaction?: { stat
 }
 
 async function appel<T>(chemin: string, corps?: unknown): Promise<T> {
+  const jeton = jetonFlexpaie(process.env.FLEXPAIE_TOKEN);
+  const probleme = problemeJeton(jeton);
+  if (probleme) throw new ErreurFlexpaie(probleme, true);
   let res: Response;
   try {
     res = await fetch(`${base()}${chemin}`, {
       method: corps ? 'POST' : 'GET',
-      headers: { Authorization: `Bearer ${process.env.FLEXPAIE_TOKEN}`, Accept: 'application/json', ...(corps ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Authorization: `Bearer ${jeton}`, Accept: 'application/json', ...(corps ? { 'Content-Type': 'application/json' } : {}) },
       body: corps ? JSON.stringify(corps) : undefined,
       signal: delai(),
     });
@@ -54,7 +107,7 @@ async function appel<T>(chemin: string, corps?: unknown): Promise<T> {
     throw new ErreurFlexpaie(estDelai(e) ? 'FlexPaie met trop de temps à répondre' : 'FlexPaie injoignable');
   }
   const data = (await res.json().catch(() => ({}))) as T & { message?: string };
-  if (!res.ok) throw new ErreurFlexpaie(data.message || `FlexPaie a répondu ${res.status}`);
+  if (!res.ok) throw erreurFlexpaie(data.message, `FlexPaie a répondu ${res.status}`);
   return data;
 }
 
@@ -70,7 +123,7 @@ export const Flexpaie = {
       currency: p.devise,
       callbackUrl: p.retour,
     });
-    if (String(r.code) !== '0' || !r.orderNumber) throw new ErreurFlexpaie(r.message || 'Paiement refusé par FlexPaie');
+    if (String(r.code) !== '0' || !r.orderNumber) throw erreurFlexpaie(r.message, 'Paiement refusé par FlexPaie');
     return { commande: r.orderNumber, message: r.message ?? '' };
   },
 
