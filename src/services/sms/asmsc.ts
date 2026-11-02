@@ -19,10 +19,10 @@ type Env = Record<string, string | undefined>;
 /** Lit la configuration ; null tant qu'il manque l'adresse, l'identifiant, le mot de passe ou l'expéditeur. */
 /**
  * L'adresse de base du service, quelle que soit la façon de la coller dans la variable : sans « https:// », entre guillemets,
- * ou le lien complet (…/api/SendSms?api_id=…), dont les paramètres ne doivent pas servir d'adresse.
+ * avec le nom de la variable devant, ou le lien complet (…/api/SendSms?api_id=…), dont les paramètres ne doivent pas servir d'adresse.
  */
 export function adresseService(brut: string | undefined): string {
-  const a = (brut ?? '').trim().replace(/^["']|["']$/g, '').trim().replace(/[?#].*$/, '').replace(/\/api(\/.*)?$/i, '').replace(/\/+$/, '');
+  const a = (brut ?? '').trim().replace(/^SMS_API_URL\s*=\s*/i, '').replace(/^["']|["']$/g, '').trim().replace(/[?#].*$/, '').replace(/\/api(\/.*)?$/i, '').replace(/\/+$/, '');
   if (!a) return '';
   return /^https?:\/\//i.test(a) ? a : `https://${a}`;
 }
@@ -109,13 +109,22 @@ export function cleValide(recue: unknown, attendue: string | undefined): boolean
 
 const CERTIFICATS = /CERT|SIGNATURE|TLS|SSL/i;
 
-/** Ce qui a empêché de joindre le service, en clair, avec le code d'origine. Jamais l'adresse complète ni le corps de la requête. */
-export function raisonPanne(e: unknown): string {
+/** Le nom du serveur appelé : il n'a rien de secret et montre tout de suite une variable mal remplie. */
+const nomServeur = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+};
+
+/** Ce qui a empêché de joindre le service, en clair, avec le code d'origine. Jamais les paramètres ni le corps de la requête. */
+export function raisonPanne(e: unknown, serveur = ''): string {
   const err = e as { name?: string; code?: string; cause?: { code?: string } };
   if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return 'Le service SMS met trop de temps à répondre.';
   const code = err?.cause?.code ?? err?.code ?? '';
   if (code === 'ERR_INVALID_URL') return 'L’adresse du service SMS est invalide (SMS_API_URL).';
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `Le serveur ne trouve pas l’adresse du service SMS (${code}).`;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `Le serveur ne trouve pas l’adresse ${serveur || 'du service SMS'} (${code}). Vérifie SMS_API_URL.`;
   if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EHOSTUNREACH' || code === 'ENETUNREACH' || code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'UND_ERR_SOCKET') return `Le service SMS refuse la connexion du serveur (${code}).`;
   if (CERTIFICATS.test(code)) return `Le certificat du service SMS est refusé (${code}).`;
   return code ? `Le service SMS est injoignable (${code}).` : 'Le service SMS est injoignable.';
@@ -127,7 +136,7 @@ async function appeler<T>(cfg: ConfigSms, chemin: string, corps: Record<string, 
   try {
     res = await fetch(`${cfg.url}/api/${chemin}`, { method: 'POST', signal: delai(), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
   } catch (e) {
-    const raison = raisonPanne(e);
+    const raison = raisonPanne(e, nomServeur(cfg.url));
     console.error('SMS', chemin, raison);
     throw new ErreurSms(raison);
   }
