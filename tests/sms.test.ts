@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { aDroit, etatAbonnement, FONCTIONS_PRO } from '../src/services/abonnements/offres.js';
-import { Asmsc, cleValide, configSms, ErreurSms, preparerTexte, rappelsParSms, statutLivraison, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
+import { adresseService, Asmsc, cleValide, configSms, ErreurSms, preparerTexte, raisonPanne, rappelsParSms, statutLivraison, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
 
 const fetchOrigine = globalThis.fetch;
 afterEach(() => {
@@ -28,6 +28,43 @@ describe('configuration', () => {
   });
   it('reste éteint tant qu’il manque quelque chose', () => {
     for (const k of Object.keys(env)) assert.equal(configSms({ ...env, [k]: '' }), null, k);
+  });
+});
+
+describe('adresse du service', () => {
+  const attendue = 'https://papi.dreamdigital.info';
+  it('accepte toutes les façons de la coller', () => {
+    for (const brut of ['https://papi.dreamdigital.info', 'https://papi.dreamdigital.info/', 'papi.dreamdigital.info', ' papi.dreamdigital.info ', '"https://papi.dreamdigital.info"', 'https://papi.dreamdigital.info/api', 'https://papi.dreamdigital.info/api/', 'https://papi.dreamdigital.info/api/SendSms']) assert.equal(adresseService(brut), attendue, brut);
+  });
+  it('retire les paramètres d’un lien complet, mot de passe compris', () => {
+    assert.equal(adresseService('https://papi.dreamdigital.info/api/SendSms?api_id=X&api_password=secret&sms_type=T'), attendue);
+  });
+  it('garde le http et le port s’ils sont donnés', () => {
+    assert.equal(adresseService('http://sms.exemple.com:8080/'), 'http://sms.exemple.com:8080');
+  });
+  it('reste vide sans valeur', () => {
+    assert.equal(adresseService(undefined), '');
+    assert.equal(adresseService('  '), '');
+  });
+});
+
+describe('raison d’une panne', () => {
+  const panne = (code: string) => Object.assign(new TypeError('fetch failed'), { cause: { code } });
+  it('dit ce qui bloque, avec le code d’origine', () => {
+    assert.match(raisonPanne(panne('ENOTFOUND')), /ne trouve pas l’adresse.*ENOTFOUND/);
+    assert.match(raisonPanne(panne('ECONNREFUSED')), /refuse la connexion.*ECONNREFUSED/);
+    assert.match(raisonPanne(panne('UND_ERR_CONNECT_TIMEOUT')), /refuse la connexion/);
+    assert.match(raisonPanne(panne('UNABLE_TO_VERIFY_LEAF_SIGNATURE')), /certificat.*UNABLE_TO_VERIFY_LEAF_SIGNATURE/);
+    assert.match(raisonPanne(panne('CERT_HAS_EXPIRED')), /certificat/);
+    assert.match(raisonPanne(panne('ERR_TLS_CERT_ALTNAME_INVALID')), /certificat/);
+    assert.match(raisonPanne(panne('ERR_INVALID_URL')), /invalide/);
+    assert.match(raisonPanne(panne('EPROTO')), /injoignable \(EPROTO\)/);
+  });
+  it('reconnaît un délai dépassé', () => {
+    assert.match(raisonPanne(Object.assign(new Error('x'), { name: 'TimeoutError' })), /trop de temps/);
+  });
+  it('reste générique sans code', () => {
+    assert.equal(raisonPanne(new Error('https://hote secret')), 'Le service SMS est injoignable.');
   });
 });
 
