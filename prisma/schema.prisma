@@ -57,6 +57,7 @@ model User {
   paiements    Paiement[]
   analysesMails AnalyseMail[]
   usageReunions UsageReunion[]
+  actionsAbonnement ActionAbonnement[]
   /// Numéro vérifié par code, pour les rappels par SMS (indicatif sans « + »).
   telephone          String?
   /// Numéro à vérifier, identifiant de la demande chez aSMSC et date d'envoi du code.
@@ -359,4 +360,24 @@ model AnalyseMail {
   @@unique([integrationId, mailId])
   @@index([userId])
   @@index([majLe])
+}
+
+/// Un geste de l'admin sur l'abonnement d'un compte : formule offerte ou retirée, essai prolongé.
+model ActionAbonnement {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Nom ou email de l'admin à ce moment-là : le journal reste lisible s'il quitte la plateforme.
+  parNom   String
+  /// offrir, retirer ou essai
+  action   String
+  formule  String?
+  palier   Int      @default(0)
+  /// « 3 mois », « 14 jours »
+  duree    String?
+  finApres DateTime?
+  note     String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

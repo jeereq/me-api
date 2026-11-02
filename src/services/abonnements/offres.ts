@@ -239,6 +239,18 @@ export function prolonger(
   formule: Formule = 'pro',
   palier: Palier = 0,
 ) {
+  return prolongerDe(actuel, OFFRES.formules[formule][periode].mois, maintenant, finEssaiEnCours, formule, palier);
+}
+
+/** Comme `prolonger`, pour un nombre de mois quelconque (une formule offerte par l'admin). */
+export function prolongerDe(
+  actuel: { fin?: Date | null; formule?: Formule | null; palier?: Palier } | Date | null | undefined,
+  mois: number,
+  maintenant = new Date(),
+  finEssaiEnCours?: Date | null,
+  formule: Formule = 'pro',
+  palier: Palier = 0,
+) {
   const a = actuel instanceof Date || actuel == null ? { fin: actuel ?? null, formule: 'pro' as Formule, palier: 0 as Palier } : actuel;
   const depart = finEssaiEnCours && finEssaiEnCours > maintenant ? finEssaiEnCours : maintenant;
   let reste = a.fin && a.fin > depart ? a.fin.getTime() - depart.getTime() : 0;
@@ -246,7 +258,7 @@ export function prolonger(
   const avantPalier = avant === 'pro' ? (a.palier ?? 0) : 0;
   const apresPalier = formule === 'pro' ? palier : 0;
   if (reste && (avant !== formule || avantPalier !== apresPalier)) reste = Math.round((reste * prixMois(avant, avantPalier)) / prixMois(formule, apresPalier));
-  return ajouterMois(new Date(depart.getTime() + reste), OFFRES.formules[formule][periode].mois);
+  return ajouterMois(new Date(depart.getTime() + reste), mois);
 }
 
 /** Message renvoyé (402) quand une fonction est demandée sans la formule qui l'inclut. */

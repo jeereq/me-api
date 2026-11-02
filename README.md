@@ -78,6 +78,9 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | GET | `/api/membres` | admin | Liste des comptes |
 | PATCH | `/api/membres/:id` | admin | `{ role: "ADMIN" \| "UTILISATEUR" }` |
 | DELETE | `/api/membres/:id` | admin | Supprime le compte et son espace |
+| GET | `/api/membres/gestion?filtre=&q=&page=` | admin | Comptes filtrés (`tous`, `abonnes`, `essai`, `sans`, `expirent`, `anciens`), par 50, avec les chiffres de la plateforme |
+| GET | `/api/membres/:id/fiche` | admin | Offre, paiements (numéro masqué), gestes de l'admin, dernière activité. Jamais le contenu de l'espace |
+| POST | `/api/membres/:id/abonnement` | admin | `{ action: "offrir", formule, palier, mois }`, `{ action: "essai", jours }` ou `{ action: "retirer" }`, avec `note?` ; noté au journal, compte prévenu |
 | GET | `/api/assistant` | compte | `{ disponible }` : clé configurée et IA activée par l'admin |
 | GET | `/api/assistant/modeles` | admin | `{ modeles, actuel, fort }` : modèles OpenAI disponibles avec la clé du serveur |
 | GET | `/api/integrations` | compte | Services configurés sur le serveur et comptes connectés |
