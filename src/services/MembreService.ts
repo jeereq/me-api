@@ -16,7 +16,7 @@ async function assertPasDernierAdmin(id: string) {
   if (cible.role === 'ADMIN' && (await prisma.user.count({ where: { role: 'ADMIN' } })) <= 1) throw new HttpError(400, 'Il faut garder au moins un admin.');
 }
 
-const CHAMPS_GESTION = { id: true, email: true, nom: true, role: true, emailVerifie: true, createdAt: true, ...SELECT_ABONNEMENT } as const;
+const CHAMPS_GESTION = { id: true, email: true, nom: true, emailVerifie: true, createdAt: true, ...SELECT_ABONNEMENT } as const;
 const PAR_PAGE = 50;
 const jourFr = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const nomOffre = (f: Formule, p: Palier) => (f === 'finances' ? 'Finances' : p ? `Pro ${p}` : 'Pro');
