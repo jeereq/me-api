@@ -36,8 +36,6 @@ export function configSms(env: Env = process.env): ConfigSms | null {
   return { url, id, motDePasse, expediteur, marque: env.SMS_BRAND?.trim() || 'Me' };
 }
 
-/** Durée de vie d'un rappel : au-delà de 6 h, il ne sert plus à rien de le livrer. */
-const VALIDITE_SECONDES = 6 * 3600;
 const GSM_SIMPLE = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
 const GSM_DOUBLE = '^{}\\[~]|€';
 const estGsm = (c: string) => GSM_SIMPLE.includes(c) || GSM_DOUBLE.includes(c);
@@ -180,6 +178,7 @@ export const Asmsc = {
   /** Envoie un SMS transactionnel. `uid` revient sur l'adresse de retour. */
   async envoyer(cfg: ConfigSms, m: { telephone: string; texte: string; uid: string; retour?: string }) {
     const { texte, encodage } = preparerTexte(m.texte);
+    // Pas de durée de vie : le service garde sa valeur par défaut (2 jours). Il refuse au-delà de 2880, alors que sa documentation parle de secondes.
     const r = await appeler<{ message_id?: unknown; status?: string; remarks?: string }>(cfg, 'SendSms', {
       ...identifiants(cfg),
       sms_type: 'T',
@@ -187,7 +186,6 @@ export const Asmsc = {
       sender_id: cfg.expediteur,
       phonenumber: m.telephone,
       textmessage: texte,
-      ValidityPeriodInSeconds: VALIDITE_SECONDES,
       uid: m.uid,
       ...(m.retour ? { callback_url: m.retour } : {}),
     });
