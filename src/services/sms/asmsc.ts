@@ -152,7 +152,7 @@ const AUTRE_ORTHOGRAPHE: Record<string, string> = { SendSms: 'SendSMS' };
  */
 async function appeler<T>(cfg: ConfigSms, chemin: string, corps: Record<string, unknown>): Promise<T> {
   const poster = (nom: string) => fetch(`${cfg.url}/api/${nom}`, { method: 'POST', signal: delai(), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
-  const lire = () => fetch(`${cfg.url}/api/${chemin}?${new URLSearchParams(Object.entries(corps).map(([k, v]) => [k, String(v)]))}`, { signal: delai() });
+  const lire = () => fetch(`${cfg.url}/api/${chemin}?${new URLSearchParams(Object.entries(corps).map(([k, v]): [string, string] => [k, String(v)]))}`, { signal: delai() });
   let res: Response;
   try {
     res = await poster(chemin);
