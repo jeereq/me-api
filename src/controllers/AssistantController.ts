@@ -82,4 +82,9 @@ export const AssistantController = {
     const { analyses, enCache, fraiches, illisibles } = await AnalyseMailService.analyser(req.user!.id, req.body);
     res.json({ analyses, enCache, fraiches, illisibles });
   },
+  /** Comprendre une boucle de mails et, si besoin, préparer la réponse. */
+  analyserBoucle: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json(await AnalyseMailService.analyserBoucle(req.user!.id, req.body));
+  },
 };

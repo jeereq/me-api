@@ -55,7 +55,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'compte_rendu']),
+    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'compte_rendu']),
     /** Pour « lot » et « synthese » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
     perimetre: z.string().max(300).optional(),
     ton: z.string().max(40).optional(),
@@ -107,6 +107,10 @@ export const analyseMailsSchema = z.object({
 });
 export type AnalyseMailsBody = z.infer<typeof analyseMailsSchema>['body'];
 
+/** Comprendre une boucle de mails : le mail ouvert (`ext:<compte>:<mail>`), le ton et les consignes. */
+export const analyseBoucleSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
+export type AnalyseBoucleBody = z.infer<typeof analyseBoucleSchema>['body'];
+
 /** Lecture d'un justificatif par l'IA : son identifiant Cloudinary, et de quoi bien lire (date du jour, devise, catégories). */
 export const analyseJustificatifSchema = z.object({
   body: z.object({
@@ -154,12 +158,12 @@ const boiteQuery = z.string().trim().email().max(320).optional();
 export const dossiersSchema = integrationParamsSchema.extend({ query: z.object({ boite: boiteQuery }).passthrough() });
 export const mailsDossierSchema = z.object({ params: z.object({ id: z.string().min(1), dossier: z.string().min(1).max(500) }), query: z.object({ boite: boiteQuery, suivant: z.string().max(2000).optional() }).passthrough() });
 const jourQuery = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.').optional();
-/** Chercher les mails d'un lot à analyser : au moins un critère (personne, domaine, dossier, boîte ou période). */
+/** Chercher les mails d'un lot à analyser : au moins un critère (personne, domaine, dossier, boîte, période, non lus, pièce jointe ou objet). */
 export const chercherMailsSchema = integrationParamsSchema.extend({
   query: z
-    .object({ de: z.string().max(320).optional(), domaine: z.string().max(253).optional(), dossier: z.string().max(500).optional(), boite: boiteQuery, depuis: jourQuery, jusqua: jourQuery, suivant: z.string().max(2000).optional(), max: z.string().regex(/^\d{1,3}$/).optional() })
+    .object({ de: z.string().max(320).optional(), domaine: z.string().max(253).optional(), dossier: z.string().max(500).optional(), boite: boiteQuery, depuis: jourQuery, jusqua: jourQuery, nonLus: z.enum(['1']).optional(), pj: z.enum(['1']).optional(), objet: z.string().trim().max(200).optional(), suivant: z.string().max(2000).optional(), max: z.string().regex(/^\d{1,3}$/).optional() })
     .passthrough()
-    .refine((q) => !!(q.de || q.domaine || q.dossier || q.boite || q.depuis || q.jusqua), { message: 'Choisis au moins une personne, un domaine, un dossier, une boîte ou une période.' }),
+    .refine((q) => !!(q.de || q.domaine || q.dossier || q.boite || q.depuis || q.jusqua || q.nonLus || q.pj || q.objet), { message: 'Choisis au moins une personne, un domaine, un dossier, une boîte, une période ou un filtre.' }),
 });
 export const filMailSchema = z.object({ params: z.object({ id: z.string().min(1), fil: z.string().min(1).max(500) }) });
 export const deplacerMailSchema = lireMailSchema.extend({ body: z.object({ dossier: z.string().min(1).max(500), depuis: z.string().min(1).max(500).optional() }) });

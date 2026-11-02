@@ -364,7 +364,7 @@ export const microsoft: Connecteur = {
     const { params, garder } = requeteOutlook(r, CHAMPS_LISTE);
     const chemin = r.dossier ? `${base}/mailFolders/${encodeURIComponent(r.dossier)}/messages` : `${base}/messages`;
     const { value = [] } = await json<{ value?: Mail[] }>('Outlook', `${chemin}?${params}`, bearer(accessToken));
-    const gardes = value.filter((m) => garder(m.receivedDateTime)).slice(0, r.max);
+    const gardes = value.filter((m) => garder(m.receivedDateTime, m)).slice(0, r.max);
     const saut = Math.max(0, Number(r.suivant) || 0);
     return { mails: gardes.map((m) => versMailImporte(m, r.fuseau, r.boite, false, r.dossier)), ...(!params.has('$search') && value.length === r.max ? { suivant: String(saut + r.max) } : {}) };
   },
