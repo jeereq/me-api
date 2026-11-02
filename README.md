@@ -117,6 +117,7 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | POST | `/api/abonnement/flexpaie/retour` | public | Retour de FlexPaie ; la commande est toujours revérifiée chez FlexPaie |
 | GET | `/api/justificatifs` | compte | `{ disponible, tailleMax }` : Cloudinary configuré, taille maximale d'un fichier |
 | POST | `/api/justificatifs` | compte (membre sauf lecteur pour `equipe`) | Formulaire `multipart/form-data` : `fichier` (JPEG, PNG, WebP, HEIC ou PDF, 10 Mo au plus), `equipe?` → **201** `{ justificatif: { id, url, apercu?, nom, sorte, taille, pages?, ajouteLe } }` à ranger dans la dépense ; 60 fichiers / heure |
+| POST | `/api/justificatifs/analyse` | compte Pro (essai compris), membre de l'équipe du justificatif | `{ id, aujourdhui, devise?, categories?: [{ id, nom }] }` → `{ lecture: { facture, montant, devise, date, heure, marchand, description, categorie, confiance, modele } }` : l'IA lit la facture déjà déposée pour pré-remplir la dépense ; 40 lectures / heure |
 
 Les erreurs ont la forme `{ "error": "message lisible" }`.
 
@@ -278,6 +279,7 @@ Une dépense peut porter des photos de reçus et des PDF de factures. L'app envo
 - **Rangement** : un dossier par compte (`me/justificatifs/<userId>`) et un par équipe (`me/justificatifs/equipe-<id>`) ; `CLOUDINARY_DOSSIER` change la racine.
 - **Ménage** : la table `Justificatif` garde chaque dépôt. Chaque nuit, un fichier déposé il y a plus de 7 jours qu'aucune dépense de son espace ne mentionne plus (retiré, dépense supprimée, ajout abandonné) est effacé de Cloudinary. Supprimer un compte efface ses justificatifs, supprimer une équipe ceux de son espace.
 - Les adresses des fichiers sont publiques mais impossibles à deviner (identifiant aléatoire), comme un lien de partage.
+- **Lecture par l'IA** (Pro) : `POST /api/justificatifs/analyse` demande à Cloudinary la photo ou la 1re page du PDF en JPEG (1600 px), l'envoie au modèle de l'assistant (il doit lire les images : gpt-4o-mini, gpt-4.1, gpt-5…) avec les catégories de l'utilisateur, et renvoie montant, devise, date, heure, commerçant et catégorie, en JSON imposé puis relu (`lecture-ia.ts`, testé dans `tests/lecture-facture.test.ts`). Rien n'est enregistré : l'app pré-remplit la dépense et l'utilisateur relit.
 - Le code est dans `src/services/justificatifs/` (`cloudinary.ts` : appels REST signés sans SDK ; `fichiers.ts` : types acceptés, vignettes ; `stock.ts` : ménage), testé dans `tests/justificatifs.test.ts`.
 
 ## Abonnements

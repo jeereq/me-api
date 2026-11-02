@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { JustificatifService } from '../services/JustificatifService.js';
 import { TAILLE_MAX } from '../services/justificatifs/fichiers.js';
 import { HttpError } from '../utils/http.js';
+import type { AnalyseJustificatifBody } from '../validators/schemas.js';
 
 /** Lit le formulaire multipart envoyé par l'app, sans dépasser `limite` octets (le reste n'est jamais gardé en mémoire). */
 async function lireFormulaire(req: Request, limite: number) {
@@ -34,5 +35,10 @@ export const JustificatifController = {
     if (!(fichier instanceof File)) throw new HttpError(400, 'Aucun fichier reçu (champ « fichier »).');
     const equipe = form.get('equipe');
     res.status(201).json({ justificatif: await JustificatifService.deposer(req.user!.id, fichier, typeof equipe === 'string' && equipe ? equipe : undefined) });
+  },
+  /** Lecture d'un justificatif déjà déposé par l'IA : `{ lecture }`, à relire dans le formulaire de dépense. */
+  analyser: async (req: Request, res: Response) => {
+    const { id, aujourdhui, devise, categories } = req.body as AnalyseJustificatifBody;
+    res.json({ lecture: await JustificatifService.analyser(req.user!.id, id, { aujourdhui, devise, categories }) });
   },
 };

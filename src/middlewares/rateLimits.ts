@@ -67,6 +67,16 @@ export const justificatifLimiter = rateLimit({
   message: { error: 'Beaucoup de justificatifs d’un coup, réessaie dans un moment.' },
 });
 
+/** Lecture des factures par l'IA : 40 lectures / heure par compte (une image en haute définition coûte plus qu'une question). */
+export const analyseJustificatifLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 40,
+  keyGenerator: cleCompte,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Beaucoup de factures lues d’un coup, réessaie dans un moment.', code: 'LIMITE_ANALYSE' },
+});
+
 /**
  * Retour de paiement FlexPaie (adresse publique) : chaque appel déclenche une vérification chez FlexPaie,
  * donc 60 appels par minute et par IP au plus.
