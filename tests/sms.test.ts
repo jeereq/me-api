@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { aDroit, etatAbonnement, FONCTIONS_PRO } from '../src/services/abonnements/offres.js';
-import { adresseService, Asmsc, cleValide, configSms, ErreurSms, preparerTexte, raisonPanne, rappelsParSms, statutLivraison, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
+import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, raisonPanne, rappelsParSms, statutLivraison, texteCode, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
 
 const fetchOrigine = globalThis.fetch;
 afterEach(() => {
@@ -32,12 +32,12 @@ describe('configuration', () => {
 });
 
 describe('adresse du service', () => {
-  const attendue = 'https://papi.dreamdigital.info';
+  const attendue = 'https://papi.dream-digital.info';
   it('accepte toutes les façons de la coller', () => {
-    for (const brut of ['https://papi.dreamdigital.info', 'https://papi.dreamdigital.info/', 'papi.dreamdigital.info', ' papi.dreamdigital.info ', '"https://papi.dreamdigital.info"', 'https://papi.dreamdigital.info/api', 'https://papi.dreamdigital.info/api/', 'https://papi.dreamdigital.info/api/SendSms']) assert.equal(adresseService(brut), attendue, brut);
+    for (const brut of ['https://papi.dream-digital.info', 'https://papi.dream-digital.info/', 'papi.dream-digital.info', ' papi.dream-digital.info ', '"https://papi.dream-digital.info"', 'https://papi.dream-digital.info/api', 'https://papi.dream-digital.info/api/', 'https://papi.dream-digital.info/api/SendSms']) assert.equal(adresseService(brut), attendue, brut);
   });
   it('retire les paramètres d’un lien complet, mot de passe compris', () => {
-    assert.equal(adresseService('https://papi.dreamdigital.info/api/SendSms?api_id=X&api_password=secret&sms_type=T'), attendue);
+    assert.equal(adresseService('https://papi.dream-digital.info/api/SendSms?api_id=X&api_password=secret&sms_type=T'), attendue);
   });
   it('garde le http et le port s’ils sont donnés', () => {
     assert.equal(adresseService('http://sms.exemple.com:8080/'), 'http://sms.exemple.com:8080');
@@ -71,28 +71,36 @@ describe('raison d’une panne', () => {
 });
 
 describe('réponse 404 du service', () => {
-  const cfg: ConfigSms = { url: 'https://sms.exemple.com', id: 'API1', motDePasse: 'secret', expediteur: 'ME', marque: 'Me' };
-  const repondre = (reponses: Record<string, { statut: number; corps: unknown }>) => {
+  const cfg404: ConfigSms = { url: 'https://sms.exemple.com', id: 'API1', motDePasse: 'secret', expediteur: 'ME', marque: 'Me' };
+  const repondre = (ok: (methode: string, route: string) => unknown) => {
     const appels: string[] = [];
-    globalThis.fetch = (async (url: string) => {
-      appels.push(url);
-      const r = reponses[url.split('/api/')[1]] ?? { statut: 404, corps: null };
-      return new Response(r.corps === null ? 'introuvable' : JSON.stringify(r.corps), { status: r.statut });
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const route = url.split('/api/')[1];
+      const methode = init?.method ?? 'GET';
+      appels.push(`${methode} ${route.split('?')[0]}`);
+      const corps = ok(methode, route.split('?')[0]);
+      return corps ? new Response(JSON.stringify(corps)) : new Response('introuvable', { status: 404 });
     }) as typeof fetch;
     return appels;
   };
+  const m = { telephone: '243812345678', texte: 'x', uid: 'u' };
   it('essaie l’orthographe de la documentation', async () => {
-    const appels = repondre({ SendSMS: { statut: 200, corps: { status: 'S', message_id: 7 } } });
-    assert.deepEqual(await Asmsc.envoyer(cfg, { telephone: '243812345678', texte: 'x', uid: 'u' }), { messageId: '7' });
-    assert.deepEqual(appels.map((u) => u.split('/api/')[1]), ['SendSms', 'SendSMS']);
+    const appels = repondre((_, r) => (r === 'SendSMS' ? { status: 'S', message_id: 7 } : null));
+    assert.deepEqual(await Asmsc.envoyer(cfg404, m), { messageId: '7' });
+    assert.deepEqual(appels, ['POST SendSms', 'POST SendSMS']);
+  });
+  it('finit par GET, la forme des liens du panneau', async () => {
+    const appels = repondre((methode) => (methode === 'GET' ? { status: 'S', message_id: 8 } : null));
+    assert.deepEqual(await Asmsc.envoyer(cfg404, m), { messageId: '8' });
+    assert.deepEqual(appels, ['POST SendSms', 'POST SendSMS', 'GET SendSms']);
   });
   it('nomme la route en échec, sans le mot de passe', async () => {
-    repondre({});
-    await assert.rejects(Asmsc.demanderVerification(cfg, '243812345678'), (e: Error) => /404 sur sms\.exemple\.com\/api\/Verify\./.test(e.message) && !e.message.includes('secret'));
+    repondre(() => null);
+    await assert.rejects(Asmsc.envoyer(cfg404, m), (e: Error) => /404 sur sms\.exemple\.com\/api\/SendSms\./.test(e.message) && !e.message.includes('secret'));
   });
   it('rapporte la précision donnée par le service', async () => {
-    repondre({ CheckBalance: { statut: 404, corps: { remarks: 'Compte inconnu' } } });
-    await assert.rejects(Asmsc.solde(cfg), /CheckBalance : Compte inconnu\./);
+    globalThis.fetch = (async () => new Response(JSON.stringify({ remarks: 'Compte inconnu' }), { status: 404 })) as typeof fetch;
+    await assert.rejects(Asmsc.solde(cfg404), /CheckBalance : Compte inconnu\./);
   });
 });
 
@@ -171,26 +179,23 @@ describe('envoi', () => {
   });
 });
 
-describe('vérification du numéro', () => {
-  it('demande un code avec l’orthographe de la documentation', async () => {
-    const s = simuler({ verfication_id: 4, status: 'S' });
-    assert.equal(await Asmsc.demanderVerification(cfg, '243812345678'), '4');
-    assert.equal(s.appels[0].url, 'https://sms.exemple.com/api/Verify');
-    assert.deepEqual(s.corps(), { api_id: 'API1', api_password: 'secret@123', brand: 'Me', phonenumber: '243812345678', sender_id: 'ME' });
+describe('code de vérification du numéro', () => {
+  it('fait 6 chiffres', () => {
+    for (let i = 0; i < 200; i++) assert.match(creerCode(), /^\d{6}$/);
   });
-  it('lit aussi l’orthographe correcte, et refuse un envoi sans identifiant', async () => {
-    simuler({ verification_id: 9, status: 'S' });
-    assert.equal(await Asmsc.demanderVerification(cfg, '1'), '9');
-    simuler({ status: 'S' });
-    await assert.rejects(Asmsc.demanderVerification(cfg, '1'), ErreurSms);
+  it('n’est valable que pour ce compte et ce numéro', () => {
+    const e = empreinteCode('123456', 'u1', '243812345678', 's');
+    assert.equal(e.includes('123456'), false);
+    assert.equal(codeValide('123456', e, 'u1', '243812345678', 's'), true);
+    assert.equal(codeValide('000000', e, 'u1', '243812345678', 's'), false);
+    assert.equal(codeValide('123456', e, 'u2', '243812345678', 's'), false);
+    assert.equal(codeValide('123456', e, 'u1', '243899999999', 's'), false);
+    assert.equal(codeValide('123456', 'autre', 'u1', '243812345678', 's'), false);
   });
-  it('V valide le code, F le refuse', async () => {
-    const s = simuler({ verfication_id: 2, status: 'V' });
-    assert.equal(await Asmsc.controlerCode(cfg, '2', '4022'), true);
-    assert.equal(s.appels[0].url, 'https://sms.exemple.com/api/VerifyStatus');
-    assert.deepEqual(s.corps(), { verfication_id: '2', verfication_code: '4022' });
-    simuler({ status: 'F' });
-    assert.equal(await Asmsc.controlerCode(cfg, '2', '0000'), false);
+  it('tient en un SMS', () => {
+    const r = preparerTexte(texteCode('Me', '123456'));
+    assert.equal(r.encodage, 'T');
+    assert.equal(r.texte, 'Me : ton code est 123456. Il expire dans 10 minutes.');
   });
 });
 
