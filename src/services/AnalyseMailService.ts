@@ -45,7 +45,7 @@ export const AnalyseMailService = {
     const ids = [...new Set(refs.map((r) => lireRef(r)!.integrationId))];
     const comptes = new Map((await prisma.integration.findMany({ where: { userId, id: { in: ids } } })).map((i) => [i.id, i]));
     const permises = refs.filter((r) => comptes.has(lireRef(r)!.integrationId));
-    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, espace: { select: { data: true } } } });
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
 
     const ton = b.ton ?? tonDe(user.espace?.data);
     const cle = empreinte(ton, b.consignes);
@@ -79,7 +79,7 @@ export const AnalyseMailService = {
           const { contenu, ctx, garde } = await IntegrationService.lirePourAnalyse(userId, integrationId, mailId);
           return mailPourIA(ref, contenu, ctx, garde?.extrait);
         },
-        demander: (donnees) => AssistantService.demanderAvecModeles({ type: 'mails', ton, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees }),
+        demander: (donnees) => AssistantService.demanderAvecModeles({ type: 'mails', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees }),
         garder: async (ref, analyse, modeles) => {
           const { integrationId, mailId } = lireRef(ref)!;
           const resultat = jsonPropre(analyse) as unknown as Prisma.InputJsonObject;

@@ -34,6 +34,8 @@ model User {
   updatedAt    DateTime @updatedAt
   /// Fuseau IANA du téléphone (ex. Europe/Paris), pour placer les rendez-vous importés à la bonne heure.
   fuseau       String   @default("UTC")
+  /// Nom de l'app choisi par l'utilisateur (« Jarvis »…), dit par la voix et reconnu par le mot-clé ; vide = « Me ».
+  nomApp       String   @default("")
   /// Fin de l'essai Pro gratuit (14 jours à l'inscription). Voir src/services/abonnements/offres.ts.
   essaiJusqua  DateTime?
   /// Abonnement Pro prépayé : période choisie au dernier paiement, et fin de la période payée (sans renouvellement automatique).

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { erreurNomApp, nettoyerNomApp } from '../commun/nom-app.js';
+
 const email = z.string({ required_error: 'Email requis' }).trim().toLowerCase().email('Email invalide');
 const password = z.string({ required_error: 'Mot de passe requis' }).min(8, 'Le mot de passe doit faire au moins 8 caractères').max(200);
 
@@ -20,8 +22,18 @@ const fuseauValide = (f: string) => {
   }
 };
 
+/** Nom de l'app choisi par l'utilisateur ; chaîne vide = revenir à « Me ». */
+const nomApp = z
+  .string()
+  .max(100)
+  .transform(nettoyerNomApp)
+  .superRefine((v, ctx) => {
+    const e = erreurNomApp(v);
+    if (e) ctx.addIssue({ code: z.ZodIssueCode.custom, message: e });
+  })
+  .optional();
 export const updateMeSchema = z.object({
-  body: z.object({ nom: z.string().trim().max(80).optional(), fuseau: z.string().max(60).refine(fuseauValide, 'Fuseau horaire inconnu').optional(), motDePasseActuel: z.string().optional(), nouveauMotDePasse: password.optional() }),
+  body: z.object({ nom: z.string().trim().max(80).optional(), fuseau: z.string().max(60).refine(fuseauValide, 'Fuseau horaire inconnu').optional(), nomApp, motDePasseActuel: z.string().optional(), nouveauMotDePasse: password.optional() }),
 });
 
 const document = z.record(z.unknown(), { invalid_type_error: 'Document JSON attendu' });
@@ -47,6 +59,8 @@ export const assistantSchema = z.object({
     /** Pour « lot » et « synthese » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
     perimetre: z.string().max(300).optional(),
     ton: z.string().max(40).optional(),
+    /** Le nom de l'app choisi par l'utilisateur, pour que l'IA se présente sous ce nom ; absent ou invalide = « Me ». */
+    nom: z.string().max(100).optional(),
     /** Pour « mails » et « lot » : les consignes de l'utilisateur sur la façon d'analyser (angle, priorités, ce qu'il cherche). */
     consignes: z.string().max(1000).optional(),
     donnees: z.string().max(200_000).optional(),

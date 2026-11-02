@@ -4,6 +4,7 @@
     "calcul.ts",
     "jours.ts",
     "modes.ts",
+    "nom-app.ts",
     "objectifs.ts",
     "patch.ts",
     "prets.ts",
