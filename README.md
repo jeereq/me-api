@@ -185,7 +185,7 @@ Fonction de Pro. Renseigne `SMS_API_URL`, `SMS_API_ID`, `SMS_API_PASSWORD` et `S
 
 Si l'envoi échoue, le message et les journaux (lignes `SMS`) donnent la cause : adresse introuvable (`ENOTFOUND`), connexion refusée, souvent une liste d'adresses IP autorisées chez le fournisseur (`ECONNREFUSED`, `ETIMEDOUT`), certificat refusé (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`), ou délai dépassé.
 
-- **Numéro vérifié** : dans Mon compte › Notifications, un code part au numéro ; les rappels n'y partent qu'une fois le code confirmé et l'option activée.
+- **Numéro vérifié** : dans Mon compte › Notifications, un code créé par le serveur part au numéro comme un SMS ordinaire (seule son empreinte est gardée) ; les rappels n'y partent qu'une fois le code confirmé et l'option activée.
 - **Coût limité** : un SMS au plus par passage des rappels, un seul message (160 caractères), 5 SMS par compte sur 24 h (`SMS_MAX_PAR_JOUR`). Les rappels discrets et le briefing ne partent pas par SMS.
 - **Données** : l'historique (`EnvoiSms`) garde la date et l'état 60 jours, ni le texte ni le numéro.
 - **Livraison** : avec `SMS_CALLBACK_CLE` et un `PUBLIC_URL` en https, aSMSC signale l'état de chaque SMS.

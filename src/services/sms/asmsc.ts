@@ -1,9 +1,9 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 
 import { delai } from '../../utils/delai.js';
 
 /**
- * aSMSC : envoi de SMS, vérification d'un numéro par code et solde du compte (API 3.1).
+ * aSMSC : envoi de SMS et solde du compte (API 3.1). Le code de vérification d'un numéro est fait ici : voir creerCode.
  * Module sans base de données, testé dans tests/sms.test.ts. Le mot de passe de l'API ne sort jamais d'ici :
  * ni dans les erreurs, ni dans les journaux, et il part dans le corps des requêtes, jamais dans une adresse.
  */
@@ -107,6 +107,19 @@ export function cleValide(recue: unknown, attendue: string | undefined): boolean
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Le code qui vérifie un numéro : créé ici et envoyé comme un SMS ordinaire, car tous les comptes n'ont pas la route Verify du service.
+ * Seule son empreinte est gardée, liée au compte et au numéro : elle ne sert ni à retrouver le code, ni pour un autre numéro.
+ */
+export const creerCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
+export const empreinteCode = (code: string, userId: string, telephone: string, secret: string) => createHmac('sha256', secret).update(`${userId}|${telephone}|${code}`).digest('hex');
+export const codeValide = (recu: string, attendue: string, userId: string, telephone: string, secret: string) => {
+  const a = Buffer.from(empreinteCode(recu, userId, telephone, secret));
+  const b = Buffer.from(attendue);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+export const texteCode = (marque: string, code: string) => `${marque} : ton code est ${code}. Il expire dans 10 minutes.`;
+
 const CERTIFICATS = /CERT|SIGNATURE|TLS|SSL/i;
 
 /** Le nom du serveur appelé : il n'a rien de secret et montre tout de suite une variable mal remplie. */
@@ -130,16 +143,21 @@ export function raisonPanne(e: unknown, serveur = ''): string {
   return code ? `Le service SMS est injoignable (${code}).` : 'Le service SMS est injoignable.';
 }
 
-/** La documentation écrit aussi « SendSMS » et « Verfiy » : un 404 n'a rien envoyé, on essaie donc cette autre orthographe. */
-const AUTRE_ORTHOGRAPHE: Record<string, string> = { SendSms: 'SendSMS', Verify: 'Verfiy' };
+/** La documentation écrit aussi « SendSMS ». */
+const AUTRE_ORTHOGRAPHE: Record<string, string> = { SendSms: 'SendSMS' };
 
-/** Appelle aSMSC en POST JSON. Une panne ne laisse jamais passer l'adresse ni le corps de la requête. */
+/**
+ * Appelle aSMSC en POST JSON. Un 404 n'a rien envoyé : on essaie alors l'autre orthographe, puis GET, qui est la forme des liens du panneau client.
+ * Une panne ne laisse jamais passer l'adresse ni le corps de la requête.
+ */
 async function appeler<T>(cfg: ConfigSms, chemin: string, corps: Record<string, unknown>): Promise<T> {
   const poster = (nom: string) => fetch(`${cfg.url}/api/${nom}`, { method: 'POST', signal: delai(), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+  const lire = () => fetch(`${cfg.url}/api/${chemin}?${new URLSearchParams(Object.entries(corps).map(([k, v]): [string, string] => [k, String(v)]))}`, { signal: delai() });
   let res: Response;
   try {
     res = await poster(chemin);
     if (res.status === 404 && AUTRE_ORTHOGRAPHE[chemin]) res = await poster(AUTRE_ORTHOGRAPHE[chemin]);
+    if (res.status === 404) res = await lire();
   } catch (e) {
     const raison = raisonPanne(e, nomServeur(cfg.url));
     console.error('SMS', chemin, raison);
@@ -175,26 +193,6 @@ export const Asmsc = {
     });
     if (r.status !== 'S') throw new ErreurSms(r.remarks || 'SMS refusé.');
     return { messageId: r.message_id === undefined ? null : String(r.message_id) };
-  },
-
-  /** Envoie un code de vérification et renvoie l'identifiant de la demande. */
-  async demanderVerification(cfg: ConfigSms, telephone: string) {
-    const r = await appeler<{ verfication_id?: unknown; verification_id?: unknown; status?: string; remarks?: string }>(cfg, 'Verify', {
-      ...identifiants(cfg),
-      brand: cfg.marque,
-      phonenumber: telephone,
-      sender_id: cfg.expediteur,
-    });
-    // La documentation écrit « verfication_id » ; l'orthographe correcte est lue aussi, au cas où.
-    const id = r.verfication_id ?? r.verification_id;
-    if (r.status !== 'S' || id === undefined || id === null) throw new ErreurSms(r.remarks || 'Code non envoyé.');
-    return String(id);
-  },
-
-  /** Le code saisi est-il le bon ? */
-  async controlerCode(cfg: ConfigSms, verification: string, code: string) {
-    const r = await appeler<{ status?: string }>(cfg, 'VerifyStatus', { verfication_id: verification, verfication_code: code });
-    return r.status === 'V';
   },
 
   async solde(cfg: ConfigSms) {

@@ -1,12 +1,13 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
-import { Asmsc, cleValide, configSms, ErreurSms, statutLivraison, type ConfigSms } from './sms/asmsc.js';
+import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, statutLivraison, texteCode, type ConfigSms } from './sms/asmsc.js';
 
 /** Un code reçu par SMS sert 10 minutes. */
 const VALIDITE_CODE_MS = 10 * 60 * 1000;
 const JOUR_MS = 24 * 3600 * 1000;
 const HISTORIQUE_JOURS = 60;
+const secretCode = () => process.env.JWT_SECRET as string;
 
 /** SMS par compte sur 24 h : chaque envoi coûte. */
 export const maxParJour = (env: Record<string, string | undefined> = process.env) => {
@@ -51,17 +52,18 @@ export const SmsService = {
     const cfg = exiger();
     const telephone = normaliserTelephone(brut);
     if (!telephone) throw new HttpError(400, 'Numéro invalide. Exemple : 243 81 234 5678.');
-    const verification = await surService(() => Asmsc.demanderVerification(cfg, telephone));
-    await prisma.user.update({ where: { id: userId }, data: { telephoneEnAttente: telephone, smsVerificationId: verification, smsVerificationLe: new Date() } });
+    const code = creerCode();
+    await surService(() => Asmsc.envoyer(cfg, { telephone, texte: texteCode(cfg.marque, code), uid: `code-${userId}` }));
+    // smsVerificationId garde l'empreinte du code, jamais le code.
+    await prisma.user.update({ where: { id: userId }, data: { telephoneEnAttente: telephone, smsVerificationId: empreinteCode(code, userId, telephone, secretCode()), smsVerificationLe: new Date() } });
     return this.etat(userId);
   },
 
   async confirmerCode(userId: string, code: string) {
-    const cfg = exiger();
+    exiger();
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { telephoneEnAttente: true, smsVerificationId: true, smsVerificationLe: true } });
     if (!u.telephoneEnAttente || !u.smsVerificationId || !u.smsVerificationLe || Date.now() - u.smsVerificationLe.getTime() >= VALIDITE_CODE_MS) throw new HttpError(400, 'Code expiré. Demande-en un nouveau.');
-    const verification = u.smsVerificationId;
-    if (!(await surService(() => Asmsc.controlerCode(cfg, verification, code)))) throw new HttpError(400, 'Code incorrect.');
+    if (!codeValide(code, u.smsVerificationId, userId, u.telephoneEnAttente, secretCode())) throw new HttpError(400, 'Code incorrect.');
     await prisma.user.update({ where: { id: userId }, data: { telephone: u.telephoneEnAttente, telephoneEnAttente: null, smsVerificationId: null, smsVerificationLe: null } });
     return this.etat(userId);
   },
