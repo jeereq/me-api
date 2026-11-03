@@ -135,7 +135,12 @@ export function arbreHtml(html: string): Noeud {
 }
 
 const style = (n: Noeud, prop: string) => new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, 'i').exec(n.attrs.style ?? '')?.[1]?.trim().toLowerCase();
-const cache = (n: Noeud) => 'hidden' in n.attrs || style(n, 'display') === 'none' || style(n, 'visibility') === 'hidden' || style(n, 'mso-hide') === 'all' || style(n, 'max-height')?.startsWith('0') || style(n, 'opacity') === '0';
+const zero = (v?: string) => !!v && /^0(\.0+)?([a-z%]+)?(\s*!important)?$/.test(v);
+const cache = (n: Noeud) => {
+  if ('hidden' in n.attrs || style(n, 'display')?.startsWith('none') || style(n, 'visibility')?.startsWith('hidden') || style(n, 'mso-hide')?.startsWith('all') || zero(style(n, 'max-height')) || zero(style(n, 'opacity'))) return true;
+  // Une taille nulle ne masque que si le débordement est coupé. Une police à 0 seule ne masque rien : les newsletters s'en servent pour leurs colonnes.
+  return !!style(n, 'overflow')?.startsWith('hidden') && (zero(style(n, 'height')) || zero(style(n, 'width')) || zero(style(n, 'max-width')));
+};
 const marque = (n: Noeud) => `${n.attrs.id ?? ''} ${n.attrs.class ?? ''} ${n.attrs['data-smartmail'] ?? ''}`;
 const EST_SIGNATURE = /(^|[\s_-])(x_)?(signature|gmail_signature|moz-signature|applemailsignature|ms-outlook-mobile-signature|olksignature)\b|signatureContainer/i;
 const EST_CITATION = /gmail_quote|gmail_attr|mail-editor-reference-message-container|moz-cite-prefix|yahoo_quoted|AppleOriginalContents/i;
@@ -221,7 +226,12 @@ function versBlocs(noeuds: (Noeud | string)[], base: Style, sortie: Sortie): Blo
     if (SANS_RENDU.has(n.nom) || cache(n)) return;
     if (EST_SIGNATURE.test(marque(n))) {
       vider();
-      return void sortie.signature.push(...versBlocs(n.enfants, base, sortie));
+      // Un mail n'a qu'une signature : celles qui suivent viennent des messages plus anciens recopiés dessous.
+      const dedans: Sortie = { signature: [], cite: [] };
+      const blocs = [...versBlocs(n.enfants, base, dedans), ...dedans.signature];
+      (sortie.signature.length ? sortie.cite : sortie.signature).push(...blocs);
+      sortie.cite.push(...dedans.cite);
+      return;
     }
     if (EST_CITATION.test(marque(n)) || (n.nom === 'blockquote' && n.attrs.type === 'cite')) {
       vider();
@@ -363,7 +373,13 @@ function decouperFin(blocs: BlocMail[], sortie: Sortie): BlocMail[] {
     sortie.cite.unshift(...corps.slice(i));
     corps = corps.slice(0, avant);
   }
-  if (sortie.signature.length) return corps;
+  // Un bloc cité tout à la fin est un ancien message, pas une citation au milieu d'une réponse.
+  while (corps.length > 1 && corps[corps.length - 1].t === 'citation') {
+    const b = corps[corps.length - 1] as Extract<BlocMail, { t: 'citation' }>;
+    sortie.cite.unshift(...b.blocs);
+    corps = corps.slice(0, -1);
+  }
+  if (sortie.signature.length) return sansSignatureRecopiee(corps, sortie.signature);
   // Une ligne par ligne de texte ; une image est courte, un tableau de données ne fait pas partie d'une signature.
   const places: { b: number; l: number }[] = [];
   const lignes: string[] = [];
@@ -414,16 +430,107 @@ function couperMorceaux(m: Morceau[], ligne: number): [Morceau[], Morceau[]] {
   return [nettoyerMorceaux(a.map((x) => ({ ...x, v: x.v.replace(/\n/g, '\u2028') }))), nettoyerMorceaux(z.map((x) => ({ ...x, v: x.v.replace(/\n/g, '\u2028') })))];
 }
 
-/** Retire de l'arbre le repère de citation d'Outlook et tout ce qui le suit, et le rend. */
+const EN_TETE_CITE = /^(De|From)\s*:[\s\S]*?\b(Envoy[ée]|Sent|Date)\s*:/i;
+const ECRIT_PAR = /^(Le|On)\s[\s\S]{5,160}(a écrit|wrote)\s*:$/i;
+
+/** Le début du texte d'un noeud, sans parcourir tout ce qu'il contient. */
+function debutTexte(n: Noeud, max: number): string {
+  let t = '';
+  const lire = (x: Noeud | string) => {
+    if (t.length >= max) return;
+    if (typeof x === 'string') t += x;
+    else if (x.nom === 'br') t += ' ';
+    else if (!SANS_RENDU.has(x.nom)) x.enfants.forEach(lire);
+  };
+  n.enfants.forEach(lire);
+  return t.replace(/[\s ]+/g, ' ').trim();
+}
+
+/** Là où commence le message cité : le repère d'Outlook, ou l'en-tête « De : … Envoyé : … » de tout client. */
+function debutCitation(n: Noeud): boolean {
+  if (DEBUT_CITATION.test(marque(n))) return true;
+  if (n.nom !== 'p' && n.nom !== 'div') return false;
+  const t = debutTexte(n, 500);
+  return EN_TETE_CITE.test(t) || (t.length <= 220 && ECRIT_PAR.test(t));
+}
+
+/** Retire de l'arbre le début du message cité et tout ce qui le suit, et le rend : ses signatures ne se mêlent pas à celle du mail. */
 function couperApres(n: Noeud): (Noeud | string)[] {
   for (let i = 0; i < n.enfants.length; i++) {
     const e = n.enfants[i];
     if (typeof e === 'string') continue;
-    if (DEBUT_CITATION.test(marque(e))) return n.enfants.splice(i);
+    if (debutCitation(e)) return n.enfants.splice(i);
     const dedans = couperApres(e);
     if (dedans.length) return [...dedans, ...n.enfants.splice(i + 1)];
   }
   return [];
+}
+
+/** Les classes que la feuille de style du mail masque. Celles des @media ne comptent pas : l'app n'est pas l'écran visé. */
+export function classesCachees(html: string): Set<string> {
+  const out = new Set<string>();
+  const bas = html.toLowerCase();
+  for (let de = bas.indexOf('<style'); de >= 0; de = bas.indexOf('<style', de + 6)) {
+    const debut = bas.indexOf('>', de);
+    if (debut < 0) break;
+    const fin = bas.indexOf('</style', debut);
+    const css = html.slice(debut + 1, fin < 0 ? undefined : fin).replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--|-->/g, '');
+    let i = 0;
+    while (i < css.length) {
+      const o = css.indexOf('{', i);
+      if (o < 0) break;
+      const selecteur = css.slice(i, o).trim();
+      let prof = 1;
+      let j = o + 1;
+      while (j < css.length && prof) {
+        if (css[j] === '{') prof++;
+        else if (css[j] === '}') prof--;
+        j++;
+      }
+      if (!selecteur.startsWith('@') && /(^|;|\s)(display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all)/i.test(css.slice(o + 1, j - 1))) {
+        for (const x of selecteur.split(',')) {
+          const m = /^[a-z0-9]*\.([\w-]+)$/i.exec(x.trim());
+          if (m) out.add(m[1].toLowerCase());
+        }
+      }
+      i = j;
+    }
+    if (fin < 0) break;
+  }
+  return out;
+}
+
+function elaguer(n: Noeud, classes: Set<string>) {
+  n.enfants = n.enfants.filter((e) => typeof e === 'string' || !(e.attrs.class ?? '').toLowerCase().split(/\s+/).some((c) => classes.has(c)));
+  for (const e of n.enfants) if (typeof e !== 'string') elaguer(e, classes);
+}
+
+const cleDe = (b: BlocMail) => texteDeBlocs([b]).replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Une signature ne dit pas deux fois la même chose : version bureau et version mobile, logo répété. */
+function sansDoublons(blocs: BlocMail[]): BlocMail[] {
+  const vus = new Set<string>();
+  const nouveau = (k: string) => {
+    if (vus.has(k)) return false;
+    vus.add(k);
+    return true;
+  };
+  return blocs.flatMap((b): BlocMail[] => {
+    if (b.t === 'trait') return [b];
+    if (b.t === 'images') {
+      const items = b.items.filter((x) => nouveau(x.src));
+      return items.length ? [{ ...b, items }] : [];
+    }
+    return nouveau(cleDe(b) || JSON.stringify(b)) ? [b] : [];
+  });
+}
+
+/** Le corps finit parfois par le texte que la signature marquée redit : on ne le garde qu'une fois. */
+function sansSignatureRecopiee(corps: BlocMail[], signature: BlocMail[]): BlocMail[] {
+  const dans = new Set(signature.map(cleDe).filter(Boolean));
+  let fin = corps.length;
+  while (fin > 1 && dans.has(cleDe(corps[fin - 1]))) fin--;
+  return corps.slice(0, fin);
 }
 
 /** Le corps d'un mail HTML, découpé pour l'écran. Null s'il n'y a rien de lisible : l'app garde alors le texte. */
@@ -432,13 +539,21 @@ export function htmlEnBlocs(html: string): CorpsRiche | null {
   try {
     const sortie: Sortie = { signature: [], cite: [] };
     const racine = arbreHtml(html);
+    const cachees = classesCachees(html);
+    if (cachees.size) elaguer(racine, cachees);
     const suite = couperApres(racine);
     if (suite.length) {
       const dedans: Sortie = { signature: [], cite: [] };
       sortie.cite.push(...versBlocs(suite, {}, dedans), ...dedans.signature, ...dedans.cite);
     }
     const brut = versBlocs(racine.enfants, {}, sortie);
-    const blocs = decouperFin(brut, sortie);
+    let blocs = decouperFin(brut, sortie);
+    sortie.signature = sansDoublons(sortie.signature);
+    // Un mail transféré sans un mot : le message transféré est le mail, on ne le replie pas.
+    if (!blocs.length && sortie.cite.length) {
+      blocs = sortie.cite;
+      sortie.cite = [];
+    }
     if (!blocs.length && !sortie.signature.length && !sortie.cite.length) return null;
     if (compter(blocs) + compter(sortie.signature) + compter(sortie.cite) > MAX_BLOCS) return null;
     return { blocs, signature: sortie.signature, cite: sortie.cite };

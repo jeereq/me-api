@@ -328,7 +328,8 @@ export const microsoft: Connecteur = {
       heure: d?.heure,
       texte: corps ? texteComplet(corps) : corpsTexte(m),
       ...(riche ? { riche } : {}),
-      piecesJointes: pieces.filter((p) => !affichees.has(p.id)).map((p) => p.name).filter((n): n is string => !!n),
+      // Une image insérée dans le texte (logo de signature) n'est pas une pièce jointe, même si elle n'a pas pu s'afficher.
+      piecesJointes: pieces.filter((p) => !affichees.has(p.id) && !(corps && p.isInline && p.contentType?.toLowerCase().startsWith('image/'))).map((p) => p.name).filter((n): n is string => !!n),
       lien: m.webLink,
       libelles: m.categories ?? [],
       fil: avant.map((x) => ({ id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, texte: corpsTexte(x), piecesJointes: [] })),
