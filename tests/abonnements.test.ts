@@ -136,6 +136,11 @@ describe('FlexPaie', () => {
     assert.equal(normaliserTelephone('0812345678'), '243812345678');
     assert.equal(normaliserTelephone('+243 81 234 5678'), '243812345678');
     assert.equal(normaliserTelephone('00243-81-234-5678'), '243812345678');
+    assert.equal(normaliserTelephone('+2430812345678'), '243812345678');
+    assert.equal(normaliserTelephone('+33 6 12 34 56 78'), '33612345678');
+    assert.equal(normaliserTelephone('+4512345678'), '4512345678');
+    assert.equal(normaliserTelephone('12345678'), null);
+    assert.equal(normaliserTelephone('+12345'), null);
     assert.equal(normaliserTelephone('12345'), null);
     assert.equal(normaliserTelephone('abc'), null);
   });

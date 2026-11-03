@@ -115,7 +115,7 @@ export const AbonnementService = {
     const palier: Palier = formule === 'pro' ? palierDe(palierDemande) : 0;
     pretPourPayer();
     const telephone = normaliserTelephone(telephoneBrut);
-    if (!telephone) throw new HttpError(400, 'Numéro de téléphone invalide. Écris-le avec l’indicatif, par exemple 243 81 234 5678.');
+    if (!telephone) throw new HttpError(400, 'Numéro de téléphone invalide. Vérifie l’indicatif et le numéro.');
     // Tant qu'un paiement attend la validation, on n'en lance pas un autre : l'app propose de l'abandonner d'abord.
     const enCours = await prisma.paiement.findFirst({ where: { userId, statut: 'en_attente' } });
     if (enCours) {

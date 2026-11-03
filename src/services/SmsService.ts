@@ -63,7 +63,7 @@ export const SmsService = {
   async demanderCode(userId: string, brut: string) {
     const cfg = exiger();
     const telephone = normaliserTelephone(brut);
-    if (!telephone) throw new HttpError(400, 'Numéro invalide. Exemple : 243 81 234 5678.');
+    if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
     await exigerNumeroLibre(userId, telephone);
     const code = creerCode();
     await surService(() => Asmsc.envoyer(cfg, { telephone, texte: texteCode(cfg.marque, code), uid: `code-${userId}` }));

@@ -97,7 +97,7 @@ export const AuthService = {
   async registerSms(email: string, password: string, nom: string, brut: string) {
     if (!(await SmsService.inscriptionOuverte())) throw new HttpError(503, 'La confirmation par SMS n’est pas disponible. Choisis l’email.');
     const telephone = normaliserTelephone(brut);
-    if (!telephone) throw new HttpError(400, 'Numéro invalide. Exemple : 243 81 234 5678.');
+    if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
     // Un numéro, un compte : sinon un même téléphone ouvrirait autant d'essais Pro que d'adresses inventées.
     if (await prisma.user.findFirst({ where: { OR: [{ telephone }, { telephoneEnAttente: telephone, smsVerificationLe: { gte: new Date(Date.now() - 86_400_000) } }] }, select: { id: true } })) throw new HttpError(409, 'Ce numéro a déjà un compte. Connecte-toi, ou choisis l’email.');
     if (await SmsService.plafondInscriptionsAtteint()) throw new HttpError(429, 'Trop d’inscriptions par SMS aujourd’hui. Choisis l’email, ou réessaie demain.');
