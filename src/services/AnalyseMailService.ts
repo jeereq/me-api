@@ -1,11 +1,11 @@
 import type { Prisma } from '@prisma/client';
 
-import type { AnalyseBoucleBody, AnalyseMailsBody } from '../validators/schemas.js';
+import type { AnalyseBoucleBody, AnalyseMailsBody, RelireReponseBody } from '../validators/schemas.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
-import { donneesBoucle, lireBoucle, type AnalyseBoucle } from './analyse-mails.js';
+import { donneesBoucle, lireBoucle, lireRelecture, type AnalyseBoucle, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -124,6 +124,20 @@ export const AnalyseMailService = {
       update: { empreinte: cle, modele: r.modeles.join('+'), resultat: json },
     });
     return { ...resultat, enCache: false };
+  },
+
+  /** Relit une réponse avant son envoi, avec le mail et sa conversation. Pas gardée : le brouillon change à chaque mot, et le mail reste non lu. */
+  async relireReponse(userId: string, b: RelireReponseBody): Promise<RelectureReponse> {
+    const ref = lireRef(b.mail);
+    if (!ref) throw new HttpError(400, 'Ce mail ne vient pas d’un compte connecté.');
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
+    const ton = b.ton ?? tonDe(user.espace?.data);
+    const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
+    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), reponse_proposee: b.reponse };
+    const r = await AssistantService.demanderAvecModeles({ type: 'relecture', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
+    const lu = lireRelecture(r.texte);
+    if (!lu) throw new HttpError(502, "L'IA n'a pas pu relire cette réponse. Réessaie dans un instant.");
+    return lu;
   },
 
   /**
