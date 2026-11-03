@@ -45,6 +45,11 @@ function adresseRetour() {
   return base?.startsWith('https://') && cle ? `${base}/api/sms/retour?cle=${encodeURIComponent(cle)}` : undefined;
 }
 
+/** Le numéro sert à se connecter : il ne peut désigner qu'un seul compte. */
+async function exigerNumeroLibre(userId: string, telephone: string) {
+  if (await prisma.user.count({ where: { telephone, NOT: { id: userId } } })) throw new HttpError(409, 'Ce numéro est déjà lié à un autre compte.');
+}
+
 export const SmsService = {
   configure: () => configSms() !== null,
 
@@ -59,6 +64,7 @@ export const SmsService = {
     const cfg = exiger();
     const telephone = normaliserTelephone(brut);
     if (!telephone) throw new HttpError(400, 'Numéro invalide. Exemple : 243 81 234 5678.');
+    await exigerNumeroLibre(userId, telephone);
     const code = creerCode();
     await surService(() => Asmsc.envoyer(cfg, { telephone, texte: texteCode(cfg.marque, code), uid: `code-${userId}` }));
     // smsVerificationId garde l'empreinte du code, jamais le code.
@@ -71,6 +77,7 @@ export const SmsService = {
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { telephoneEnAttente: true, smsVerificationId: true, smsVerificationLe: true } });
     if (!u.telephoneEnAttente || !u.smsVerificationId || !u.smsVerificationLe || Date.now() - u.smsVerificationLe.getTime() >= VALIDITE_CODE_MS) throw new HttpError(400, 'Code expiré. Demande-en un nouveau.');
     if (!codeValide(code, u.smsVerificationId, userId, u.telephoneEnAttente, secretCode())) throw new HttpError(400, 'Code incorrect.');
+    await exigerNumeroLibre(userId, u.telephoneEnAttente);
     await prisma.user.update({ where: { id: userId }, data: { telephone: u.telephoneEnAttente, telephoneEnAttente: null, smsVerificationId: null, smsVerificationLe: null } });
     return this.etat(userId);
   },

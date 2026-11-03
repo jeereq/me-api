@@ -44,6 +44,11 @@ export const EmailsCompte = {
     return EmailService.envoyer(email, 'Confirme ton email pour Me', m.texte, m.html);
   },
 
+  motDePasseChange(email: string) {
+    const m = gabarit('Mot de passe changé', 'Le mot de passe de ton compte Me vient de changer.', 'Ouvrir Me', `${adresseApp()}/`, "Si ce n'est pas toi, utilise « Mot de passe oublié » tout de suite sur l'écran de connexion.");
+    return EmailService.envoyer(email, 'Ton mot de passe Me a changé', m.texte, m.html);
+  },
+
   reinitialisation(email: string, jeton: string) {
     const lien = lienReinitialisation(jeton);
     const m = gabarit(

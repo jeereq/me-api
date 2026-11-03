@@ -6,6 +6,9 @@ import { ConnexionGoogle, retourConnexion } from '../services/comptes/google.js'
 /** Renvoie vers l'app avec le résultat de la connexion Google. */
 const versApp = (retour: string, params: Record<string, string>) => `${retour}${retour.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`;
 
+/** L'email ou le numéro donné ; `email` pour les anciennes versions de l'app. */
+const qui = (req: Request): string => req.body.identifiant ?? req.body.email;
+
 export const AuthController = {
   options: async (_req: Request, res: Response) => {
     res.json(await AuthService.options());
@@ -14,22 +17,22 @@ export const AuthController = {
     res.status(201).json(await AuthService.register(req.body.email, req.body.password, req.body.nom, { confirmation: req.body.confirmation, telephone: req.body.telephone }));
   },
   login: async (req: Request, res: Response) => {
-    res.json(await AuthService.login(req.body.email, req.body.password));
+    res.json(await AuthService.login(qui(req), req.body.password));
   },
   verifier: async (req: Request, res: Response) => {
     res.json(await AuthService.verifier(req.body.jeton));
   },
   confirmerSms: async (req: Request, res: Response) => {
-    res.json(await AuthService.confirmerSms(req.body.email, req.body.code));
+    res.json(await AuthService.confirmerSms(qui(req), req.body.code));
   },
   renvoyerCodeSms: async (req: Request, res: Response) => {
-    res.json(await AuthService.renvoyerCodeSms(req.body.email));
+    res.json(await AuthService.renvoyerCodeSms(qui(req)));
   },
   renvoyerVerification: async (req: Request, res: Response) => {
-    res.json(await AuthService.renvoyerVerification(req.body.email));
+    res.json(await AuthService.renvoyerVerification(qui(req)));
   },
   oubli: async (req: Request, res: Response) => {
-    res.json(await AuthService.oubli(req.body.email));
+    res.json(await AuthService.oubli(qui(req)));
   },
   reinitialiser: async (req: Request, res: Response) => {
     res.json(await AuthService.reinitialiser(req.body.jeton, req.body.password));

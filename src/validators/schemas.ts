@@ -3,11 +3,16 @@ import { z } from 'zod';
 import { erreurNomApp, nettoyerNomApp } from '../commun/nom-app.js';
 
 const email = z.string({ required_error: 'Email requis' }).trim().toLowerCase().email('Email invalide');
-const password = z.string({ required_error: 'Mot de passe requis' }).min(8, 'Le mot de passe doit faire au moins 8 caractères').max(200);
+const password = z.string({ required_error: 'Mot de passe requis' }).min(8, 'Le mot de passe doit faire au moins 8 caractères').max(128, 'Le mot de passe doit faire au plus 128 caractères').max(200);
 
 export const registerSchema = z.object({ body: z.object({ email, password, nom: z.string().trim().max(80).optional(), confirmation: z.enum(['email', 'sms']).optional(), telephone: z.string().trim().max(30).optional() }) });
-export const confirmerSmsSchema = z.object({ body: z.object({ email, code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{6}$/, 'Le code a 6 chiffres.') }) });
-export const loginSchema = z.object({ body: z.object({ email, password: z.string().min(1, 'Mot de passe requis') }) });
+export const confirmerSmsSchema = z.object({ body: identifiant.and(z.object({ code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{6}$/, 'Le code a 6 chiffres.') })) });
+/** Un email ou un numéro de téléphone ; `email` reste accepté pour les anciennes versions de l'app. */
+const identifiant = z
+  .object({ identifiant: z.string().trim().min(3).max(320).optional(), email: z.string().trim().max(320).optional() })
+  .refine((b) => !!(b.identifiant || b.email), { message: 'Email ou téléphone requis' });
+export const loginSchema = z.object({ body: identifiant.and(z.object({ password: z.string().min(1, 'Mot de passe requis').max(1000) })) });
+export const identifiantSchema = z.object({ body: identifiant });
 export const emailSchema = z.object({ body: z.object({ email }) });
 export const contactSchema = z.object({
   body: z.object({

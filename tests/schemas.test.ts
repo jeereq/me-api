@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { actionAbonnementSchema, gestionMembresSchema, putEspaceSchema } from '../src/validators/schemas.js';
+import { actionAbonnementSchema, gestionMembresSchema, identifiantSchema, loginSchema, putEspaceSchema } from '../src/validators/schemas.js';
 
 const ok = (body: unknown) => putEspaceSchema.safeParse({ body }).success;
 
@@ -40,5 +40,22 @@ describe('onglet Utilisateurs de l’admin', () => {
     assert.deepEqual(gestionMembresSchema.parse({ query: {} }).query, { filtre: 'tous', q: '', page: 1 });
     assert.equal(gestionMembresSchema.parse({ query: { page: '3' } }).query.page, 3);
     assert.equal(gestionMembresSchema.safeParse({ query: { filtre: 'autre' } }).success, false);
+  });
+});
+
+describe('connexion : identifiant', () => {
+  const login = (body: unknown) => loginSchema.safeParse({ body }).success;
+  it('accepte un email ou un numéro', () => {
+    assert.equal(login({ identifiant: 'a@x.com', password: 'x' }), true);
+    assert.equal(login({ identifiant: '0817125577', password: 'x' }), true);
+  });
+  it('accepte encore `email` pour les anciennes versions de l’app', () => {
+    assert.equal(login({ email: 'a@x.com', password: 'x' }), true);
+  });
+  it('exige un identifiant et un mot de passe', () => {
+    assert.equal(login({ password: 'x' }), false);
+    assert.equal(login({ identifiant: 'a@x.com' }), false);
+    assert.equal(identifiantSchema.safeParse({ body: {} }).success, false);
+    assert.equal(identifiantSchema.safeParse({ body: { identifiant: '0817125577' } }).success, true);
   });
 });
