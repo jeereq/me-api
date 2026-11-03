@@ -24,6 +24,7 @@ router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(Integ
 // Lire un mail en entier, à la demande.
 router.post('/:id/mails/trier', validateRequest(trierMailsSchema), asyncHandler(IntegrationController.trierMails));
 router.get('/:id/mails/recherche', validateRequest(chercherMailsSchema), asyncHandler(IntegrationController.chercherMails));
+router.get('/:id/mails/:mail/destinataires', validateRequest(lireMailSchema), asyncHandler(IntegrationController.destinataires));
 router.get('/:id/mails/:mail', validateRequest(lireMailQuerySchema), asyncHandler(IntegrationController.lireMail));
 // Poser ou retirer des étiquettes (libellés Gmail, catégories Outlook).
 // L'environnement de la boîte : dossiers, mails d'un dossier page par page, ranger un mail, règles.

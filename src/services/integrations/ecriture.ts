@@ -9,8 +9,10 @@ export class ErreurSaisie extends Error {}
 /* ---------- Réponse à un mail ---------- */
 
 export type Reponse = {
-  /** Adresse du destinataire (l'expéditeur du message auquel on répond). */
-  a: string;
+  /** Adresse du destinataire (l'expéditeur du message auquel on répond), ou plusieurs. */
+  a: string | string[];
+  /** Les personnes en copie. */
+  cc?: string[];
   sujet: string;
   texte: string;
   /** `Message-ID` du message d'origine : c'est lui qui raccroche la réponse au bon fil. */
@@ -37,13 +39,65 @@ export function enteteEncode(valeur: string): string {
 /** Une adresse seule : « Marie Dupont <marie@exemple.fr> » devient « marie@exemple.fr ». */
 export const adresseSeule = (v: string) => (v.match(/<([^>]+)>/)?.[1] ?? v).trim();
 
+/** Une personne d'un mail. */
+export type Personne = { nom?: string; adresse: string };
+
+/** Un en-tête d'adresses : « Paul <p@x.fr>, "Doe, Jean" <j@x.fr>, a@x.fr ». Une virgule entre guillemets ne sépare rien. */
+export function lireAdresses(entete: string): Personne[] {
+  const morceaux: string[] = [];
+  let courant = '';
+  let guillemet = false;
+  let chevron = false;
+  for (const c of entete) {
+    if (c === '"') guillemet = !guillemet;
+    if (c === '<' && !guillemet) chevron = true;
+    if (c === '>' && !guillemet) chevron = false;
+    if ((c === ',' || c === ';') && !guillemet && !chevron) {
+      morceaux.push(courant);
+      courant = '';
+    } else courant += c;
+  }
+  morceaux.push(courant);
+  return morceaux.flatMap((m) => {
+    const adresse = adresseSeule(m);
+    if (!adresse.includes('@')) return [];
+    const nom = m.includes('<') ? m.slice(0, m.indexOf('<')).replace(/"/g, '').trim() : '';
+    return [{ ...(nom ? { nom } : {}), adresse }];
+  });
+}
+
+const memeAdresse = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Qui reçoit une réponse à tous : l'expéditeur (ou son « Répondre à »), les autres destinataires, et les personnes en copie, sans soi-même ni doublon.
+ * Si le mail vient de soi, la réponse repart vers ceux à qui il était adressé.
+ */
+export function destinatairesReponse(m: { de: Personne[]; repondreA?: Personne[]; a: Personne[]; cc: Personne[] }, moi: string[]): { a: Personne[]; cc: Personne[] } {
+  const estMoi = (p: Personne) => moi.some((x) => memeAdresse(x, p.adresse));
+  const vus = new Set<string>();
+  const garder = (l: Personne[]) =>
+    l.filter((p) => {
+      const k = p.adresse.trim().toLowerCase();
+      if (estMoi(p) || vus.has(k)) return false;
+      vus.add(k);
+      return true;
+    });
+  const premiers = m.repondreA?.length ? m.repondreA : m.de;
+  const a = garder([...premiers, ...m.a]);
+  const cc = garder(m.cc);
+  // Tout le monde était en copie : le premier passe en destinataire, un mail en a besoin d'un.
+  return a.length ? { a, cc } : { a: cc.slice(0, 1), cc: cc.slice(1) };
+}
+
 /** Le message complet au format RFC 2822, prêt à être envoyé par Gmail. */
 export function messageRfc822(r: Reponse): string {
-  const a = adresseSeule(r.a);
-  if (!a.includes('@')) throw new ErreurSaisie("L'adresse du destinataire est introuvable dans ce message.");
+  const a = (Array.isArray(r.a) ? r.a : [r.a]).map(adresseSeule);
+  if (!a.length || a.some((x) => !x.includes('@'))) throw new ErreurSaisie("L'adresse du destinataire est introuvable dans ce message.");
   if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
+  const cc = (r.cc ?? []).map(adresseSeule).filter((x) => x.includes('@'));
   const entetes = [
-    `To: ${a}`,
+    `To: ${a.join(', ')}`,
+    cc.length ? `Cc: ${cc.join(', ')}` : '',
     r.de ? `From: ${adresseSeule(r.de)}` : '',
     `Subject: ${enteteEncode(sujetReponse(r.sujet))}`,
     r.messageId ? `In-Reply-To: ${r.messageId}` : '',

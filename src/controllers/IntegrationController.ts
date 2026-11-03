@@ -67,7 +67,10 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
   },
 
   repondre: async (req: Request, res: Response) => {
-    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, req.body.mail, req.body.texte));
+    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, req.body.mail, req.body.texte, { a: req.body.a, cc: req.body.cc }));
+  },
+  destinataires: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.destinataires(req.user!.id, req.params.id, req.params.mail));
   },
   lireMail: async (req: Request, res: Response) => {
     res.json(await IntegrationService.lireMail(req.user!.id, req.params.id, req.params.mail, req.query.lu === '0'));

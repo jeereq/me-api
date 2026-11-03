@@ -2,6 +2,7 @@ import type { Fournisseur } from '@prisma/client';
 import type { RechercheMails } from './recherche.js';
 
 import type { AgendaDispo, MailImporte } from './choix.js';
+import type { Personne } from './ecriture.js';
 import type { MailRiche } from './html-mail.js';
 
 export type { AgendaDispo, MailImporte };
@@ -100,6 +101,8 @@ export interface Connecteur {
 
   /** Envoie une réponse dans le fil d'un message. */
   repondre?(jetons: Jetons, r: ReponseMail): Promise<{ lien?: string }>;
+  /** Qui reçoit une réponse à tous, sans télécharger le mail. */
+  destinataires?(jetons: Jetons, m: { mailId: string; boite?: string; moi: string[] }): Promise<Destinataires>;
   /** Lit un mail en entier (et les messages plus anciens du fil), à la demande, et le marque comme lu dans la boîte. Me ne garde pas ce contenu. */
   lireMail?(jetons: Jetons, mailId: string, fuseau: string, ou?: OuMail): Promise<ContenuMail>;
   /** Pose ou retire des étiquettes sur un mail (tout le fil chez Gmail) ; rend les étiquettes qu'il porte ensuite. */
@@ -137,7 +140,9 @@ export interface Connecteur {
 }
 
 /** Une réponse à envoyer : le message d'origine, et le texte écrit dans Me. */
-export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string };
+export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string; /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ dest?: { a: string[]; cc: string[] }; /** Les adresses du compte, pour ne pas s'écrire à soi-même. */ moi?: string[] };
+/** Les personnes qu'une réponse à tous atteindrait. */
+export type Destinataires = { a: Personne[]; cc: Personne[] };
 /** Où se trouve un mail : son fil, et la boîte partagée qui le contient (absente = la boîte du compte). */
 /** `garderNonLu` : lu pour l'analyse du copilote, le mail reste « non lu » dans la boîte. */
 /** `riche` : pour l'écran, avec la mise en forme et les images jointes ; le copilote n'a besoin que du texte. */
