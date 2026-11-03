@@ -12,7 +12,6 @@ import { EmailsCompte, emailsActifs, adresseApp, lienReinitialisation } from './
 import { normaliserTelephone } from './abonnements/flexpaie.js';
 import { NumerosAutorises } from './sms/numeros.js';
 import { SmsService } from './SmsService.js';
-import { Eve } from './voix/eve.js';
 import { refusMotDePasse } from '../commun/mot-de-passe.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
@@ -78,7 +77,7 @@ async function envoyerVerification(user: { id: string; email: string }) {
 
 export const AuthService = {
   /** Ce que l'écran de connexion peut proposer. */
-  options: async () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms(), sms: await SmsService.inscriptionOuverte(), indicatifs: await NumerosAutorises.indicatifs(), eve: Eve.configure() }),
+  options: async () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms(), sms: await SmsService.inscriptionOuverte(), indicatifs: await NumerosAutorises.indicatifs() }),
 
   /**
    * Inscription. La personne choisit comment confirmer son compte : par email, ou par un code reçu par SMS.

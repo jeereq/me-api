@@ -4,7 +4,6 @@ import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
 import { rappelsParSms, rappelSecondaire, texteRappels } from './sms/asmsc.js';
 import { SmsService } from './SmsService.js';
-import { Eve } from './voix/eve.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
@@ -106,7 +105,6 @@ export const NotificationService = {
       if (parSms.length) await SmsService.envoyer(u.id, u.telephone!, texteRappels(parSms), parSms.every(rappelSecondaire));
     }
     await SmsService.purger(maintenant);
-    await Eve.purger(maintenant);
     // On garde 60 jours d'historique.
     await prisma.notification.deleteMany({ where: { createdAt: { lt: new Date(maintenant.getTime() - 60 * 86400000) } } });
   },
