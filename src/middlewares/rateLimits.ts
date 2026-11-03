@@ -1,9 +1,14 @@
 import type { Request } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
+import { normaliserTelephone } from '../services/abonnements/flexpaie.js';
+
 const message = { error: 'Trop de tentatives, réessaie plus tard.' };
 const emailKey = (req: Request) => {
-  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const brut = req.body?.identifiant ?? req.body?.email;
+  const texte = typeof brut === 'string' ? brut.trim().toLowerCase() : '';
+  // 0817… et +243 817… sont le même numéro : la limite ne doit pas se contourner en changeant d'écriture.
+  const email = texte && !texte.includes('@') ? (normaliserTelephone(texte) ?? texte) : texte;
   return email ? `email:${email}` : `ip:${ipKeyGenerator(req.ip ?? '')}`;
 };
 

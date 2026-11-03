@@ -19,6 +19,12 @@ export const JetonService = {
     return brut;
   },
 
+  /** Le compte d'un jeton encore valable, sans le consommer. */
+  async lire(brut: string, type: TypeJeton) {
+    const j = await prisma.jetonCompte.findFirst({ where: { empreinte: empreinte(brut || ''), type, utiliseLe: null, expireLe: { gt: new Date() } }, include: { user: true } });
+    return j?.user ?? null;
+  },
+
   /** Marque le jeton utilisé et renvoie son compte ; un jeton expiré, déjà servi ou inconnu est refusé. */
   async consommer(brut: string, type: TypeJeton, message = 'Ce lien n’est plus valable. Demande-en un nouveau.') {
     const e = empreinte(brut || '');

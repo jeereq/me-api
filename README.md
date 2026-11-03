@@ -186,6 +186,7 @@ Fonction de Pro. Renseigne `SMS_API_URL`, `SMS_API_ID`, `SMS_API_PASSWORD` et `S
 Si l'envoi échoue, le message et les journaux (lignes `SMS`) donnent la cause : adresse introuvable (`ENOTFOUND`), connexion refusée, souvent une liste d'adresses IP autorisées chez le fournisseur (`ECONNREFUSED`, `ETIMEDOUT`), certificat refusé (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`), ou délai dépassé.
 
 - **Numéro vérifié** : dans Mon compte › Notifications, un code créé par le serveur part au numéro comme un SMS ordinaire (seule son empreinte est gardée) ; les rappels n'y partent qu'une fois le code confirmé et l'option activée.
+- **Connexion par numéro** : un numéro vérifié sert d'identifiant avec le mot de passe. Il ne peut être lié qu'à un seul compte.
 - **Inscription au choix** : par email, ou par un code SMS. Avec le SMS, un seul compte par numéro, 5 inscriptions par heure et par IP, 50 sur 24 h (`SMS_INSCRIPTIONS_PAR_JOUR`), et aucun email tant que l'adresse n'est pas confirmée. L'admin peut couper ce choix dans Configuration.
 - **Mot de passe oublié** : le lien part aussi au numéro vérifié du compte, sans condition d'abonnement, dans la limite du jour.
 - **Mêmes rappels que l'email** : tous les rappels et les tâches confiées dans une équipe partent aussi par SMS. Le plus important vient d'abord.

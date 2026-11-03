@@ -11,6 +11,7 @@ import { prisma } from '../utils/prisma.js';
 import { EmailsCompte, emailsActifs, adresseApp, lienReinitialisation } from './comptes/emails.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
 import { SmsService } from './SmsService.js';
+import { refusMotDePasse } from '../commun/mot-de-passe.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
@@ -21,6 +22,34 @@ const publicUser = (u: Compte) => ({ id: u.id, email: u.email, emailVerifie: u.e
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
 // Les jetons de session ont une précision à la seconde : on tronque pour que la session ouverte juste après reste valable.
 const maintenant = () => new Date(Math.floor(Date.now() / 1000) * 1000);
+
+/**
+ * Le compte d'un email ou d'un numéro de téléphone. Un numéro doit être vérifié, ou en attente de son code sur un compte qui
+ * n'a rien d'autre ; s'il est lié à plusieurs comptes (ancien doublon), il ne désigne personne : il faut passer par l'email.
+ */
+async function trouverCompte(identifiant: string) {
+  const brut = identifiant.trim();
+  if (brut.includes('@')) return prisma.user.findUnique({ where: { email: brut.toLowerCase() } });
+  const telephone = normaliserTelephone(brut);
+  if (!telephone) return null;
+  const verifies = await prisma.user.findMany({ where: { telephone }, take: 2 });
+  if (verifies.length) return verifies.length === 1 ? verifies[0] : null;
+  const attente = await prisma.user.findMany({ where: { telephoneEnAttente: telephone, telephone: null, emailVerifie: false }, take: 2 });
+  return attente.length === 1 ? attente[0] : null;
+}
+
+const exigerBonMotDePasse = (mdp: string, c: { email?: string; nom?: string; telephone?: string | null }) => {
+  const refus = refusMotDePasse(mdp, { email: c.email, nom: c.nom, telephone: c.telephone ?? undefined });
+  if (refus) throw new HttpError(400, `Mot de passe refusé : ${refus}`);
+};
+
+/** Prévient que le mot de passe vient de changer, par les canaux prouvés du compte. Une alerte perdue ne bloque rien. */
+function alerterMotDePasse(u: { id: string; email: string; emailVerifie: boolean; telephone?: string | null }) {
+  const envois: Promise<unknown>[] = [];
+  if (u.emailVerifie && emailsActifs()) envois.push(EmailsCompte.motDePasseChange(u.email));
+  if (u.telephone) envois.push(SmsService.envoyer(u.id, u.telephone, 'Me : ton mot de passe vient de changer. Si ce n\'est pas toi, utilise "Mot de passe oublie" tout de suite.'));
+  Promise.allSettled(envois).catch(() => {});
+}
 
 /** Le lien de mot de passe oublié peut-il partir par SMS ? Il faut le service et l'adresse de l'app. */
 const oubliParSms = () => SmsService.configure() && !!adresseApp();
@@ -56,6 +85,7 @@ export const AuthService = {
    * Par SMS, l'adresse n'est pas prouvée : aucun email ne lui part tant qu'elle n'est pas confirmée.
    */
   async register(email: string, password: string, nom = '', choix: { confirmation?: 'email' | 'sms'; telephone?: string } = {}) {
+    exigerBonMotDePasse(password, { email, nom, telephone: choix.telephone });
     if (choix.confirmation === 'sms') return this.registerSms(email, password, nom, choix.telephone ?? '');
     const verifier = emailsActifs();
     const user = await creerCompte({ email, nom, passwordHash: await bcrypt.hash(password, 12), emailVerifie: !verifier });
@@ -81,26 +111,26 @@ export const AuthService = {
   },
 
   /** Le code reçu par SMS confirme le compte et ouvre sa session. */
-  async confirmerSms(email: string, code: string) {
-    const u = await prisma.user.findUnique({ where: { email } });
+  async confirmerSms(identifiant: string, code: string) {
+    const u = await trouverCompte(identifiant);
     if (!u?.telephoneEnAttente || u.telephone || u.emailVerifie) throw new HttpError(400, 'Code expiré. Demande-en un nouveau.');
     await SmsService.confirmerCode(u.id, code);
     return session(await prisma.user.findUniqueOrThrow({ where: { id: u.id } }));
   },
 
   /** Renvoie le code. Répond pareil que le compte existe ou non ; pas plus d'un code par minute. */
-  async renvoyerCodeSms(email: string) {
-    const u = await prisma.user.findUnique({ where: { email } });
+  async renvoyerCodeSms(identifiant: string) {
+    const u = await trouverCompte(identifiant);
     const attendre = !!u?.smsVerificationLe && Date.now() - u.smsVerificationLe.getTime() < 60_000;
     if (u?.telephoneEnAttente && !u.telephone && !u.emailVerifie && !attendre) await SmsService.codeInscription(u.id, u.telephoneEnAttente);
     return { ok: true };
   },
 
-  async login(email: string, password: string) {
-    const user = await prisma.user.findUnique({ where: { email } });
+  async login(identifiant: string, password: string) {
+    const user = await trouverCompte(identifiant);
     // Même message dans tous les cas pour ne pas révéler quels emails ont un compte.
     if (!user?.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
-      throw new HttpError(401, user && !user.passwordHash ? 'Ce compte se connecte avec Google, ou choisis un mot de passe avec « Mot de passe oublié ».' : 'Email ou mot de passe incorrect.');
+      throw new HttpError(401, user && !user.passwordHash ? 'Ce compte se connecte avec Google, ou choisis un mot de passe avec « Mot de passe oublié ».' : 'Identifiant ou mot de passe incorrect.');
     }
     // Un numéro confirmé par SMS suffit pour entrer ; l'adresse, elle, reste à prouver.
     if (!user.emailVerifie && !user.telephone) {
@@ -117,18 +147,18 @@ export const AuthService = {
   },
 
   /** Renvoie le lien de confirmation. Répond pareil que le compte existe ou non. */
-  async renvoyerVerification(email: string) {
+  async renvoyerVerification(identifiant: string) {
     if (!emailsActifs()) throw new HttpError(503, "Les emails de compte ne sont pas configurés sur le serveur.");
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await trouverCompte(identifiant);
     if (user && !user.emailVerifie && !(await JetonService.recent(user.id, 'VERIFICATION'))) await envoyerVerification(user);
     return { ok: true };
   },
 
   /** Mot de passe oublié : envoie un lien valable 1 h, par email et au numéro vérifié du compte. Répond pareil que le compte existe ou non. */
-  async oubli(email: string) {
+  async oubli(identifiant: string) {
     const parEmail = emailsActifs();
     if (!parEmail && !oubliParSms()) throw new HttpError(503, "La réinitialisation n'est pas configurée sur le serveur. Demande à l'admin.");
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await trouverCompte(identifiant);
     if (user && !(await JetonService.recent(user.id, 'REINITIALISATION'))) {
       const jeton = await JetonService.creer(user.id, 'REINITIALISATION', 60);
       const parSms = !!user.telephone && oubliParSms() && (await SmsService.reinitialisation(user.id, user.telephone, lienReinitialisation(jeton)));
@@ -139,10 +169,14 @@ export const AuthService = {
 
   /** Nouveau mot de passe depuis le lien reçu : ferme les autres sessions et ouvre celle-ci. */
   async reinitialiser(jeton: string, password: string) {
+    // Avant de consommer le lien : un mot de passe refusé ne doit pas le griller.
+    const titulaire = await JetonService.lire(jeton, 'REINITIALISATION');
+    if (titulaire) exigerBonMotDePasse(password, titulaire);
     const u = await JetonService.consommer(jeton, 'REINITIALISATION', 'Ce lien n’est plus valable. Refais une demande de mot de passe oublié.');
     await JetonService.annulerTous(u.id, 'REINITIALISATION');
     // Ouvrir le lien reçu par email prouve aussi l'adresse ; avec un numéro vérifié, il a pu arriver par SMS : rien n'est prouvé.
     const user = await prisma.user.update({ where: { id: u.id }, data: { passwordHash: await bcrypt.hash(password, 12), motDePasseLe: maintenant(), emailVerifie: u.emailVerifie || !u.telephone } });
+    alerterMotDePasse(user);
     return session(user);
   },
 
@@ -186,11 +220,13 @@ export const AuthService = {
       const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
       // Un compte créé avec Google n'a pas encore de mot de passe : il peut en choisir un sans l'ancien.
       if (user.passwordHash && (!input.motDePasseActuel || !(await bcrypt.compare(input.motDePasseActuel, user.passwordHash)))) throw new HttpError(400, 'Mot de passe actuel incorrect.');
+      exigerBonMotDePasse(input.nouveauMotDePasse, user);
       data.passwordHash = await bcrypt.hash(input.nouveauMotDePasse, 12);
       data.motDePasseLe = maintenant();
     }
     const user = await prisma.user.update({ where: { id: userId }, data });
     // Changer le mot de passe ferme les autres sessions : celle-ci reçoit un nouveau jeton.
+    if (input.nouveauMotDePasse) alerterMotDePasse(user);
     return input.nouveauMotDePasse ? session(user) : { user: publicUser(user) };
   },
 
