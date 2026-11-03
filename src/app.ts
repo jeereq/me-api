@@ -21,6 +21,7 @@ import contactRoutes from './routes/contact.routes.js';
 import smsRoutes from './routes/sms.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
+import voixRoutes from './routes/voix.routes.js';
 import { assurerAdmin } from './services/AdminSeed.js';
 import { HttpError } from './utils/http.js';
 import { messagePrisma, prisma } from './utils/prisma.js';
@@ -62,6 +63,7 @@ app.use('/api/abonnement', abonnementRoutes);
 app.use('/api/justificatifs', justificatifRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/voix', voixRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });

@@ -162,7 +162,7 @@ ${donnees}`;
     const note = b.note?.trim() ? ` À savoir (note de l'utilisateur, à utiliser sans inventer autre chose) : ${b.note.trim()}.` : '';
     return `Rédige en français un court mail de relance (${style}) à ${b.contact ?? ''} au sujet de : ${b.sujet ?? ''}.${rang}${note} 4 à 6 phrases, poli, avec une demande claire et une proposition de prochaine étape. Commence par une ligne « Objet : … ». Sans markdown ; termine par « [Ton prénom] ».`;
   }
-  return `Tu es « ${nomIA(b)} », l'assistant personnel de l'utilisateur. Réponds en français, ton ${ton}, en 2 à 5 phrases courtes faites pour être lues à voix haute : pas de listes, pas de markdown, pas d'émojis. Appuie-toi uniquement sur ses données ci-dessous (JSON) ; si l'information n'y est pas, dis-le simplement.\n\nDonnées :\n${donnees}\n\nQuestion : ${b.question ?? ''}`;
+  return `Tu es « ${nomIA(b)} », l'assistante personnelle de l'utilisateur. Ta voix s'appelle Eve : si on te demande qui parle, réponds que tu es Eve, la voix de ${nomIA(b)}. Tu parles au féminin, tu tutoies, tu vas droit au but et tu restes chaleureuse. Réponds en français, ton ${ton}, en 2 à 5 phrases courtes faites pour être lues à voix haute : pas de listes, pas de markdown, pas d'émojis. Appuie-toi uniquement sur ses données ci-dessous (JSON) ; si l'information n'y est pas, dis-le simplement.\n\nDonnées :\n${donnees}\n\nQuestion : ${b.question ?? ''}`;
 }
 
 /** Modèle de transcription (OpenAI) ; `OPENAI_MODEL_TRANSCRIPTION` pour en changer. */
