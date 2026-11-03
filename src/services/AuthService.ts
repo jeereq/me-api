@@ -8,7 +8,8 @@ import { etatAbonnement, finEssai, type ChampsAbonnement } from './abonnements/o
 import { HttpError } from '../utils/http.js';
 import { generateToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
-import { EmailsCompte, emailsActifs } from './comptes/emails.js';
+import { EmailsCompte, emailsActifs, adresseApp, lienReinitialisation } from './comptes/emails.js';
+import { SmsService } from './SmsService.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
@@ -19,6 +20,9 @@ const publicUser = (u: Compte) => ({ id: u.id, email: u.email, nom: u.nom, nomAp
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
 // Les jetons de session ont une précision à la seconde : on tronque pour que la session ouverte juste après reste valable.
 const maintenant = () => new Date(Math.floor(Date.now() / 1000) * 1000);
+
+/** Le lien de mot de passe oublié peut-il partir par SMS ? Il faut le service et l'adresse de l'app. */
+const oubliParSms = () => SmsService.configure() && !!adresseApp();
 
 /** Crée un compte (inscription ou premier passage par Google) en respectant SIGNUP_OPEN et la règle du premier admin. */
 function creerCompte(data: Omit<Prisma.UserCreateInput, 'role'>) {
@@ -43,7 +47,7 @@ async function envoyerVerification(user: { id: string; email: string }) {
 
 export const AuthService = {
   /** Ce que l'écran de connexion peut proposer. */
-  options: () => ({ google: ConnexionGoogle.configure(), email: emailsActifs() }),
+  options: () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms() }),
 
   /**
    * Inscription. Si les emails de compte sont configurés, le compte attend la confirmation de l'adresse
@@ -81,13 +85,15 @@ export const AuthService = {
     return { ok: true };
   },
 
-  /** Mot de passe oublié : envoie un lien valable 1 h. Répond pareil que le compte existe ou non. */
+  /** Mot de passe oublié : envoie un lien valable 1 h, par email et au numéro vérifié du compte. Répond pareil que le compte existe ou non. */
   async oubli(email: string) {
-    if (!emailsActifs()) throw new HttpError(503, "La réinitialisation par email n'est pas configurée sur le serveur. Demande à l'admin.");
+    const parEmail = emailsActifs();
+    if (!parEmail && !oubliParSms()) throw new HttpError(503, "La réinitialisation n'est pas configurée sur le serveur. Demande à l'admin.");
     const user = await prisma.user.findUnique({ where: { email } });
     if (user && !(await JetonService.recent(user.id, 'REINITIALISATION'))) {
       const jeton = await JetonService.creer(user.id, 'REINITIALISATION', 60);
-      if (!(await EmailsCompte.reinitialisation(user.email, jeton))) throw new HttpError(503, "L'email n'a pas pu partir. Réessaie dans un moment.");
+      const parSms = !!user.telephone && oubliParSms() && (await SmsService.reinitialisation(user.id, user.telephone, lienReinitialisation(jeton)));
+      if (parEmail && !(await EmailsCompte.reinitialisation(user.email, jeton)) && !parSms) throw new HttpError(503, "L'email n'a pas pu partir. Réessaie dans un moment.");
     }
     return { ok: true };
   },

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { aDroit, etatAbonnement, FONCTIONS_PRO } from '../src/services/abonnements/offres.js';
-import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, placeSms, raisonPanne, rappelsParSms, rappelSecondaire, statutLivraison, texteCode, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
+import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, placeSms, raisonPanne, rappelsParSms, rappelSecondaire, statutLivraison, texteCode, texteRappels, texteReinitialisation, type ConfigSms } from '../src/services/sms/asmsc.js';
 
 const fetchOrigine = globalThis.fetch;
 afterEach(() => {
@@ -128,6 +128,17 @@ describe('texte d’un SMS', () => {
   it('un rappel seul donne son titre et son texte, plusieurs leur nombre et leurs titres', () => {
     assert.equal(texteRappels([{ titre: 'A', corps: 'détail' }]), 'A. détail');
     assert.equal(texteRappels([{ titre: 'A', corps: 'x' }, { titre: 'B', corps: 'y' }]), '2 rappels : A ; B');
+  });
+});
+
+describe('mot de passe oublié par SMS', () => {
+  const lien = `https://me.exemple.com/reinitialiser?jeton=${'a'.repeat(43)}`;
+  it('garde le lien entier', () => {
+    assert.equal(texteReinitialisation('Me', lien), `Me : choisis un nouveau mot de passe (1 h) : ${lien}`);
+    assert.equal(preparerTexte(texteReinitialisation('Me', lien)!).encodage, 'T');
+  });
+  it('n’envoie pas un lien qui serait coupé', () => {
+    assert.equal(texteReinitialisation('Me', `https://${'x'.repeat(120)}.com/reinitialiser?jeton=${'a'.repeat(43)}`), null);
   });
 });
 
