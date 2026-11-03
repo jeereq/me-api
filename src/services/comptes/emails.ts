@@ -34,6 +34,9 @@ function gabarit(titre: string, intro: string, bouton: string, lien: string, fin
   return { html, texte };
 }
 
+/** Le lien de mot de passe oublié, par email ou par SMS. */
+export const lienReinitialisation = (jeton: string) => `${adresseApp()}/reinitialiser?jeton=${encodeURIComponent(jeton)}`;
+
 export const EmailsCompte = {
   verification(email: string, jeton: string) {
     const lien = `${adresseApp()}/verifier?jeton=${encodeURIComponent(jeton)}`;
@@ -42,7 +45,7 @@ export const EmailsCompte = {
   },
 
   reinitialisation(email: string, jeton: string) {
-    const lien = `${adresseApp()}/reinitialiser?jeton=${encodeURIComponent(jeton)}`;
+    const lien = lienReinitialisation(jeton);
     const m = gabarit(
       'Mot de passe oublié',
       'Tu as demandé à changer le mot de passe de ton compte me. Choisis-en un nouveau avec le bouton ci-dessous.',

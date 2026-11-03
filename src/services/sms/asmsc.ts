@@ -81,6 +81,12 @@ export function texteRappels(rappels: { titre: string; corps: string }[]): strin
   return `${rappels.length} rappels : ${rappels.map((r) => r.titre).join(' ; ')}`;
 }
 
+/** Le SMS de mot de passe oublié ; null si le lien ne tiendrait pas en un SMS : coupé, il ne marcherait plus. */
+export function texteReinitialisation(marque: string, lien: string): string | null {
+  const texte = `${marque} : choisis un nouveau mot de passe (1 h) : ${lien}`;
+  return preparerTexte(texte).texte === texte ? texte : null;
+}
+
 /** Un rappel qui peut attendre : discret, briefing, encouragement de la série. Il part après les autres et ne prend pas leur place. */
 export const rappelSecondaire = (r: { mode: string; cle: string }) => r.mode === 'passif' || r.mode === 'briefing' || /\|serie(\||$)/.test(r.cle);
 

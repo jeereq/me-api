@@ -1,7 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
-import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, placeSms, statutLivraison, texteCode, type ConfigSms } from './sms/asmsc.js';
+import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, placeSms, statutLivraison, texteCode, texteReinitialisation, type ConfigSms } from './sms/asmsc.js';
 
 /** Un code reçu par SMS sert 10 minutes. */
 const VALIDITE_CODE_MS = 10 * 60 * 1000;
@@ -93,6 +93,13 @@ export const SmsService = {
       await prisma.envoiSms.update({ where: { id: envoi.id }, data: { statut: 'echec' } });
       return false;
     }
+  },
+
+  /** Mot de passe oublié : le lien part aussi au numéro vérifié du compte, dans la limite du jour. Ne lève jamais. */
+  async reinitialisation(userId: string, telephone: string, lien: string): Promise<boolean> {
+    const cfg = configSms();
+    const texte = cfg && texteReinitialisation(cfg.marque, lien);
+    return texte ? this.envoyer(userId, telephone, texte) : false;
   },
 
   async tester(userId: string) {
