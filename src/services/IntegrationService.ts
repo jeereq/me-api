@@ -362,16 +362,20 @@ export const IntegrationService = {
     return [i.compte, boite].filter((x): x is string => !!x);
   },
 
-  /** Un lien court pour ouvrir une pièce jointe depuis l'app ou le navigateur, qui ne peuvent pas joindre un jeton de session à une adresse. */
-  async lienPiece(userId: string, id: string, mailId: string, pieceId: string) {
-    await this._pourEcrire(userId, id, 'lirePiece');
-    const jeton = jwt.sign({ typ: 'piece', userId, compte: id, mailId, pieceId }, process.env.JWT_SECRET as string, { expiresIn: '5m' });
+  /**
+   * Un lien court pour ouvrir une pièce jointe depuis l'app ou le navigateur, qui ne peuvent pas joindre un jeton de session à une adresse.
+   * `message` : un ancien message du fil ; la boîte (perso ou partagée) reste celle du mail de la liste.
+   */
+  async lienPiece(userId: string, id: string, mailId: string, pieceId: string, message?: string) {
+    const { i } = await this._pourEcrire(userId, id, 'lirePiece');
+    const boite = this._mailGarde(i, mailId)?.boite;
+    const jeton = jwt.sign({ typ: 'piece', userId, compte: id, mailId: message || mailId, pieceId, ...(boite ? { boite } : {}) }, process.env.JWT_SECRET as string, { expiresIn: '5m' });
     return { url: `/api/integrations/pieces/ouvrir?j=${encodeURIComponent(jeton)}` };
   },
 
   /** La pièce jointe d'un lien : rien n'est gardé, elle est lue chez le service à chaque ouverture. */
   async ouvrirPiece(jeton: string) {
-    let p: { typ?: string; userId: string; compte: string; mailId: string; pieceId: string };
+    let p: { typ?: string; userId: string; compte: string; mailId: string; pieceId: string; boite?: string };
     try {
       p = jwt.verify(jeton, process.env.JWT_SECRET as string) as typeof p;
     } catch {
@@ -379,8 +383,7 @@ export const IntegrationService = {
     }
     if (p.typ !== 'piece') throw new HttpError(401, 'Lien invalide.');
     const { i, c, jetons } = await this._pourEcrire(p.userId, p.compte, 'lirePiece');
-    const garde = this._mailGarde(i, p.mailId);
-    return this._ecrire(() => c.lirePiece!(jetons, { mailId: p.mailId, pieceId: p.pieceId, boite: garde?.boite }), i, false);
+    return this._ecrire(() => c.lirePiece!(jetons, { mailId: p.mailId, pieceId: p.pieceId, boite: p.boite }), i, false);
   },
 
   /** Qui recevrait une réponse à tous : pour le montrer et laisser choisir. */

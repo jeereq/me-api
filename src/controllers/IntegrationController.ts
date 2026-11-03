@@ -25,7 +25,7 @@ async function formulaireMail(req: Request) {
   } catch {
     throw new HttpError(400, 'Formulaire illisible.');
   }
-  const fichiers = form.getAll('pieces').filter((x): x is File => x instanceof File);
+  const fichiers = form.getAll('pieces').flatMap((x) => (x instanceof File ? [x] : []));
   const pieces = await Promise.all(fichiers.map(async (f) => ({ nom: f.name, type: f.type, octets: Buffer.from(await f.arrayBuffer()) })));
   return { donnees, pieces };
 }
@@ -103,7 +103,7 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
     res.json(await IntegrationService.envoyer(req.user!.id, req.params.id, valider(envoyerMailSchema.shape.body.safeParse(donnees)), pieces));
   },
   lienPiece: async (req: Request, res: Response) => {
-    res.json(await IntegrationService.lienPiece(req.user!.id, req.params.id, req.params.mail, req.params.piece));
+    res.json(await IntegrationService.lienPiece(req.user!.id, req.params.id, req.params.mail, req.params.piece, typeof req.body?.message === 'string' ? req.body.message.slice(0, 500) : undefined));
   },
   /** Ouvert par un lien, sans en-tête d'authentification : le lien signé en tient lieu. */
   ouvrirPiece: async (req: Request, res: Response) => {
