@@ -87,4 +87,9 @@ export const AssistantController = {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
     res.json(await AnalyseMailService.analyserBoucle(req.user!.id, req.body));
   },
+  /** Relire une réponse avant de l'envoyer. */
+  relireReponse: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json(await AnalyseMailService.relireReponse(req.user!.id, req.body));
+  },
 };
