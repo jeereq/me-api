@@ -97,6 +97,15 @@ export const AssistantController = {
     if (!traduits) throw new HttpError(502, "L'IA n'a pas pu traduire ce texte. Réessaie dans un instant.");
     res.json({ textes: traduits });
   },
+  /** Ajuster une réponse proposée. */
+  ajusterReponse: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json({ reponse: await AnalyseMailService.ajusterReponse(req.user!.id, req.body) });
+  },
+  /** Ce qui est déjà analysé parmi ces mails. */
+  etatsAnalyse: async (req: Request, res: Response) => {
+    res.json({ etats: await AnalyseMailService.etats(req.user!.id, req.body.mails) });
+  },
   /** Relire une réponse avant de l'envoyer. */
   relireReponse: async (req: Request, res: Response) => {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
