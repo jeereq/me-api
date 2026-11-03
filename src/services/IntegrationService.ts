@@ -348,12 +348,25 @@ export const IntegrationService = {
   },
 
   /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */
-  async repondre(userId: string, id: string, mailId: string, texte: string) {
+  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'repondre');
     const m = this._mailGarde(i, mailId);
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
+    // Des destinataires choisis, vérifiés ; sans choix, la réponse va à toutes les personnes du mail.
+    const dest = choix?.a?.length ? { a: adresses(choix.a.join(',')), cc: adresses((choix.cc ?? []).join(',')) } : undefined;
     // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.
-    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite }), i, false);
+    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite, dest, moi: this._mesAdresses(i, m.boite) }), i, false);
+  },
+
+  _mesAdresses(i: Integration, boite?: string) {
+    return [i.compte, boite].filter((x): x is string => !!x);
+  },
+
+  /** Qui recevrait une réponse à tous : pour le montrer et laisser choisir. */
+  async destinataires(userId: string, id: string, mailId: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'destinataires');
+    const garde = this._mailGarde(i, mailId);
+    return this._ecrire(() => c.destinataires!(jetons, { mailId, boite: garde?.boite, moi: this._mesAdresses(i, garde?.boite) }), i, false);
   },
 
   /**

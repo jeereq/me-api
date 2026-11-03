@@ -5,7 +5,7 @@ import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { chercherMailsSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, trierMailsSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { chercherMailsSchema, lireMailSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, trierMailsSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Routes ouvertes : le navigateur y revient après l'autorisation, le `state` signé identifie le compte.
@@ -24,6 +24,7 @@ router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(Integ
 // Lire un mail en entier, à la demande.
 router.post('/:id/mails/trier', validateRequest(trierMailsSchema), asyncHandler(IntegrationController.trierMails));
 router.get('/:id/mails/recherche', validateRequest(chercherMailsSchema), asyncHandler(IntegrationController.chercherMails));
+router.get('/:id/mails/:mail/destinataires', validateRequest(lireMailSchema), asyncHandler(IntegrationController.destinataires));
 router.get('/:id/mails/:mail', validateRequest(lireMailQuerySchema), asyncHandler(IntegrationController.lireMail));
 // Poser ou retirer des étiquettes (libellés Gmail, catégories Outlook).
 // L'environnement de la boîte : dossiers, mails d'un dossier page par page, ranger un mail, règles.

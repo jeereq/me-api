@@ -1,5 +1,5 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
+import { destinatairesReponse, ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteComplet, texteDeBlocs } from './html-mail.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
@@ -294,9 +294,29 @@ export const microsoft: Connecteur = {
 
   async repondre({ accessToken }, r) {
     if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
-    // Graph répond dans le fil tout seul : il reprend l'objet, les destinataires et les en-têtes du message.
-    await json('Outlook', `${racine(r.boite)}/messages/${encodeURIComponent(r.mailId)}/reply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    const url = `${racine(r.boite)}/messages/${encodeURIComponent(r.mailId)}`;
+    // Sans choix, comme « Répondre à tous » : Graph reprend l'objet, le fil et toutes les personnes du mail.
+    if (!r.dest) {
+      await json('Outlook', `${url}/replyAll`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+      return {};
+    }
+    // Avec un choix : un brouillon, dont on fixe les destinataires, pour envoyer exactement à ceux-là et à personne d'autre.
+    const brouillon = await json<{ id: string }>('Outlook', `${url}/createReply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    const parti = `${racine(r.boite)}/messages/${encodeURIComponent(brouillon.id)}`;
+    try {
+      await json('Outlook', parti, corpsJson(accessToken, 'PATCH', { toRecipients: versGraph(r.dest.a), ccRecipients: versGraph(r.dest.cc) }));
+      await json('Outlook', `${parti}/send`, corpsJson(accessToken, 'POST', {}));
+    } catch (e) {
+      await json('Outlook', parti, { ...bearer(accessToken), method: 'DELETE' }).catch(() => {});
+      throw e;
+    }
     return {};
+  },
+
+  async destinataires({ accessToken }, { mailId, boite, moi }) {
+    const m = await json<{ from?: Adresse; replyTo?: Adresse[]; toRecipients?: Adresse[]; ccRecipients?: Adresse[] }>('Outlook', `${racine(boite)}/messages/${encodeURIComponent(mailId)}?$select=from,replyTo,toRecipients,ccRecipients`, bearer(accessToken));
+    const personnes = (l: Adresse[] = []) => l.flatMap((x) => (x.emailAddress?.address ? [{ ...(x.emailAddress.name ? { nom: x.emailAddress.name } : {}), adresse: x.emailAddress.address }] : []));
+    return destinatairesReponse({ de: personnes(m.from ? [m.from] : []), repondreA: personnes(m.replyTo), a: personnes(m.toRecipients), cc: personnes(m.ccRecipients) }, moi);
   },
 
   async lireMail({ accessToken }, mailId, fuseau, ou) {

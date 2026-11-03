@@ -1,5 +1,5 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
+import { base64Url, destinatairesReponse, lendemain, lireAdresses, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
 import { decoderEntites, htmlDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
@@ -233,7 +233,9 @@ export const google: Connecteur = {
   /* ---------- Écriture ---------- */
 
   async repondre({ accessToken }, r) {
-    const brut = base64Url(messageRfc822({ a: r.a, sujet: r.sujet, texte: r.texte, messageId: r.messageId, references: r.references }));
+    // Sans choix, la réponse va à tout le monde, comme « Répondre à tous » : personne ne disparaît du fil.
+    const tous = r.dest ?? (await this.destinataires!({ accessToken }, { mailId: r.mailId, boite: r.boite, moi: r.moi ?? [] }).then((d) => ({ a: d.a.map((p) => p.adresse), cc: d.cc.map((p) => p.adresse) })).catch(() => null));
+    const brut = base64Url(messageRfc822({ a: tous?.a.length ? tous.a : r.a, cc: tous?.a.length ? tous.cc : [], sujet: r.sujet, texte: r.texte, messageId: r.messageId, references: r.references }));
     const env = await json<{ id: string; threadId: string }>('Gmail', `${GMAIL}/messages/send`, {
       method: 'POST',
       ...bearer(accessToken),
@@ -241,6 +243,12 @@ export const google: Connecteur = {
       body: JSON.stringify({ raw: brut, threadId: r.fil }),
     });
     return { lien: lienMail(env.threadId || r.fil || env.id) };
+  },
+
+  async destinataires({ accessToken }, { mailId, moi }) {
+    const noms = ['From', 'Reply-To', 'To', 'Cc'].map((n) => `metadataHeaders=${n}`).join('&');
+    const m = await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=metadata&${noms}`, bearer(accessToken));
+    return destinatairesReponse({ de: lireAdresses(entete(m, 'From')), repondreA: lireAdresses(entete(m, 'Reply-To')), a: lireAdresses(entete(m, 'To')), cc: lireAdresses(entete(m, 'Cc')) }, moi);
   },
 
   async lireMail({ accessToken }, mailId, fuseau, ou) {
