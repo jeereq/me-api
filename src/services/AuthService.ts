@@ -10,6 +10,7 @@ import { generateToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailsCompte, emailsActifs, adresseApp, lienReinitialisation } from './comptes/emails.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
+import { NumerosAutorises } from './sms/numeros.js';
 import { SmsService } from './SmsService.js';
 import { refusMotDePasse } from '../commun/mot-de-passe.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
@@ -77,7 +78,7 @@ async function envoyerVerification(user: { id: string; email: string }) {
 
 export const AuthService = {
   /** Ce que l'écran de connexion peut proposer. */
-  options: async () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms(), sms: await SmsService.inscriptionOuverte() }),
+  options: async () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms(), sms: await SmsService.inscriptionOuverte(), indicatifs: await NumerosAutorises.indicatifs() }),
 
   /**
    * Inscription. La personne choisit comment confirmer son compte : par email, ou par un code reçu par SMS.
@@ -98,6 +99,7 @@ export const AuthService = {
     if (!(await SmsService.inscriptionOuverte())) throw new HttpError(503, 'La confirmation par SMS n’est pas disponible. Choisis l’email.');
     const telephone = normaliserTelephone(brut);
     if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+    await NumerosAutorises.exiger(telephone);
     // Un numéro, un compte : sinon un même téléphone ouvrirait autant d'essais Pro que d'adresses inventées.
     if (await prisma.user.findFirst({ where: { OR: [{ telephone }, { telephoneEnAttente: telephone, smsVerificationLe: { gte: new Date(Date.now() - 86_400_000) } }] }, select: { id: true } })) throw new HttpError(409, 'Ce numéro a déjà un compte. Connecte-toi, ou choisis l’email.');
     if (await SmsService.plafondInscriptionsAtteint()) throw new HttpError(429, 'Trop d’inscriptions par SMS aujourd’hui. Choisis l’email, ou réessaie demain.');

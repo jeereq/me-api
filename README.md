@@ -116,6 +116,9 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | DELETE | `/api/sms/telephone` | compte | Retire le numéro |
 | POST | `/api/sms/test` | Pro | Envoie un SMS d'essai (3 par heure) |
 | GET | `/api/sms/solde` | admin | `{ montant, devise }` : solde du compte aSMSC |
+| GET | `/api/sms/numeros` | admin | Numéros et pays ouverts hors RD Congo |
+| POST | `/api/sms/numeros` | admin | `{ indicatif, numero? }` : ouvre un pays (sans numéro) ou un seul numéro |
+| DELETE | `/api/sms/numeros/:id` | admin | Referme |
 | POST | `/api/sms/retour?cle=` | clé | État de livraison envoyé par aSMSC |
 | POST | `/api/assistant/mails` | compte, Pro | `{ mails: ["ext:<compte>:<mail>", …] (1 à 10), ton?, consignes?, crm? }` → `{ analyses, enCache, fraiches, illisibles }` : le serveur lit les mails, analyse ceux qui n'ont pas d'analyse de moins de 30 jours et garde le résultat |
 | POST | `/api/assistant/transcription` | compte, Pro | Formulaire `audio` (m4a, webm, mp3… 25 Mo au plus, environ 90 minutes en AAC mono 32 kbit/s) + `contexte?` (noms, sujet) → `{ texte, modele }` : transcription en français par OpenAI (`OPENAI_MODEL_TRANSCRIPTION`, `gpt-4o-mini-transcribe` par défaut). L'enregistrement n'est jamais gardé. 10 par heure et par compte |

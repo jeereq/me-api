@@ -1,5 +1,6 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
+import { NumerosAutorises } from './sms/numeros.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
 import { ConfigService } from './ConfigService.js';
 import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, placeSms, statutLivraison, texteCode, texteReinitialisation, type ConfigSms } from './sms/asmsc.js';
@@ -64,6 +65,7 @@ export const SmsService = {
     const cfg = exiger();
     const telephone = normaliserTelephone(brut);
     if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+    await NumerosAutorises.exiger(telephone);
     await exigerNumeroLibre(userId, telephone);
     const code = creerCode();
     await surService(() => Asmsc.envoyer(cfg, { telephone, texte: texteCode(cfg.marque, code), uid: `code-${userId}` }));

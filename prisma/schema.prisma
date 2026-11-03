@@ -363,6 +363,18 @@ model AnalyseMail {
 }
 
 /// Un geste de l'admin sur l'abonnement d'un compte : formule offerte ou retirée, essai prolongé.
+/// Hors RD Congo, seuls les numéros ouverts par un admin sont acceptés : un pays entier (numero vide) ou un seul numéro.
+model NumeroAutorise {
+  id        String   @id @default(cuid())
+  indicatif String
+  numero    String   @default("")
+  /// Nom ou email de l'admin à ce moment-là.
+  parNom    String
+  createdAt DateTime @default(now())
+
+  @@unique([indicatif, numero])
+}
+
 model ActionAbonnement {
   id       String   @id @default(cuid())
   userId   String

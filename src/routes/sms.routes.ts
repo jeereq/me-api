@@ -7,7 +7,7 @@ import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js
 import { retourSmsLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { smsCodeSchema, smsTelephoneSchema } from '../validators/schemas.js';
+import { numeroAutoriseParamsSchema, numeroAutoriseSchema, smsCodeSchema, smsTelephoneSchema } from '../validators/schemas.js';
 
 const parCompte = (limit: number, windowMs: number, error: string) =>
   rateLimit({ windowMs, limit, keyGenerator: (req) => req.user!.id, standardHeaders: 'draft-7', legacyHeaders: false, message: { error } });
@@ -23,6 +23,9 @@ router.post('/retour', retourSmsLimiter, asyncHandler(SmsController.retour));
 router.use(authenticateJWT);
 router.get('/', asyncHandler(SmsController.etat));
 router.get('/solde', requireAdmin, asyncHandler(SmsController.solde));
+router.get('/numeros', requireAdmin, asyncHandler(SmsController.numeros));
+router.post('/numeros', requireAdmin, validateRequest(numeroAutoriseSchema), asyncHandler(SmsController.autoriser));
+router.delete('/numeros/:id', requireAdmin, validateRequest(numeroAutoriseParamsSchema), asyncHandler(SmsController.retirerAutorisation));
 router.post('/telephone', requireFonction('sms'), limiteCode, validateRequest(smsTelephoneSchema), asyncHandler(SmsController.demanderCode));
 router.post('/telephone/code', requireFonction('sms'), limiteControle, validateRequest(smsCodeSchema), asyncHandler(SmsController.confirmerCode));
 router.delete('/telephone', asyncHandler(SmsController.retirer));
