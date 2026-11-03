@@ -75,7 +75,7 @@ export const assistantSchema = z.object({
   body: z.object({
     type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'etiquettes', 'traduction', 'compte_rendu']),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
-    ajustement: z.enum(['court', 'formel', 'decliner', 'refaire']).optional(),
+    ajustement: z.enum(['court', 'formel', 'decliner', 'refaire', 'contexte']).optional(),
     /** Pour « traduction » : la langue voulue. */
     langue: z.enum(['fr', 'en', 'pt']).optional(),
     /** Pour « lot » et « synthese » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
@@ -137,8 +137,12 @@ export type AnalyseBoucleBody = z.infer<typeof analyseBoucleSchema>['body'];
 export const relireReponseSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), reponse: z.string().trim().min(1).max(8000), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
 export type RelireReponseBody = z.infer<typeof relireReponseSchema>['body'];
 
-/** Ajuster une réponse : le mail, le brouillon, et ce qu'il faut en faire. */
-export const ajusterReponseSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), reponse: z.string().trim().min(1).max(8000), action: z.enum(['court', 'formel', 'decliner', 'refaire']), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
+/** Ajuster une réponse : le mail, le brouillon, et ce qu'il faut en faire. Avec un contexte, le brouillon peut être vide. */
+export const ajusterReponseSchema = z.object({
+  body: z
+    .object({ mail: z.string().min(1).max(500), reponse: z.string().trim().max(8000).optional(), action: z.enum(['court', 'formel', 'decliner', 'refaire', 'contexte']), contexte: z.string().trim().max(2000).optional(), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() })
+    .refine((b) => (b.action === 'contexte' ? !!b.contexte : !!b.reponse), { message: 'Rien à rédiger.' }),
+});
 export type AjusterReponseBody = z.infer<typeof ajusterReponseSchema>['body'];
 
 /** Proposer des étiquettes : le mail, celles du compte, et celles qu'il porte déjà. */
