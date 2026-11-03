@@ -116,6 +116,9 @@ Toutes les routes sauf `health` et les routes publiques de `/api/auth` demandent
 | DELETE | `/api/sms/telephone` | compte | Retire le numéro |
 | POST | `/api/sms/test` | Pro | Envoie un SMS d'essai (3 par heure) |
 | GET | `/api/sms/solde` | admin | `{ montant, devise }` : solde du compte aSMSC |
+| POST | `/api/voix/eve` | compte | `{ texte }` (800 caractères) : prépare la lecture par Eve, renvoie `{ jeton }` |
+| POST | `/api/voix/essai` | public | `{ texte }` (120 caractères, 5 par heure) : la zone de test de la page d'accueil |
+| GET | `/api/voix/audio/:jeton` | jeton | L'audio préparé, gardé 5 minutes en mémoire |
 | GET | `/api/sms/numeros` | admin | Numéros et pays ouverts hors RD Congo |
 | POST | `/api/sms/numeros` | admin | `{ indicatif, numero? }` : ouvre un pays (sans numéro) ou un seul numéro |
 | DELETE | `/api/sms/numeros/:id` | admin | Referme |

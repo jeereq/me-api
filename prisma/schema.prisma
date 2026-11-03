@@ -69,6 +69,15 @@ model User {
 }
 
 /// Un SMS envoyé à un compte : sert à limiter les envois par jour. Ni le texte ni le numéro ne sont gardés.
+/// Caractères lus par Eve, par jour (« cle » : un compte, ou « essai » pour la page d'accueil). Gardé une semaine.
+model UsageVoix {
+  cle        String
+  jour       String
+  caracteres Int    @default(0)
+
+  @@id([cle, jour])
+}
+
 model EnvoiSms {
   /// Renvoyé par aSMSC (« uid ») sur l'adresse de retour.
   id        String   @id @default(cuid())
