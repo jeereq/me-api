@@ -73,7 +73,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'traduction', 'compte_rendu']),
+    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'etiquettes', 'traduction', 'compte_rendu']),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
     ajustement: z.enum(['court', 'formel', 'decliner', 'refaire']).optional(),
     /** Pour « traduction » : la langue voulue. */
@@ -140,6 +140,10 @@ export type RelireReponseBody = z.infer<typeof relireReponseSchema>['body'];
 /** Ajuster une réponse : le mail, le brouillon, et ce qu'il faut en faire. */
 export const ajusterReponseSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), reponse: z.string().trim().min(1).max(8000), action: z.enum(['court', 'formel', 'decliner', 'refaire']), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
 export type AjusterReponseBody = z.infer<typeof ajusterReponseSchema>['body'];
+
+/** Proposer des étiquettes : le mail, celles du compte, et celles qu'il porte déjà. */
+export const proposerEtiquettesSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), existantes: z.array(z.string().min(1).max(200)).max(200), posees: z.array(z.string().min(1).max(200)).max(50) }) });
+export type ProposerEtiquettesBody = z.infer<typeof proposerEtiquettesSchema>['body'];
 
 /** Ce qui est déjà analysé parmi les mails affichés. */
 export const etatsAnalyseSchema = z.object({ body: z.object({ mails: z.array(z.string().min(1).max(500)).max(300) }) });

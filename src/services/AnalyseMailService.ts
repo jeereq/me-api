@@ -1,11 +1,11 @@
 import type { Prisma } from '@prisma/client';
 
-import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, RelireReponseBody } from '../validators/schemas.js';
+import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, ProposerEtiquettesBody, RelireReponseBody } from '../validators/schemas.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
-import { donneesBoucle, lireAjustement, lireBoucle, lireRelecture, type AnalyseBoucle, type RelectureReponse } from './analyse-mails.js';
+import { donneesBoucle, exemplesEtiquettes, lireAjustement, lireBoucle, lireEtiquettes, lireRelecture, type AnalyseBoucle, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -152,6 +152,23 @@ export const AnalyseMailService = {
     const r = await AssistantService.demanderAvecModeles({ type: 'ajustement', ajustement: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
     const lu = lireAjustement(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu ajuster cette réponse. Réessaie dans un instant.");
+    return lu;
+  },
+
+  /** Propose des étiquettes d'après le contenu du mail et la façon dont l'utilisateur range déjà. Rien n'est posé ni gardé, et le mail reste non lu. */
+  async proposerEtiquettes(userId: string, b: ProposerEtiquettesBody) {
+    const ref = lireRef(b.mail);
+    if (!ref) throw new HttpError(400, 'Ce mail ne vient pas d’un compte connecté.');
+    const [user, integration] = await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true } }),
+      prisma.integration.findFirst({ where: { id: ref.integrationId, userId }, select: { donnees: true } }),
+    ]);
+    const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
+    const gardes = ((integration?.donnees ?? {}) as { mails?: { sujet?: string; libelles?: string[] }[] }).mails ?? [];
+    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), etiquettes: exemplesEtiquettes(b.existantes, gardes), posees: b.posees };
+    const r = await AssistantService.demanderAvecModeles({ type: 'etiquettes', donnees: JSON.stringify(donnees) });
+    const lu = lireEtiquettes(r.texte, b.existantes, b.posees);
+    if (!lu) throw new HttpError(502, "L'IA n'a pas pu proposer d'étiquettes. Réessaie dans un instant.");
     return lu;
   },
 

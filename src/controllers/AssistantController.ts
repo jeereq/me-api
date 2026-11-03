@@ -102,6 +102,11 @@ export const AssistantController = {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
     res.json({ reponse: await AnalyseMailService.ajusterReponse(req.user!.id, req.body) });
   },
+  /** Proposer des étiquettes pour un mail : rien n'est posé. */
+  proposerEtiquettes: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json({ propositions: await AnalyseMailService.proposerEtiquettes(req.user!.id, req.body) });
+  },
   /** Ce qui est déjà analysé parmi ces mails. */
   etatsAnalyse: async (req: Request, res: Response) => {
     res.json({ etats: await AnalyseMailService.etats(req.user!.id, req.body.mails) });
