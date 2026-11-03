@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { actionAbonnementSchema, gestionMembresSchema, identifiantSchema, loginSchema, putEspaceSchema } from '../src/validators/schemas.js';
+import { actionAbonnementSchema, gestionMembresSchema, identifiantSchema, loginSchema, putEspaceSchema, registerSchema } from '../src/validators/schemas.js';
 
 const ok = (body: unknown) => putEspaceSchema.safeParse({ body }).success;
 
@@ -40,6 +40,19 @@ describe('onglet Utilisateurs de l’admin', () => {
     assert.deepEqual(gestionMembresSchema.parse({ query: {} }).query, { filtre: 'tous', q: '', page: 1 });
     assert.equal(gestionMembresSchema.parse({ query: { page: '3' } }).query.page, 3);
     assert.equal(gestionMembresSchema.safeParse({ query: { filtre: 'autre' } }).success, false);
+  });
+});
+
+describe('inscription', () => {
+  const inscrire = (body: unknown) => registerSchema.safeParse({ body }).success;
+  it('accepte un email, ou un numéro confirmé par SMS', () => {
+    assert.equal(inscrire({ email: 'a@x.com', password: 'tigre-bleu-42' }), true);
+    assert.equal(inscrire({ password: 'tigre-bleu-42', confirmation: 'sms', telephone: '+243812345678' }), true);
+  });
+  it('refuse un compte sans l’un ni l’autre', () => {
+    assert.equal(inscrire({ password: 'tigre-bleu-42' }), false);
+    assert.equal(inscrire({ password: 'tigre-bleu-42', telephone: '+243812345678' }), false);
+    assert.equal(inscrire({ password: 'tigre-bleu-42', confirmation: 'sms' }), false);
   });
 });
 

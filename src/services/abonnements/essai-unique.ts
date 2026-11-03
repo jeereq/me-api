@@ -28,9 +28,11 @@ export function normaliserEmail(brut: string): string {
 
 const hmac = (valeur: string, secret: string) => createHmac('sha256', secret).update(valeur).digest('hex');
 
-/** Empreintes d'un compte : son email normalisé et, s'il en a un, son identifiant Google. */
-export function empreintesCompte(c: { email: string; googleId?: string | null }, secret = process.env.JWT_SECRET || ''): string[] {
-  const liste = [hmac(`email:${normaliserEmail(c.email)}`, secret)];
+/** Empreintes d'un compte : son email normalisé, son numéro et son identifiant Google, s'il en a. */
+export function empreintesCompte(c: { email?: string | null; googleId?: string | null; telephone?: string | null }, secret = process.env.JWT_SECRET || ''): string[] {
+  const liste: string[] = [];
+  if (c.email) liste.push(hmac(`email:${normaliserEmail(c.email)}`, secret));
+  if (c.telephone) liste.push(hmac(`tel:${c.telephone}`, secret));
   if (c.googleId) liste.push(hmac(`google:${c.googleId}`, secret));
   return liste;
 }

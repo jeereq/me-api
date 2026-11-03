@@ -12,8 +12,10 @@ const SUITES = ['0123456789', '9876543210', 'abcdefghijklmnopqrstuvwxyz', 'azert
 
 const propre = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
+type Compte = { email?: string | null; nom?: string | null; telephone?: string | null };
+
 /** Pourquoi ce mot de passe n'est pas accepté ; null s'il convient. */
-export function refusMotDePasse(mdp: string, c: { email?: string; nom?: string; telephone?: string } = {}): string | null {
+export function refusMotDePasse(mdp: string, c: Compte = {}): string | null {
   if (mdp.length < MDP_MIN) return `${MDP_MIN} caractères minimum.`;
   if (mdp.length > MDP_MAX) return `${MDP_MAX} caractères maximum.`;
   const m = propre(mdp);
@@ -29,7 +31,7 @@ export function refusMotDePasse(mdp: string, c: { email?: string; nom?: string; 
 }
 
 /** De 1 (acceptable) à 3 (solide) : surtout la longueur. 0 si le mot de passe est refusé. */
-export function forceMotDePasse(mdp: string, c: { email?: string; nom?: string; telephone?: string } = {}): 0 | 1 | 2 | 3 {
+export function forceMotDePasse(mdp: string, c: Compte = {}): 0 | 1 | 2 | 3 {
   if (refusMotDePasse(mdp, c)) return 0;
   const varietes = [/[a-z]/, /[A-Z]/, /\d/, /[^\w\s]/].filter((r) => r.test(mdp)).length;
   const points = (mdp.length >= 12 ? 2 : mdp.length >= 10 ? 1 : 0) + (mdp.length >= 16 ? 1 : 0) + (varietes >= 3 ? 1 : 0) + (varietes === 4 ? 1 : 0);

@@ -4,8 +4,9 @@ import { delai } from '../utils/delai.js';
 export const EmailService = {
   configure: () => !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM),
 
-  async envoyer(to: string, sujet: string, texte: string, html: string, repondreA?: string) {
-    if (!this.configure()) return false;
+  async envoyer(to: string | null, sujet: string, texte: string, html: string, repondreA?: string) {
+    // Un compte créé avec son seul numéro n'a pas d'adresse.
+    if (!to || !this.configure()) return false;
     try {
       const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
         method: 'POST',

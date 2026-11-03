@@ -17,9 +17,9 @@ import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
 
-type Compte = { id: string; email: string; emailVerifie?: boolean; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
+type Compte = { id: string; email: string | null; telephone?: string | null; emailVerifie?: boolean; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
 
-const publicUser = (u: Compte) => ({ id: u.id, email: u.email, emailVerifie: u.emailVerifie, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
+const publicUser = (u: Compte) => ({ id: u.id, email: u.email, telephone: u.telephone ?? null, emailVerifie: u.emailVerifie, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
 // Les jetons de session ont une précision à la seconde : on tronque pour que la session ouverte juste après reste valable.
 const maintenant = () => new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -35,19 +35,18 @@ async function trouverCompte(identifiant: string) {
   if (!telephone) return null;
   const verifies = await prisma.user.findMany({ where: { telephone }, take: 2 });
   if (verifies.length) return verifies.length === 1 ? verifies[0] : null;
-  const attente = await prisma.user.findMany({ where: { telephoneEnAttente: telephone, telephone: null, emailVerifie: false }, take: 2 });
-  return attente.length === 1 ? attente[0] : null;
+  return prisma.user.findFirst({ where: { telephoneEnAttente: telephone, telephone: null, emailVerifie: false }, orderBy: { smsVerificationLe: 'desc' } });
 }
 
-const exigerBonMotDePasse = (mdp: string, c: { email?: string; nom?: string; telephone?: string | null }) => {
-  const refus = refusMotDePasse(mdp, { email: c.email, nom: c.nom, telephone: c.telephone ?? undefined });
+const exigerBonMotDePasse = (mdp: string, c: { email?: string | null; nom?: string; telephone?: string | null }) => {
+  const refus = refusMotDePasse(mdp, c);
   if (refus) throw new HttpError(400, `Mot de passe refusé : ${refus}`);
 };
 
 /** Prévient que le mot de passe vient de changer, par les canaux prouvés du compte. Une alerte perdue ne bloque rien. */
-function alerterMotDePasse(u: { id: string; email: string; emailVerifie: boolean; telephone?: string | null }) {
+function alerterMotDePasse(u: { id: string; email: string | null; emailVerifie: boolean; telephone?: string | null }) {
   const envois: Promise<unknown>[] = [];
-  if (u.emailVerifie && emailsActifs()) envois.push(EmailsCompte.motDePasseChange(u.email));
+  if (u.email && u.emailVerifie && emailsActifs()) envois.push(EmailsCompte.motDePasseChange(u.email));
   if (u.telephone) envois.push(SmsService.envoyer(u.id, u.telephone, 'Me : ton mot de passe vient de changer. Si ce n\'est pas toi, utilise "Mot de passe oublie" tout de suite.'));
   Promise.allSettled(envois).catch(() => {});
 }
@@ -62,9 +61,9 @@ function creerCompte(data: Omit<Prisma.UserCreateInput, 'role'>) {
     async (tx) => {
       const count = await tx.user.count();
       if (count > 0 && process.env.SIGNUP_OPEN === 'false') throw new HttpError(403, "Les inscriptions sont fermées. Demande à l'admin.");
-      if (await tx.user.findUnique({ where: { email: data.email } })) throw new HttpError(409, 'Un compte existe déjà avec cet email.');
+      if (data.email && (await tx.user.findUnique({ where: { email: data.email } }))) throw new HttpError(409, 'Un compte existe déjà avec cet email.');
       // Chaque nouveau compte commence par l'essai Pro, sauf si la même personne l'a déjà eu avec un compte supprimé.
-      const dejaEu = await tx.essaiUtilise.count({ where: { empreinte: { in: empreintesCompte({ email: data.email, googleId: data.googleId }) } } });
+      const dejaEu = await tx.essaiUtilise.count({ where: { empreinte: { in: empreintesCompte({ email: data.email, googleId: data.googleId, telephone: data.telephoneEnAttente }) } } });
       return tx.user.create({ data: { ...data, essaiJusqua: dejaEu ? null : finEssai(), role: count === 0 && !process.env.ADMIN_EMAIL ? 'ADMIN' : 'UTILISATEUR' } });
     },
     { isolationLevel: 'Serializable' },
@@ -85,23 +84,26 @@ export const AuthService = {
    * Par email, si les emails de compte sont configurés, le compte attend la confirmation ; sinon il est utilisable tout de suite.
    * Par SMS, l'adresse n'est pas prouvée : aucun email ne lui part tant qu'elle n'est pas confirmée.
    */
-  async register(email: string, password: string, nom = '', choix: { confirmation?: 'email' | 'sms'; telephone?: string } = {}) {
+  async register(email: string | undefined, password: string, nom = '', choix: { confirmation?: 'email' | 'sms'; telephone?: string } = {}) {
     exigerBonMotDePasse(password, { email, nom, telephone: choix.telephone });
     if (choix.confirmation === 'sms') return this.registerSms(email, password, nom, choix.telephone ?? '');
+    if (!email) throw new HttpError(400, 'Email ou téléphone requis.');
     const verifier = emailsActifs();
     const user = await creerCompte({ email, nom, passwordHash: await bcrypt.hash(password, 12), emailVerifie: !verifier });
     if (!verifier) return session(user);
-    await envoyerVerification(user);
-    return { verification: true, email: user.email };
+    await envoyerVerification({ id: user.id, email });
+    return { verification: true, email };
   },
 
-  async registerSms(email: string, password: string, nom: string, brut: string) {
+  async registerSms(email: string | undefined, password: string, nom: string, brut: string) {
     if (!(await SmsService.inscriptionOuverte())) throw new HttpError(503, 'La confirmation par SMS n’est pas disponible. Choisis l’email.');
     const telephone = normaliserTelephone(brut);
     if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
     await NumerosAutorises.exiger(telephone);
     // Un numéro, un compte : sinon un même téléphone ouvrirait autant d'essais Pro que d'adresses inventées.
     if (await prisma.user.findFirst({ where: { OR: [{ telephone }, { telephoneEnAttente: telephone, smsVerificationLe: { gte: new Date(Date.now() - 86_400_000) } }] }, select: { id: true } })) throw new HttpError(409, 'Ce numéro a déjà un compte. Connecte-toi, ou choisis l’email.');
+    // Un essai resté sans code : le numéro est à nouveau libre (pas de doublon qui le rendrait ambigu à la connexion).
+    await prisma.user.deleteMany({ where: { email: null, telephone: null, emailVerifie: false, telephoneEnAttente: telephone } });
     if (await SmsService.plafondInscriptionsAtteint()) throw new HttpError(429, 'Trop d’inscriptions par SMS aujourd’hui. Choisis l’email, ou réessaie demain.');
     const user = await creerCompte({ email, nom, passwordHash: await bcrypt.hash(password, 12), emailVerifie: false, telephoneEnAttente: telephone });
     if (!(await SmsService.codeInscription(user.id, telephone))) {
@@ -152,7 +154,7 @@ export const AuthService = {
   async renvoyerVerification(identifiant: string) {
     if (!emailsActifs()) throw new HttpError(503, "Les emails de compte ne sont pas configurés sur le serveur.");
     const user = await trouverCompte(identifiant);
-    if (user && !user.emailVerifie && !(await JetonService.recent(user.id, 'VERIFICATION'))) await envoyerVerification(user);
+    if (user?.email && !user.emailVerifie && !(await JetonService.recent(user.id, 'VERIFICATION'))) await envoyerVerification({ id: user.id, email: user.email });
     return { ok: true };
   },
 
@@ -164,7 +166,7 @@ export const AuthService = {
     if (user && !(await JetonService.recent(user.id, 'REINITIALISATION'))) {
       const jeton = await JetonService.creer(user.id, 'REINITIALISATION', 60);
       const parSms = !!user.telephone && oubliParSms() && (await SmsService.reinitialisation(user.id, user.telephone, lienReinitialisation(jeton)));
-      if (parEmail && !(await EmailsCompte.reinitialisation(user.email, jeton)) && !parSms) throw new HttpError(503, "L'email n'a pas pu partir. Réessaie dans un moment.");
+      if (parEmail && user.email && !(await EmailsCompte.reinitialisation(user.email, jeton)) && !parSms) throw new HttpError(503, "L'email n'a pas pu partir. Réessaie dans un moment.");
     }
     return { ok: true };
   },
@@ -213,11 +215,19 @@ export const AuthService = {
     return publicUser(await prisma.user.findUniqueOrThrow({ where: { id: userId } }));
   },
 
-  async updateMe(userId: string, input: { nom?: string; fuseau?: string; nomApp?: string; motDePasseActuel?: string; nouveauMotDePasse?: string }) {
+  async updateMe(userId: string, input: { email?: string; nom?: string; fuseau?: string; nomApp?: string; motDePasseActuel?: string; nouveauMotDePasse?: string }) {
     const data: Prisma.UserUpdateInput = {};
     if (input.nom !== undefined) data.nom = input.nom;
     if (input.fuseau !== undefined) data.fuseau = input.fuseau;
     if (input.nomApp !== undefined) data.nomApp = input.nomApp;
+    if (input.email) {
+      // Seul un compte créé avec son numéro n'a pas d'adresse ; elle reste à confirmer.
+      const moi = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+      if (moi.email) throw new HttpError(400, 'Ton compte a déjà une adresse email.');
+      if (await prisma.user.findUnique({ where: { email: input.email } })) throw new HttpError(409, 'Un compte existe déjà avec cet email.');
+      data.email = input.email;
+      data.emailVerifie = !emailsActifs();
+    }
     if (input.nouveauMotDePasse) {
       const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
       // Un compte créé avec Google n'a pas encore de mot de passe : il peut en choisir un sans l'ancien.
@@ -229,6 +239,7 @@ export const AuthService = {
     const user = await prisma.user.update({ where: { id: userId }, data });
     // Changer le mot de passe ferme les autres sessions : celle-ci reçoit un nouveau jeton.
     if (input.nouveauMotDePasse) alerterMotDePasse(user);
+    if (input.email && emailsActifs()) await envoyerVerification({ id: user.id, email: input.email }).catch(() => {});
     return input.nouveauMotDePasse ? session(user) : { user: publicUser(user) };
   },
 
@@ -269,7 +280,9 @@ export const AuthService = {
   /** Suppression définitive du compte et de toutes ses données, confirmée en retapant son email. */
   async supprimer(userId: string, confirmation: string) {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { integrations: true } });
-    if (confirmation.trim().toLowerCase() !== user.email) throw new HttpError(400, 'Tape ton adresse email exacte pour confirmer.');
+    if (user.email ? confirmation.trim().toLowerCase() !== user.email : normaliserTelephone(confirmation) !== user.telephone) {
+      throw new HttpError(400, user.email ? 'Tape ton adresse email exacte pour confirmer.' : 'Tape ton numéro exact pour confirmer.');
+    }
     if (user.role === 'ADMIN' && (await prisma.user.count({ where: { role: 'ADMIN' } })) <= 1 && (await prisma.user.count()) > 1) {
       throw new HttpError(400, 'Tu es le seul admin : nomme un autre admin dans Membres avant de supprimer ton compte.');
     }

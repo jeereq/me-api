@@ -18,9 +18,9 @@ const empreinte = (brut: string) => createHash('sha256').update(brut).digest('he
 const membreSelect = { id: true, role: true, depuisLe: true, user: { select: { id: true, nom: true, email: true } } } as const;
 const invitationSelect = { id: true, email: true, role: true, parNom: true, expireLe: true, createdAt: true, ouverteLe: true, ouvertePar: true } as const;
 
-type MembreLu = { id: string; role: RoleEquipe; depuisLe: Date; user: { id: string; nom: string; email: string } };
+type MembreLu = { id: string; role: RoleEquipe; depuisLe: Date; user: { id: string; nom: string; email: string | null } };
 
-const lireMembre = (m: MembreLu) => ({ id: m.user.id, nom: m.user.nom, email: m.user.email, role: m.role, depuisLe: m.depuisLe.toISOString() });
+const lireMembre = (m: MembreLu) => ({ id: m.user.id, nom: m.user.nom, email: m.user.email ?? '', role: m.role, depuisLe: m.depuisLe.toISOString() });
 
 /**
  * Les équipes : des comptes « me » qui partagent un espace (budgets, objectifs, projets, tâches, habitudes).
@@ -42,7 +42,7 @@ export const EquipeService = {
       creeLe: equipe.createdAt.toISOString(),
       monRole: role,
       membres: equipe.membres.map(lireMembre),
-      invitations: role === 'PROPRIETAIRE' ? invitationsAffichables(equipe.invitations, equipe.membres.map((m) => m.user.email)).map(invitationPourApp) : [],
+      invitations: role === 'PROPRIETAIRE' ? invitationsAffichables(equipe.invitations, equipe.membres.map((m) => m.user.email ?? '')).map(invitationPourApp) : [],
     }));
   },
 
@@ -84,7 +84,7 @@ export const EquipeService = {
 
     const equipe = await prisma.equipe.findUniqueOrThrow({ where: { id: equipeId }, select: { nom: true } });
     const invitant = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { nom: true, email: true } });
-    const parNom = invitant.nom || invitant.email;
+    const parNom = invitant.nom || invitant.email || 'Un membre';
 
     // Une seule invitation en attente par adresse : une nouvelle remplace la précédente.
     await prisma.invitationEquipe.deleteMany({ where: { equipeId, email, utiliseLe: null } });

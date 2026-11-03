@@ -11,7 +11,7 @@ export type FiltreMembres = (typeof FILTRES)[number];
 /** Une période qui finit dans ces jours « expire bientôt » : c'est le moment de relancer. */
 export const JOURS_EXPIRE_BIENTOT = 7;
 
-export type CompteGestion = ChampsAbonnement & { id: string; email: string; nom: string; role: 'ADMIN' | 'UTILISATEUR'; emailVerifie: boolean; createdAt: Date };
+export type CompteGestion = ChampsAbonnement & { id: string; email: string | null; telephone?: string | null; nom: string; role: 'ADMIN' | 'UTILISATEUR'; emailVerifie: boolean; createdAt: Date };
 
 export type LigneMembre = {
   id: string;
@@ -35,7 +35,8 @@ export function ligneMembre(u: CompteGestion, maintenant = new Date(), depuis = 
   const passe = u.abonnementFinLe && u.abonnementFinLe <= maintenant ? u.abonnementFinLe : null;
   return {
     id: u.id,
-    email: u.email,
+    // Un compte sans email se reconnaît à son numéro.
+    email: u.email ?? (u.telephone ? `+${u.telephone}` : ''),
     nom: u.nom,
     role: u.role,
     emailVerifie: u.emailVerifie,
