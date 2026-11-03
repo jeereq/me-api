@@ -2,7 +2,7 @@ import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailService } from './EmailService.js';
 import { PushService } from './PushService.js';
-import { rappelsParSms, texteRappels } from './sms/asmsc.js';
+import { rappelsParSms, rappelSecondaire, texteRappels } from './sms/asmsc.js';
 import { SmsService } from './SmsService.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { local } from './integrations/http.js';
@@ -100,7 +100,7 @@ export const NotificationService = {
       }
       // Un seul SMS par passage : chaque SMS coûte.
       const parSms = parSmsPossible && aDroit(etat, 'sms') ? rappelsParSms(nouveaux) : [];
-      if (parSms.length) await SmsService.envoyer(u.id, u.telephone!, texteRappels(parSms));
+      if (parSms.length) await SmsService.envoyer(u.id, u.telephone!, texteRappels(parSms), parSms.every(rappelSecondaire));
     }
     await SmsService.purger(maintenant);
     // On garde 60 jours d'historique.
@@ -132,21 +132,22 @@ export const NotificationService = {
   },
 
   /**
-   * Prévient les membres à qui des tâches viennent d'être confiées : dans l'app (cloche), en push et par email.
+   * Prévient les membres à qui des tâches viennent d'être confiées : dans l'app (cloche), en push, par email et par SMS (payant : Pro seulement).
    * C'est un message d'un collègue, pas un rappel : il part sans condition d'abonnement, mais chacun garde la main
    * (réglages Notifications de son compte, et canal « Mail à moi-même » coupé par l'admin).
    * `revision` rend la clé unique par enregistrement : reconfier la même tâche plus tard prévient de nouveau.
    */
   async affecter(equipe: { nom: string }, acteur: { nom: string }, affectations: Affectation[], revision: number) {
     if (!affectations.length) return;
-    const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as { canaux?: { mail?: boolean } };
+    const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as { canaux?: { mail?: boolean; sms?: boolean } };
     const mailActif = cfg.canaux?.mail !== false && EmailService.configure();
+    const smsActif = cfg.canaux?.sms !== false && SmsService.configure();
     const quand = new Date().toISOString().slice(0, 16);
     const parPersonne = new Map<string, Affectation[]>();
     for (const a of affectations) parPersonne.set(a.userId, [...(parPersonne.get(a.userId) ?? []), a]);
 
     for (const [userId, liste] of parPersonne) {
-      const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, espace: { select: { data: true } } } });
+      const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, telephone: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true, espace: { select: { data: true } } } });
       if (!u) continue;
       const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
       const qui = acteur.nom || "Quelqu'un";
@@ -175,6 +176,7 @@ export const NotificationService = {
         const m = email(avis, u.nom, `Tu reçois cet email parce que quelque chose t'a été confié dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
         if (await EmailService.envoyer(u.email, sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId, cle: { in: avis.map((r) => r.cle) } }, data: { parEmail: true } });
       }
+      if (smsActif && prefs.sms === true && u.telephone && aDroit(etatAbonnement(u), 'sms')) await SmsService.envoyer(userId, u.telephone, avis.length === 1 ? texteRappels(avis) : resume);
     }
   },
 

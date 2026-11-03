@@ -81,13 +81,19 @@ export function texteRappels(rappels: { titre: string; corps: string }[]): strin
   return `${rappels.length} rappels : ${rappels.map((r) => r.titre).join(' ; ')}`;
 }
 
-/**
- * Les rappels qui méritent un SMS payé : ce qui est à faire. Ni les rappels discrets, ni le briefing, ni les encouragements
- * de la série, ni une alerte dont le push et l'email sont tous deux coupés.
- */
+/** Un rappel qui peut attendre : discret, briefing, encouragement de la série. Il part après les autres et ne prend pas leur place. */
+export const rappelSecondaire = (r: { mode: string; cle: string }) => r.mode === 'passif' || r.mode === 'briefing' || /\|serie(\||$)/.test(r.cle);
+
+/** Les rappels envoyés par SMS, comme par email : tous, sauf une alerte dont le push et l'email sont coupés. Le plus important d'abord, car un SMS est court. */
 export function rappelsParSms<R extends { mode: string; cle: string; canaux?: { push: boolean; email: boolean } }>(rappels: R[]): R[] {
-  return rappels.filter((r) => r.mode !== 'passif' && r.mode !== 'briefing' && !/\|serie(\||$)/.test(r.cle) && (r.canaux?.push !== false || r.canaux?.email !== false));
+  const gardes = rappels.filter((r) => r.canaux?.push !== false || r.canaux?.email !== false);
+  return [...gardes.filter((r) => !rappelSecondaire(r)), ...gardes.filter(rappelSecondaire)];
 }
+
+/** Places gardées chaque jour pour ce qui est à faire : un briefing et des rappels discrets ne les prennent pas. */
+const PLACES_GARDEES = 2;
+/** Reste-t-il de la place aujourd'hui pour ce SMS ? */
+export const placeSms = (envoyes: number, max: number, secondaire: boolean) => envoyes < (secondaire ? Math.max(1, max - PLACES_GARDEES) : max);
 
 /** L'état d'un SMS d'après le statut de livraison d'aSMSC. */
 export function statutLivraison(dlr: unknown): StatutSms {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { aDroit, etatAbonnement, FONCTIONS_PRO } from '../src/services/abonnements/offres.js';
-import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, raisonPanne, rappelsParSms, statutLivraison, texteCode, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
+import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, placeSms, raisonPanne, rappelsParSms, rappelSecondaire, statutLivraison, texteCode, texteRappels, type ConfigSms } from '../src/services/sms/asmsc.js';
 
 const fetchOrigine = globalThis.fetch;
 afterEach(() => {
@@ -137,8 +137,18 @@ describe('rappels envoyés par SMS', () => {
     const l = [r('agressif', '2026-11-03|relance|r1|jour'), r('normal', '2026-11-03|tache|t1|jour'), r('coach', '2026-11-03|tache|t2|soir')];
     assert.deepEqual(rappelsParSms(l), l);
   });
-  it('écarte les discrets, le briefing et les encouragements de la série', () => {
-    assert.deepEqual(rappelsParSms([r('passif', 'a'), r('briefing', 'b'), r('coach', '2026-11-03|serie')]), []);
+  it('envoie aussi les discrets, le briefing et la série, après ce qui est à faire', () => {
+    const l = [r('passif', 'a'), r('briefing', 'b'), r('coach', '2026-11-03|serie'), r('agressif', 'c')];
+    assert.deepEqual(rappelsParSms(l).map((x) => x.cle), ['c', 'a', 'b', '2026-11-03|serie']);
+    assert.equal(rappelSecondaire(l[0]), true);
+    assert.equal(rappelSecondaire(l[3]), false);
+  });
+  it('garde des places chaque jour pour ce qui est à faire', () => {
+    assert.equal(placeSms(2, 5, true), true);
+    assert.equal(placeSms(3, 5, true), false);
+    assert.equal(placeSms(4, 5, false), true);
+    assert.equal(placeSms(5, 5, false), false);
+    assert.equal(placeSms(0, 1, true), true);
   });
   it('écarte une alerte dont le push et l’email sont coupés', () => {
     assert.deepEqual(rappelsParSms([r('hebdo', 'a', { push: false, email: false })]), []);
