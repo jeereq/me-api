@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 
+import { NumerosAutorises } from '../services/sms/numeros.js';
 import { SmsService } from '../services/SmsService.js';
 
 export const SmsController = {
@@ -21,6 +22,15 @@ export const SmsController = {
   },
   solde: async (_req: Request, res: Response) => {
     res.json(await SmsService.solde());
+  },
+  numeros: async (_req: Request, res: Response) => {
+    res.json(await NumerosAutorises.liste());
+  },
+  autoriser: async (req: Request, res: Response) => {
+    res.json(await NumerosAutorises.ajouter(req.user!.nom || req.user!.email, req.body.indicatif, req.body.numero));
+  },
+  retirerAutorisation: async (req: Request, res: Response) => {
+    res.json(await NumerosAutorises.retirer(req.params.id));
   },
   retour: async (req: Request, res: Response) => {
     await SmsService.retour(req.query.cle, req.body);

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_FINANCES, FONCTIONS_PRO, FONCTIONS_REUNIONS, formulePayee, OFFRES, palierDe, prixPeriode, prolonger, VERSION_CGV, type Formule, type Palier, type Periode } from './abonnements/offres.js';
+import { NumerosAutorises } from './sms/numeros.js';
 import { ErreurFlexpaie, Flexpaie, flexpaieConfigure, normaliserTelephone, type EtatCommande } from './abonnements/flexpaie.js';
 import { NotificationService } from './NotificationService.js';
 import { ReunionService } from './ReunionService.js';
@@ -116,6 +117,7 @@ export const AbonnementService = {
     pretPourPayer();
     const telephone = normaliserTelephone(telephoneBrut);
     if (!telephone) throw new HttpError(400, 'Numéro de téléphone invalide. Vérifie l’indicatif et le numéro.');
+    await NumerosAutorises.exiger(telephone);
     // Tant qu'un paiement attend la validation, on n'en lance pas un autre : l'app propose de l'abandonner d'abord.
     const enCours = await prisma.paiement.findFirst({ where: { userId, statut: 'en_attente' } });
     if (enCours) {

@@ -237,6 +237,8 @@ export const paiementSchema = z.object({
 });
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });
 export const smsTelephoneSchema = z.object({ body: z.object({ telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(20) }) });
+export const numeroAutoriseSchema = z.object({ body: z.object({ indicatif: z.string().regex(/^[1-9]\d{0,3}$/, 'Indicatif invalide'), numero: z.string().regex(/^\d{0,14}$/, 'Numéro invalide').default('') }) });
+export const numeroAutoriseParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
 export const smsCodeSchema = z.object({ body: z.object({ code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{3,10}$/, 'Code invalide') }) });
 export const gestionMembresSchema = z.object({
   query: z.object({
