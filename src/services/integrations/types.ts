@@ -2,7 +2,7 @@ import type { Fournisseur } from '@prisma/client';
 import type { RechercheMails } from './recherche.js';
 
 import type { AgendaDispo, MailImporte } from './choix.js';
-import type { Personne } from './ecriture.js';
+import type { PieceAJoindre, Personne } from './ecriture.js';
 import type { MailRiche } from './html-mail.js';
 
 export type { AgendaDispo, MailImporte };
@@ -101,6 +101,8 @@ export interface Connecteur {
 
   /** Envoie une réponse dans le fil d'un message. */
   repondre?(jetons: Jetons, r: ReponseMail): Promise<{ lien?: string }>;
+  /** Une pièce jointe d'un mail, pour l'ouvrir. */
+  lirePiece?(jetons: Jetons, p: { mailId: string; pieceId: string; boite?: string }): Promise<{ nom: string; type: string; octets: Buffer }>;
   /** Qui reçoit une réponse à tous, sans télécharger le mail. */
   destinataires?(jetons: Jetons, m: { mailId: string; boite?: string; moi: string[] }): Promise<Destinataires>;
   /** Lit un mail en entier (et les messages plus anciens du fil), à la demande, et le marque comme lu dans la boîte. Me ne garde pas ce contenu. */
@@ -140,7 +142,7 @@ export interface Connecteur {
 }
 
 /** Une réponse à envoyer : le message d'origine, et le texte écrit dans Me. */
-export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string; /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ dest?: { a: string[]; cc: string[] }; /** Les adresses du compte, pour ne pas s'écrire à soi-même. */ moi?: string[] };
+export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string; /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ dest?: { a: string[]; cc: string[] }; /** Les adresses du compte, pour ne pas s'écrire à soi-même. */ moi?: string[]; pieces?: PieceAJoindre[] };
 /** Les personnes qu'une réponse à tous atteindrait. */
 export type Destinataires = { a: Personne[]; cc: Personne[] };
 /** Où se trouve un mail : son fil, et la boîte partagée qui le contient (absente = la boîte du compte). */
@@ -150,7 +152,9 @@ export type OuMail = { fil?: string; boite?: string; garderNonLu?: boolean; rich
 export type Etiquetage = OuMail & { mailId: string; ajouter: string[]; retirer: string[] };
 /** Un message plus ancien du même fil, lu avec le mail ouvert. */
 /** `message` : ce que la personne a écrit, sans sa signature ni le message cité. `riche` : le même message mis en forme, pour l'écran. */
-export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; message?: string; riche?: MailRiche; piecesJointes: string[] };
+/** Une pièce jointe, de quoi l'ouvrir et la décrire. */
+export type PieceMail = { id: string; nom: string; taille?: number; type?: string };
+export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; message?: string; riche?: MailRiche; piecesJointes: string[]; pieces?: PieceMail[] };
 /** Un mail lu en entier : le texte brut, sa mise en forme quand il est en HTML, et le nom des pièces jointes. */
 export type ContenuMail = {
   id: string;
@@ -166,6 +170,7 @@ export type ContenuMail = {
   message?: string;
   riche?: MailRiche;
   piecesJointes: string[];
+  pieces?: PieceMail[];
   lien?: string;
   /** Étiquettes posées sur le mail (libellés Gmail, catégories Outlook). */
   libelles?: string[];
@@ -173,7 +178,7 @@ export type ContenuMail = {
   fil?: MessageFil[];
 };
 /** Un nouveau mail écrit dans Me : adresses déjà vérifiées. */
-export type NouveauMail = { a: string[]; cc: string[]; sujet: string; texte: string };
+export type NouveauMail = { a: string[]; cc: string[]; sujet: string; texte: string; pieces?: PieceAJoindre[] };
 export type EcritureEvenement = { agendaId: string; titre: string; date: string; debut?: string; fin?: string; lieu?: string; journee?: boolean; fuseau: string };
 export type ListeTaches = { id: string; nom: string; principale?: boolean };
 export type EcritureTache = { listeId: string; titre: string; echeance?: string | null; fait?: boolean };

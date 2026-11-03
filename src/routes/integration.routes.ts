@@ -13,6 +13,8 @@ router.get('/trello/retour', IntegrationController.trelloRetour);
 router.post('/trello/jeton', validateRequest(trelloJetonSchema), asyncHandler(IntegrationController.trelloJeton));
 router.get('/:nom/callback', asyncHandler(IntegrationController.callback));
 
+// Ouvert par un lien : le lien signé et court tient lieu d'authentification.
+router.get('/pieces/ouvrir', asyncHandler(IntegrationController.ouvrirPiece));
 router.use(authenticateJWT);
 router.get('/', asyncHandler(IntegrationController.liste));
 // Sans Pro, on peut encore voir et déconnecter ses comptes, mais plus en connecter ni s'en servir.
@@ -37,6 +39,10 @@ router.get('/:id/regles', validateRequest(integrationParamsSchema), asyncHandler
 router.patch('/:id/regles/:regle', validateRequest(activerRegleSchema), asyncHandler(IntegrationController.activerRegle));
 router.post('/:id/mails/:mail/libelles', validateRequest(etiqueterMailSchema), asyncHandler(IntegrationController.etiqueter));
 // Écriture dans le compte connecté (répondre, écrire, tenir l'agenda et les tâches).
+// Avec des fichiers : un formulaire, lu et vérifié par le contrôleur.
+router.post('/:id/repondre/pieces', asyncHandler(IntegrationController.repondreAvecPieces));
+router.post('/:id/envoyer/pieces', asyncHandler(IntegrationController.envoyerAvecPieces));
+router.post('/:id/mails/:mail/pieces/:piece/lien', asyncHandler(IntegrationController.lienPiece));
 router.post('/:id/repondre', validateRequest(repondreMailSchema), asyncHandler(IntegrationController.repondre));
 router.post('/:id/envoyer', validateRequest(envoyerMailSchema), asyncHandler(IntegrationController.envoyer));
 router.post('/:id/agenda', validateRequest(creerEvenementSchema), asyncHandler(IntegrationController.creerEvenement));
