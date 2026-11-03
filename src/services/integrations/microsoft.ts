@@ -1,7 +1,7 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
-import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, normaliserCid, remplirImages, texteComplet } from './html-mail.js';
+import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteComplet, texteDeBlocs } from './html-mail.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
 import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
@@ -303,9 +303,8 @@ export const microsoft: Connecteur = {
     const base = racine(ou?.boite);
     const url = `${base}/messages/${encodeURIComponent(mailId)}`;
     const auth = bearer(accessToken);
-    const texte = bearer(accessToken, { Prefer: 'outlook.body-content-type="text"' });
     const champs = 'subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,isRead,webLink,categories,conversationId,isDraft';
-    // Le mail ouvert arrive en HTML, pour garder ses tableaux, ses images et sa signature ; les plus anciens du fil restent en texte.
+    // En HTML, le mail ouvert comme les plus anciens du fil : c'est là que se voient ses tableaux, ses images et la limite de sa signature.
     const m = await json<MailComplet>('Outlook', `${url}?$select=${champs}`, auth);
     const corps = m.body?.contentType?.toLowerCase() === 'html' ? htmlEnBlocs(m.body.content || '') : null;
     const cids = corps ? cidsDe(corps) : [];
@@ -325,7 +324,7 @@ export const microsoft: Connecteur = {
     if (m.isRead === false && !ou?.garderNonLu) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
     // Les messages plus anciens de la conversation (sans tri côté Graph, qui refuse filtre et tri sur ces champs ensemble).
     const conv = m.conversationId
-      ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '25', $select: champs })}`, texte).catch(() => ({ value: [] }))).value ?? [])
+      ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '25', $select: champs })}`, auth).catch(() => ({ value: [] }))).value ?? [])
       : [];
     // Les autres messages non lus de la conversation aussi : la liste de Me montre la conversation entière comme non lue.
     if (!ou?.garderNonLu) await Promise.all(conv.filter((x) => x.id !== m.id && x.isRead === false && !x.isDraft).map((x) => json('Outlook', `${base}/messages/${encodeURIComponent(x.id)}`, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {})));
@@ -346,12 +345,16 @@ export const microsoft: Connecteur = {
       date: d?.date,
       heure: d?.heure,
       texte: corps ? texteComplet(corps) : corpsTexte(m),
+      ...(corps ? { message: texteDeBlocs(corps.blocs) } : {}),
       ...(riche ? { riche } : {}),
       // Une image insérée dans le texte (logo de signature) n'est pas une pièce jointe, même si elle n'a pas pu s'afficher.
       piecesJointes: pieces.filter((p) => !affichees.has(p.id) && !(corps && p.isInline && p.contentType?.toLowerCase().startsWith('image/'))).map((p) => p.name).filter((n): n is string => !!n),
       lien: m.webLink,
       libelles: m.categories ?? [],
-      fil: avant.map((x) => ({ id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, texte: corpsTexte(x), piecesJointes: [] })),
+      fil: avant.map((x) => {
+        const lu = x.body?.contentType?.toLowerCase() === 'html' ? messageDuFil(x.body.content || '', ou?.riche) : null;
+        return { id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, ...(lu ?? { texte: corpsTexte(x) }), piecesJointes: [] };
+      }),
     };
   },
 

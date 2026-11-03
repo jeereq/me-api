@@ -70,16 +70,18 @@ export type MailLisible = {
   adresse?: string;
   date?: string;
   texte?: string;
+  /** Le message seul, sans signature ni citation, quand le mail est en HTML. */
+  message?: string;
   piecesJointes?: string[];
-  fil?: { de?: string; date?: string; texte?: string }[];
+  fil?: { de?: string; date?: string; texte?: string; message?: string }[];
 };
 
 /** Un mail lu en entier, ramené à ce qui sert à l'analyse : texte nettoyé, derniers messages du fil, pièces jointes. */
 export function mailPourIA(ref: string, m: MailLisible, boite: string, extrait?: string) {
-  const texte = texteUtile(m.texte || extrait || '').slice(0, MAX_TEXTE_MAIL);
+  const texte = texteUtile(m.message?.trim() || m.texte || extrait || '').slice(0, MAX_TEXTE_MAIL);
   const precedents = (m.fil ?? [])
     .slice(-MAX_PRECEDENTS)
-    .map((x) => ({ de: x.de ?? '', ...(x.date ? { date: x.date } : {}), texte: texteUtile(x.texte ?? '').slice(0, MAX_TEXTE_PRECEDENT) }))
+    .map((x) => ({ de: x.de ?? '', ...(x.date ? { date: x.date } : {}), texte: texteUtile(x.message?.trim() || x.texte || '').slice(0, MAX_TEXTE_PRECEDENT) }))
     .filter((x) => x.texte);
   const pj = (m.piecesJointes ?? []).filter(Boolean).slice(0, MAX_PIECES_JOINTES);
   return {

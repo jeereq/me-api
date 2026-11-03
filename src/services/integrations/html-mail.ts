@@ -593,6 +593,16 @@ export const texteComplet = (c: CorpsRiche) => nettoyerTexte([c.blocs, c.signatu
 
 export const enMailRiche = (c: CorpsRiche): MailRiche => ({ ...c, aLire: texteDeBlocs(c.blocs) });
 
+/**
+ * Un ancien message d'un fil, découpé comme le mail ouvert : sa signature à part, son message seul.
+ * Ses images jointes ne sont pas chargées, et ce qu'il cite est déjà dans le fil.
+ */
+export function messageDuFil(html: string, riche?: boolean): { texte: string; message: string; riche?: MailRiche } | null {
+  const c = htmlEnBlocs(html);
+  if (!c) return null;
+  return { texte: texteComplet(c), message: texteDeBlocs(c.blocs), ...(riche ? { riche: enMailRiche(poserImages({ ...c, cite: [] }, new Map())) } : {}) };
+}
+
 const visiter = (blocs: BlocMail[], f: (im: ImageMail) => void) => {
   for (const b of blocs) {
     if (b.t === 'images') b.items.forEach(f);
