@@ -1,7 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
-import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, statutLivraison, texteCode, type ConfigSms } from './sms/asmsc.js';
+import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, placeSms, statutLivraison, texteCode, type ConfigSms } from './sms/asmsc.js';
 
 /** Un code reçu par SMS sert 10 minutes. */
 const VALIDITE_CODE_MS = 10 * 60 * 1000;
@@ -77,12 +77,12 @@ export const SmsService = {
    * Envoie un SMS à un compte, dans la limite du jour. Ne lève jamais : un SMS perdu ne doit pas arrêter les rappels.
    * Le texte et le numéro ne sont pas gardés dans l'historique : seulement la date et l'état.
    */
-  async envoyer(userId: string, telephone: string, texte: string): Promise<boolean> {
+  async envoyer(userId: string, telephone: string, texte: string, secondaire = false): Promise<boolean> {
     const cfg = configSms();
     if (!cfg) return false;
     const depuis = new Date(Date.now() - JOUR_MS);
     // Un envoi refusé par le service (sans identifiant de message) n'a rien coûté : il ne compte pas dans la limite.
-    if ((await prisma.envoiSms.count({ where: { userId, createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } })) >= maxParJour()) return false;
+    if (!placeSms(await prisma.envoiSms.count({ where: { userId, createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } }), maxParJour(), secondaire)) return false;
     const envoi = await prisma.envoiSms.create({ data: { userId } });
     try {
       const r = await Asmsc.envoyer(cfg, { telephone, texte, uid: envoi.id, retour: adresseRetour() });
