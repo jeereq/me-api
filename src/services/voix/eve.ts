@@ -1,4 +1,6 @@
 import { createHash, randomBytes } from 'crypto';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 
 import { HttpError } from '../../utils/http.js';
 import { prisma } from '../../utils/prisma.js';
@@ -6,9 +8,10 @@ import { prisma } from '../../utils/prisma.js';
 /**
  * Eve, la voix de l'app : ElevenLabs lit le texte, et l'audio reste quelques minutes en mémoire pour que le lecteur
  * (navigateur, iPhone, Android) le demande par une adresse. Se paie au caractère : d'où les plafonds, et les mêmes phrases relues sans repayer.
+ * La voix naît de l'enregistrement `assets/eve.mp3`, une seule fois, à la première lecture ; `ELEVENLABS_VOICE_ID` permet d'en imposer une autre.
  */
 const cle = () => process.env.ELEVENLABS_API_KEY?.trim() || '';
-const voixId = () => process.env.ELEVENLABS_VOICE_ID?.trim() || '';
+const voixImposee = () => process.env.ELEVENLABS_VOICE_ID?.trim() || '';
 const modele = () => process.env.ELEVENLABS_MODEL?.trim() || 'eleven_flash_v2_5';
 const nombre = (brut: string | undefined, defaut: number) => {
   const n = Number(brut);
@@ -42,10 +45,46 @@ export function lirePlage(entete: string | undefined, taille: number): { debut: 
   return debut <= fin && debut < taille ? { debut, fin } : null;
 }
 
+const CLE_VOIX = 'eve_voice_id';
+let voixCreee: string | null = null;
+let creation: Promise<string> | null = null;
+
+/** Crée la voix chez ElevenLabs à partir de l'enregistrement. */
+async function creerVoix(): Promise<string> {
+  const corps = new FormData();
+  corps.append('name', 'Eve');
+  corps.append('description', 'La voix de l’app Me');
+  corps.append('labels', JSON.stringify({ language: 'fr', gender: 'female' }));
+  corps.append('files', new Blob([await readFile(join(process.cwd(), 'assets/eve.mp3'))], { type: 'audio/mpeg' }), 'eve.mp3');
+  const r = await fetch('https://api.elevenlabs.io/v1/voices/add', { method: 'POST', headers: { 'xi-api-key': cle() }, body: corps, signal: AbortSignal.timeout(60_000) });
+  if (!r.ok) throw new Error(`ElevenLabs a refusé de créer la voix (${r.status}) : ${(await r.text().catch(() => '')).slice(0, 300)}`);
+  const v = (await r.json()) as { voice_id?: string; requires_verification?: boolean };
+  if (!v.voice_id) throw new Error('ElevenLabs n’a pas renvoyé d’identifiant de voix.');
+  if (v.requires_verification) console.warn('ElevenLabs demande de vérifier la voix Eve : à faire dans ton compte ElevenLabs.');
+  return v.voice_id;
+}
+
+/** La voix à utiliser : celle imposée, sinon celle déjà créée, sinon elle se crée maintenant. */
+async function voixEve(): Promise<string> {
+  if (voixImposee()) return voixImposee();
+  if (voixCreee) return voixCreee;
+  // Deux lectures simultanées ne créent qu'une voix.
+  creation ??= (async () => {
+    const lu = await prisma.reglageServeur.findUnique({ where: { cle: CLE_VOIX } });
+    const id = lu?.valeur ?? (await creerVoix());
+    if (!lu) await prisma.reglageServeur.create({ data: { cle: CLE_VOIX, valeur: id } });
+    voixCreee = id;
+    return id;
+  })().finally(() => {
+    creation = null;
+  });
+  return creation;
+}
+
 async function synthese(texte: string): Promise<Buffer> {
   let r: Response;
   try {
-    r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voixId())}?output_format=mp3_44100_128`, {
+    r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(await voixEve())}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: { 'xi-api-key': cle(), 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
       body: JSON.stringify({ text: texte, model_id: modele(), language_code: 'fr' }),
@@ -85,7 +124,7 @@ async function preparer(texte: string, cleUsage: string, plafond: number, messag
 }
 
 export const Eve = {
-  configure: () => !!(cle() && voixId()),
+  configure: () => !!cle(),
 
   /** Pour un compte connecté : ce que l'app lit à voix haute. Au-delà du plafond du jour, l'app reprend la voix du téléphone. */
   dire: (userId: string, texte: string, maintenant = new Date()) =>
