@@ -49,7 +49,24 @@ export function nettoyerTexte(t: string): string {
   return net.length > TEXTE_MAX ? `${net.slice(0, TEXTE_MAX).trimEnd()}\n\n[…] La suite est dans le mail d'origine.` : net;
 }
 
-export type PartieGmail = { mimeType?: string; filename?: string; body?: { data?: string; attachmentId?: string; size?: number }; parts?: PartieGmail[] };
+export type PartieGmail = { mimeType?: string; filename?: string; headers?: { name?: string; value?: string }[]; body?: { data?: string; attachmentId?: string; size?: number }; parts?: PartieGmail[] };
+export type ImageGmail = { cid: string; mimeType?: string; filename?: string; attachmentId?: string; data?: string; size: number };
+
+/** Le HTML d'un message Gmail, et les images jointes que ce HTML peut afficher (« cid: »), par identifiant brut. */
+export function htmlDeGmail(payload: PartieGmail | undefined): { html: string; images: ImageGmail[] } {
+  const htmls: string[] = [];
+  const images: ImageGmail[] = [];
+  const parcourir = (p: PartieGmail | undefined) => {
+    if (!p) return;
+    const cid = p.headers?.find((h) => h.name?.toLowerCase() === 'content-id')?.value;
+    if (cid && p.mimeType?.toLowerCase().startsWith('image/') && (p.body?.attachmentId || p.body?.data)) {
+      images.push({ cid, mimeType: p.mimeType, filename: p.filename, attachmentId: p.body.attachmentId, data: p.body.data, size: p.body.size ?? 0 });
+    } else if (!p.filename && p.body?.data && p.mimeType === 'text/html') htmls.push(depuisBase64Url(p.body.data));
+    p.parts?.forEach(parcourir);
+  };
+  parcourir(payload);
+  return { html: htmls.join('\n'), images };
+}
 
 /** Le texte d'un message Gmail : la partie texte de préférence, sinon le HTML converti ; et les noms des pièces jointes. */
 export function texteDeGmail(payload: PartieGmail | undefined): { texte: string; piecesJointes: string[] } {

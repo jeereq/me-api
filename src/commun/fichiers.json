@@ -10,6 +10,7 @@
     "patch.ts",
     "prets.ts",
     "previsions.ts",
-    "projets.ts"
+    "projets.ts",
+    "signature.ts"
   ]
 }
