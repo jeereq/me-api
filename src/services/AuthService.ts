@@ -9,6 +9,7 @@ import { HttpError } from '../utils/http.js';
 import { generateToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
 import { EmailsCompte, emailsActifs, adresseApp, lienReinitialisation } from './comptes/emails.js';
+import { normaliserTelephone } from './abonnements/flexpaie.js';
 import { SmsService } from './SmsService.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
@@ -16,7 +17,7 @@ import { StockJustificatifs } from './justificatifs/stock.js';
 
 type Compte = { id: string; email: string; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
 
-const publicUser = (u: Compte) => ({ id: u.id, email: u.email, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
+const publicUser = (u: Compte) => ({ id: u.id, email: u.email, emailVerifie: u.emailVerifie, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
 // Les jetons de session ont une précision à la seconde : on tronque pour que la session ouverte juste après reste valable.
 const maintenant = () => new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -47,18 +48,52 @@ async function envoyerVerification(user: { id: string; email: string }) {
 
 export const AuthService = {
   /** Ce que l'écran de connexion peut proposer. */
-  options: () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms() }),
+  options: async () => ({ google: ConnexionGoogle.configure(), email: emailsActifs(), oubli: emailsActifs() || oubliParSms(), sms: await SmsService.inscriptionOuverte() }),
 
   /**
-   * Inscription. Si les emails de compte sont configurés, le compte attend la confirmation de l'adresse
-   * avant la première connexion ; sinon il est utilisable tout de suite.
+   * Inscription. La personne choisit comment confirmer son compte : par email, ou par un code reçu par SMS.
+   * Par email, si les emails de compte sont configurés, le compte attend la confirmation ; sinon il est utilisable tout de suite.
+   * Par SMS, l'adresse n'est pas prouvée : aucun email ne lui part tant qu'elle n'est pas confirmée.
    */
-  async register(email: string, password: string, nom = '') {
+  async register(email: string, password: string, nom = '', choix: { confirmation?: 'email' | 'sms'; telephone?: string } = {}) {
+    if (choix.confirmation === 'sms') return this.registerSms(email, password, nom, choix.telephone ?? '');
     const verifier = emailsActifs();
     const user = await creerCompte({ email, nom, passwordHash: await bcrypt.hash(password, 12), emailVerifie: !verifier });
     if (!verifier) return session(user);
     await envoyerVerification(user);
     return { verification: true, email: user.email };
+  },
+
+  async registerSms(email: string, password: string, nom: string, brut: string) {
+    if (!(await SmsService.inscriptionOuverte())) throw new HttpError(503, 'La confirmation par SMS n’est pas disponible. Choisis l’email.');
+    const telephone = normaliserTelephone(brut);
+    if (!telephone) throw new HttpError(400, 'Numéro invalide. Exemple : 243 81 234 5678.');
+    // Un numéro, un compte : sinon un même téléphone ouvrirait autant d'essais Pro que d'adresses inventées.
+    if (await prisma.user.findFirst({ where: { OR: [{ telephone }, { telephoneEnAttente: telephone, smsVerificationLe: { gte: new Date(Date.now() - 86_400_000) } }] }, select: { id: true } })) throw new HttpError(409, 'Ce numéro a déjà un compte. Connecte-toi, ou choisis l’email.');
+    if (await SmsService.plafondInscriptionsAtteint()) throw new HttpError(429, 'Trop d’inscriptions par SMS aujourd’hui. Choisis l’email, ou réessaie demain.');
+    const user = await creerCompte({ email, nom, passwordHash: await bcrypt.hash(password, 12), emailVerifie: false, telephoneEnAttente: telephone });
+    if (!(await SmsService.codeInscription(user.id, telephone))) {
+      // Sans code reçu, le compte ne servirait à rien et bloquerait l'adresse.
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+      throw new HttpError(502, 'Le SMS n’a pas pu partir. Vérifie le numéro, ou choisis l’email.');
+    }
+    return { verification: true, par: 'sms', email: user.email, telephone };
+  },
+
+  /** Le code reçu par SMS confirme le compte et ouvre sa session. */
+  async confirmerSms(email: string, code: string) {
+    const u = await prisma.user.findUnique({ where: { email } });
+    if (!u?.telephoneEnAttente || u.telephone || u.emailVerifie) throw new HttpError(400, 'Code expiré. Demande-en un nouveau.');
+    await SmsService.confirmerCode(u.id, code);
+    return session(await prisma.user.findUniqueOrThrow({ where: { id: u.id } }));
+  },
+
+  /** Renvoie le code. Répond pareil que le compte existe ou non ; pas plus d'un code par minute. */
+  async renvoyerCodeSms(email: string) {
+    const u = await prisma.user.findUnique({ where: { email } });
+    const attendre = !!u?.smsVerificationLe && Date.now() - u.smsVerificationLe.getTime() < 60_000;
+    if (u?.telephoneEnAttente && !u.telephone && !u.emailVerifie && !attendre) await SmsService.codeInscription(u.id, u.telephoneEnAttente);
+    return { ok: true };
   },
 
   async login(email: string, password: string) {
@@ -67,7 +102,11 @@ export const AuthService = {
     if (!user?.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
       throw new HttpError(401, user && !user.passwordHash ? 'Ce compte se connecte avec Google, ou choisis un mot de passe avec « Mot de passe oublié ».' : 'Email ou mot de passe incorrect.');
     }
-    if (!user.emailVerifie && emailsActifs()) throw new HttpError(403, 'Confirme ton email avant de te connecter : ouvre le lien reçu à cette adresse.', 'EMAIL_NON_VERIFIE');
+    // Un numéro confirmé par SMS suffit pour entrer ; l'adresse, elle, reste à prouver.
+    if (!user.emailVerifie && !user.telephone) {
+      if (user.telephoneEnAttente) throw new HttpError(403, 'Entre le code reçu par SMS pour activer ton compte.', 'SMS_NON_VERIFIE');
+      if (emailsActifs()) throw new HttpError(403, 'Confirme ton email avant de te connecter : ouvre le lien reçu à cette adresse.', 'EMAIL_NON_VERIFIE');
+    }
     return session(user);
   },
 
@@ -102,8 +141,8 @@ export const AuthService = {
   async reinitialiser(jeton: string, password: string) {
     const u = await JetonService.consommer(jeton, 'REINITIALISATION', 'Ce lien n’est plus valable. Refais une demande de mot de passe oublié.');
     await JetonService.annulerTous(u.id, 'REINITIALISATION');
-    // Ouvrir le lien reçu par email prouve aussi l'adresse.
-    const user = await prisma.user.update({ where: { id: u.id }, data: { passwordHash: await bcrypt.hash(password, 12), motDePasseLe: maintenant(), emailVerifie: true } });
+    // Ouvrir le lien reçu par email prouve aussi l'adresse ; avec un numéro vérifié, il a pu arriver par SMS : rien n'est prouvé.
+    const user = await prisma.user.update({ where: { id: u.id }, data: { passwordHash: await bcrypt.hash(password, 12), motDePasseLe: maintenant(), emailVerifie: u.emailVerifie || !u.telephone } });
     return session(user);
   },
 

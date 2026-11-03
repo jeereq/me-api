@@ -54,7 +54,7 @@ export const NotificationService = {
     const smsActif = cfg.canaux?.sms !== false && SmsService.configure();
     const users = await prisma.user.findMany({
       select: {
-        id: true, email: true, nom: true, fuseau: true, telephone: true, espace: { select: { data: true } },
+        id: true, email: true, emailVerifie: true, nom: true, fuseau: true, telephone: true, espace: { select: { data: true } },
         role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true,
       },
     });
@@ -66,7 +66,9 @@ export const NotificationService = {
       const prefs = e.notifs ?? {};
       // Le SMS se demande : il coûte, et il faut un numéro vérifié.
       const parSmsPossible = smsActif && prefs.sms === true && !!u.telephone;
-      if (prefs.app === false && !(mailActif && prefs.email !== false) && !parSmsPossible) continue;
+      // Une adresse pas encore prouvée (compte confirmé par SMS) ne reçoit rien.
+      const parMailPossible = mailActif && prefs.email !== false && u.emailVerifie;
+      if (prefs.app === false && !parMailPossible && !parSmsPossible) continue;
       const { date, heure } = local(maintenant, u.fuseau);
       const nowLocal = `${date}T${heure}`;
       const depuis = local(new Date(maintenant.getTime() - RATTRAPAGE_MIN * 60000), u.fuseau);
@@ -92,7 +94,7 @@ export const NotificationService = {
         await PushService.envoyer(u.id, { ...m, tag: enPush[0].cle });
       }
       const parMail = nouveaux.filter((r) => r.canaux?.email !== false && horsApp(r));
-      if (parMail.length && mailActif && prefs.email !== false) {
+      if (parMail.length && parMailPossible) {
         const m = email(parMail, u.nom);
         if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) {
           await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });
@@ -108,7 +110,7 @@ export const NotificationService = {
   },
 
   /** Fin d'essai et fin de la période payée : un message par échéance, quels que soient les réglages de rappels. */
-  async avisAbonnements(users: ({ id: string; email: string; nom: string } & Parameters<typeof avisAbonnement>[0])[], maintenant: Date) {
+  async avisAbonnements(users: ({ id: string; email: string; emailVerifie: boolean; nom: string } & Parameters<typeof avisAbonnement>[0])[], maintenant: Date) {
     for (const u of users) {
       const avis = avisAbonnement(u, maintenant);
       if (avis) await this.envoyerAvis(u, avis, maintenant);
@@ -117,16 +119,16 @@ export const NotificationService = {
 
   /** Un avis d'abonnement pour un compte (ex. paiement confirmé en retard), envoyé une seule fois grâce à sa clé. */
   async avisCompte(userId: string, avis: AvisAbonnement, maintenant = new Date()) {
-    const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true } });
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, emailVerifie: true, nom: true } });
     if (u) await this.envoyerAvis(u, avis, maintenant);
   },
 
-  async envoyerAvis(u: { id: string; email: string; nom: string }, avis: AvisAbonnement, maintenant: Date) {
+  async envoyerAvis(u: { id: string; email: string; emailVerifie: boolean; nom: string }, avis: AvisAbonnement, maintenant: Date) {
     const cree = await prisma.notification.createMany({
       data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: maintenant.toISOString().slice(0, 16) }],
       skipDuplicates: true,
     });
-    if (!cree.count || !avis.parEmail || !EmailService.configure()) return;
+    if (!cree.count || !avis.parEmail || !u.emailVerifie || !EmailService.configure()) return;
     const m = email([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
     if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
   },
@@ -147,7 +149,7 @@ export const NotificationService = {
     for (const a of affectations) parPersonne.set(a.userId, [...(parPersonne.get(a.userId) ?? []), a]);
 
     for (const [userId, liste] of parPersonne) {
-      const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, nom: true, telephone: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true, espace: { select: { data: true } } } });
+      const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, emailVerifie: true, nom: true, telephone: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true, espace: { select: { data: true } } } });
       if (!u) continue;
       const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
       const qui = acteur.nom || "Quelqu'un";
@@ -171,7 +173,7 @@ export const NotificationService = {
         const m = avis.length === 1 ? { titre: avis[0].titre, corps: avis[0].corps } : { titre: resume, corps: avis.map((r) => r.corps.split(' · ')[0]).join(' · ') };
         await PushService.envoyer(userId, { ...m, mode: 'normal', url: genres.size === 1 ? URL_AFFECTATION[liste[0].genre] : '/', tag: avis[0].cle });
       }
-      if (mailActif && prefs.email !== false) {
+      if (mailActif && prefs.email !== false && u.emailVerifie) {
         const sujet = avis.length === 1 ? avis[0].titre : resume;
         const m = email(avis, u.nom, `Tu reçois cet email parce que quelque chose t'a été confié dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
         if (await EmailService.envoyer(u.email, sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId, cle: { in: avis.map((r) => r.cle) } }, data: { parEmail: true } });
@@ -199,6 +201,7 @@ export const NotificationService = {
     await prisma.notification.create({ data: { userId, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand } });
     const push = await PushService.envoyer(userId, { titre: r.titre, corps: r.corps, mode: r.mode, tag: r.cle });
     if (!EmailService.configure()) return { email: false, push, raison: "SendGrid n'est pas configuré sur le serveur." };
+    if (!u.emailVerifie) return { email: false, push, raison: 'Confirme ton adresse email pour en recevoir.' };
     const m = email([r], u.nom);
     const ok = await EmailService.envoyer(u.email, m.sujet, m.texte, m.html);
     if (!ok) throw new HttpError(502, "SendGrid a refusé l'envoi : vérifie la clé et l'expéditeur.");
