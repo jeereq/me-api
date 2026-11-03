@@ -110,7 +110,7 @@ export const NotificationService = {
   },
 
   /** Fin d'essai et fin de la période payée : un message par échéance, quels que soient les réglages de rappels. */
-  async avisAbonnements(users: ({ id: string; email: string; emailVerifie: boolean; nom: string } & Parameters<typeof avisAbonnement>[0])[], maintenant: Date) {
+  async avisAbonnements(users: ({ id: string; email: string | null; emailVerifie: boolean; nom: string } & Parameters<typeof avisAbonnement>[0])[], maintenant: Date) {
     for (const u of users) {
       const avis = avisAbonnement(u, maintenant);
       if (avis) await this.envoyerAvis(u, avis, maintenant);
@@ -123,7 +123,7 @@ export const NotificationService = {
     if (u) await this.envoyerAvis(u, avis, maintenant);
   },
 
-  async envoyerAvis(u: { id: string; email: string; emailVerifie: boolean; nom: string }, avis: AvisAbonnement, maintenant: Date) {
+  async envoyerAvis(u: { id: string; email: string | null; emailVerifie: boolean; nom: string }, avis: AvisAbonnement, maintenant: Date) {
     const cree = await prisma.notification.createMany({
       data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: maintenant.toISOString().slice(0, 16) }],
       skipDuplicates: true,
