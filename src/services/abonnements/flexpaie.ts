@@ -69,14 +69,16 @@ export function erreurFlexpaie(message: string | undefined, repli: string): Erre
 
 /**
  * Numéro au format attendu (indicatif sans « + », ex. 243812345678). Un numéro congolais écrit en local
- * (0812345678) reçoit l'indicatif 243. Renvoie null si ce n'est pas un numéro plausible.
+ * (0812345678) reçoit l'indicatif 243. Avec un « + » ou un « 00 », le pays est explicite : les numéros courts (Danemark, Singapour)
+ * passent. Renvoie null si ce n'est pas un numéro plausible.
  */
 export function normaliserTelephone(brut: string): string | null {
   let n = brut.replace(/[\s.()-]/g, '');
-  if (n.startsWith('+')) n = n.slice(1);
-  else if (n.startsWith('00')) n = n.slice(2);
-  else if (/^0\d{9}$/.test(n)) n = `243${n.slice(1)}`;
-  return /^\d{11,15}$/.test(n) ? n : null;
+  const international = /^(\+|00)/.test(n);
+  n = n.replace(/^(\+|00)/, '');
+  if (!international && /^0\d{9}$/.test(n)) n = `243${n.slice(1)}`;
+  if (/^2430\d{9}$/.test(n)) n = `243${n.slice(4)}`;
+  return (international ? /^\d{8,15}$/ : /^\d{11,15}$/).test(n) ? n : null;
 }
 
 /** Montant en centimes → chaîne décimale (499 → « 4.99 »). */
