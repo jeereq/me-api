@@ -105,6 +105,8 @@ function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: 
   return { summary: v.titre, ...(v.lieu ? { location: v.lieu } : {}), ...quand };
 }
 
+const urlModifier = (m: { mailId: string; fil?: string }) => (m.fil ? `${GMAIL}/threads/${encodeURIComponent(m.fil)}/modify` : `${GMAIL}/messages/${encodeURIComponent(m.mailId)}/modify`);
+
 export const google: Connecteur = {
   fournisseur: 'GOOGLE',
   nom: 'Google',
@@ -365,6 +367,14 @@ export const google: Connecteur = {
     const corps = { addLabelIds: [d.dossier], removeLabelIds: d.depuis && d.depuis !== d.dossier ? [d.depuis] : [] };
     const url = d.fil ? `${GMAIL}/threads/${encodeURIComponent(d.fil)}/modify` : `${GMAIL}/messages/${encodeURIComponent(d.mailId)}/modify`;
     await json('Gmail', url, corpsJson(accessToken, 'POST', corps));
+  },
+
+  async marquerLu({ accessToken }, m) {
+    await json('Gmail', urlModifier(m), corpsJson(accessToken, 'POST', { removeLabelIds: ['UNREAD'] }));
+  },
+
+  async archiver({ accessToken }, m) {
+    await json('Gmail', urlModifier(m), corpsJson(accessToken, 'POST', { removeLabelIds: ['INBOX', 'UNREAD'] }));
   },
 
   async envoyer({ accessToken }, n) {

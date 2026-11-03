@@ -126,3 +126,9 @@ export function rangerMails(mails: MailImporte[], max = 25): MailImporte[] {
   }
   return [...parFil.values()].sort((a, b) => quand(b).localeCompare(quand(a))).slice(0, max);
 }
+
+/** Les mails gardés d'un compte après un tri : marqués comme lus, ou retirés de la réception s'ils sont archivés. */
+export function mailsApresTri<M extends { id: string; nonLu?: boolean }>(mails: M[], ids: string[], action: 'lu' | 'archiver'): M[] {
+  const faits = new Set(ids);
+  return mails.filter((m) => action !== 'archiver' || !faits.has(m.id)).map((m) => (faits.has(m.id) ? { ...m, nonLu: false } : m));
+}

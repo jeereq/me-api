@@ -86,6 +86,9 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
   mailDuFil: async (req: Request, res: Response) => {
     res.json(await IntegrationService.mailDuFil(req.user!.id, req.params.id, req.params.fil));
   },
+  trierMails: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.trierMails(req.user!.id, req.params.id, req.body.action, req.body.mails));
+  },
   deplacer: async (req: Request, res: Response) => {
     await IntegrationService.deplacer(req.user!.id, req.params.id, req.params.mail, req.body);
     res.status(204).end();

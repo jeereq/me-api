@@ -5,7 +5,7 @@ import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
-import { boitesValides, chargementValide, choixValides, type MailImporte } from './integrations/choix.js';
+import { boitesValides, chargementValide, choixValides, mailsApresTri, type MailImporte } from './integrations/choix.js';
 import { adresses, ErreurSaisie } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
@@ -290,6 +290,35 @@ export const IntegrationService = {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'deplacer');
     const garde = this._mailGarde(i, mailId);
     await this._ecrire(() => c.deplacer!(jetons, { mailId, fil: garde?.fil, boite: garde?.boite, dossier: d.dossier, depuis: d.depuis ?? garde?.dossier ?? (i.fournisseur === 'GOOGLE' ? 'INBOX' : undefined) }), i);
+  },
+
+  /** Marque comme lus ou archive plusieurs mails : l'échec de l'un n'arrête pas les suivants, et l'app sait lesquels sont passés. */
+  async trierMails(userId: string, id: string, action: 'lu' | 'archiver', mailIds: string[]) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, action === 'lu' ? 'marquerLu' : 'archiver');
+    const faits: string[] = [];
+    const echecs: { id: string; message: string }[] = [];
+    const file = [...new Set(mailIds)];
+    const suivant = async () => {
+      for (let mailId = file.shift(); mailId; mailId = file.shift()) {
+        const garde = this._mailGarde(i, mailId);
+        const m = { mailId, fil: garde?.fil, boite: garde?.boite };
+        try {
+          await this._ecrire(() => (action === 'lu' ? c.marquerLu!(jetons, m) : c.archiver!(jetons, m)), i, false);
+          faits.push(mailId);
+        } catch (e) {
+          echecs.push({ id: mailId, message: (e as Error).message });
+        }
+      }
+    };
+    // Quelques-uns à la fois : Graph et Gmail limitent les appels par boîte.
+    await Promise.all(Array.from({ length: 4 }, suivant));
+    if (faits.length) {
+      const d = donneesDe(i);
+      await prisma.integration
+        .update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, mails: mailsApresTri(d.mails ?? [], faits, action), ...(d.vus ? { vus: mailsApresTri(d.vus, faits, 'lu') } : {}) }) as unknown as Prisma.InputJsonObject } })
+        .catch(() => {});
+    }
+    return { faits, echecs };
   },
 
   /**

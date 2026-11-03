@@ -184,6 +184,7 @@ export const chercherMailsSchema = integrationParamsSchema.extend({
     .refine((q) => !!(q.de || q.domaine || q.dossier || q.boite || q.depuis || q.jusqua || q.nonLus || q.pj || q.objet), { message: 'Choisis au moins une personne, un domaine, un dossier, une boîte, une période ou un filtre.' }),
 });
 export const filMailSchema = z.object({ params: z.object({ id: z.string().min(1), fil: z.string().min(1).max(500) }) });
+export const trierMailsSchema = z.object({ params: z.object({ id: z.string().min(1) }), body: z.object({ action: z.enum(['lu', 'archiver']), mails: z.array(z.string().min(1).max(500)).min(1).max(100) }) });
 export const deplacerMailSchema = lireMailSchema.extend({ body: z.object({ dossier: z.string().min(1).max(500), depuis: z.string().min(1).max(500).optional() }) });
 export const activerRegleSchema = z.object({ params: z.object({ id: z.string().min(1), regle: z.string().min(1).max(500) }), body: z.object({ active: z.boolean() }) });
 export const etiqueterMailSchema = lireMailSchema.extend({
