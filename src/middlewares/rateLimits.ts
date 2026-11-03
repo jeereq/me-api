@@ -16,6 +16,9 @@ export const authLimiter = [
 /** Inscription confirmée par SMS : chaque essai est un SMS payé, réussites comprises. 5 par heure et par IP. */
 export const inscriptionSmsLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, skip: (req) => req.body?.confirmation !== 'sms', standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Trop d’inscriptions par SMS. Réessaie dans une heure, ou choisis l’email.' } });
 
+/** Formulaire de contact, ouvert sans compte : 5 messages par heure et par IP. */
+export const contactLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Trop de messages envoyés. Réessaie dans une heure.' } });
+
 /** Emails de compte (confirmation, mot de passe oublié) : 5 / 15 min par email, 30 / 15 min par IP, réussites comprises. */
 export const mailLimiter = [
   rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, keyGenerator: emailKey, standardHeaders: 'draft-7', legacyHeaders: false, message }),

@@ -4,7 +4,7 @@ import { delai } from '../utils/delai.js';
 export const EmailService = {
   configure: () => !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM),
 
-  async envoyer(to: string, sujet: string, texte: string, html: string) {
+  async envoyer(to: string, sujet: string, texte: string, html: string, repondreA?: string) {
     if (!this.configure()) return false;
     try {
       const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
@@ -14,6 +14,7 @@ export const EmailService = {
         body: JSON.stringify({
           personalizations: [{ to: [{ email: to }] }],
           from: { email: process.env.SENDGRID_FROM, name: process.env.SENDGRID_FROM_NAME || 'Me' },
+          ...(repondreA ? { reply_to: { email: repondreA } } : {}),
           subject: sujet,
           content: [
             { type: 'text/plain', value: texte },
