@@ -1,7 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import type { AssistantBody } from '../validators/schemas.js';
 import { MODELE_DEFAUT, modeleFortChoisi, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
-import { consignesPropres, mailsImportants, preparerMails, reglesAnalyse, reglesAjustement, reglesBoucle, reglesRelecture, reglesTraduction, remplacerAnalyses, SCHEMA_AJUSTEMENT, SCHEMA_BOUCLE, SCHEMA_RELECTURE, SCHEMA_TRADUCTION, sansBalises, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_SYNTHESE, seulementCes } from './analyse-mails.js';
+import { consignesPropres, mailsImportants, preparerMails, reglesAnalyse, reglesAjustement, reglesBoucle, reglesEtiquettes, reglesRelecture, reglesTraduction, remplacerAnalyses, SCHEMA_AJUSTEMENT, SCHEMA_BOUCLE, SCHEMA_ETIQUETTES, SCHEMA_RELECTURE, SCHEMA_TRADUCTION, sansBalises, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_SYNTHESE, seulementCes } from './analyse-mails.js';
 import { ConfigService } from './ConfigService.js';
 import { nomApp } from '../commun/nom-app.js';
 import type { SCHEMA_FACTURE } from './justificatifs/lecture-ia.js';
@@ -28,7 +28,7 @@ async function openai(path: string, init: RequestInit = {}) {
  */
 export const raisonne = (modele: string) => /^(o\d|gpt-5)/.test(modele) && !/chat|o1-mini|o1-preview/.test(modele);
 /** Les réponses du copilote, de l'analyse des mails et des comptes rendus sont du JSON que l'app range en cases à cocher : plus longues, et forcées en JSON. */
-export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot' || type === 'synthese' || type === 'boucle' || type === 'relecture' || type === 'ajustement' || type === 'traduction' || type === 'compte_rendu';
+export const enJson = (type: AssistantBody['type']) => type === 'copilote' || type === 'mails' || type === 'lot' || type === 'synthese' || type === 'boucle' || type === 'relecture' || type === 'ajustement' || type === 'etiquettes' || type === 'traduction' || type === 'compte_rendu';
 /** Un message de la conversation envoyée à OpenAI. */
 /** Le nom sous lequel l'IA se présente : celui que l'utilisateur a donné à l'app, sinon « Me ». */
 const nomIA = (b: Pick<AssistantBody, 'nom'>) => nomApp(b.nom);
@@ -37,11 +37,11 @@ export type MessageIA = { role: 'system' | 'user'; content: string };
 /** Un message qui peut porter une image (lecture d'une facture) : texte et image en morceaux. */
 export type MessageVision = { role: 'system' | 'user'; content: string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } })[] };
 /** Forme de réponse imposée : `schema` (Structured Outputs, JSON validé champ par champ) ou simple objet JSON. */
-export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_MAILS | typeof SCHEMA_LOT | typeof SCHEMA_SYNTHESE | typeof SCHEMA_BOUCLE | typeof SCHEMA_RELECTURE | typeof SCHEMA_TRADUCTION | typeof SCHEMA_AJUSTEMENT | typeof SCHEMA_FACTURE } | { type: 'json_object' };
+export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_MAILS | typeof SCHEMA_LOT | typeof SCHEMA_SYNTHESE | typeof SCHEMA_BOUCLE | typeof SCHEMA_RELECTURE | typeof SCHEMA_TRADUCTION | typeof SCHEMA_AJUSTEMENT | typeof SCHEMA_ETIQUETTES | typeof SCHEMA_FACTURE } | { type: 'json_object' };
 
 /** La forme stricte attendue pour l'analyse des mails et d'un lot ; les autres réponses JSON restent libres. */
 export const schemaDe = (type: AssistantBody['type']): FormatJson | null =>
-  type === 'mails' ? { type: 'json_schema', json_schema: SCHEMA_MAILS } : type === 'lot' ? { type: 'json_schema', json_schema: SCHEMA_LOT } : type === 'synthese' ? { type: 'json_schema', json_schema: SCHEMA_SYNTHESE } : type === 'boucle' ? { type: 'json_schema', json_schema: SCHEMA_BOUCLE } : type === 'relecture' ? { type: 'json_schema', json_schema: SCHEMA_RELECTURE } : type === 'traduction' ? { type: 'json_schema', json_schema: SCHEMA_TRADUCTION } : type === 'ajustement' ? { type: 'json_schema', json_schema: SCHEMA_AJUSTEMENT } : null;
+  type === 'mails' ? { type: 'json_schema', json_schema: SCHEMA_MAILS } : type === 'lot' ? { type: 'json_schema', json_schema: SCHEMA_LOT } : type === 'synthese' ? { type: 'json_schema', json_schema: SCHEMA_SYNTHESE } : type === 'boucle' ? { type: 'json_schema', json_schema: SCHEMA_BOUCLE } : type === 'relecture' ? { type: 'json_schema', json_schema: SCHEMA_RELECTURE } : type === 'traduction' ? { type: 'json_schema', json_schema: SCHEMA_TRADUCTION } : type === 'ajustement' ? { type: 'json_schema', json_schema: SCHEMA_AJUSTEMENT } : type === 'etiquettes' ? { type: 'json_schema', json_schema: SCHEMA_ETIQUETTES } : null;
 /** Les réponses longues : un paquet de mails analysés, un lot, sa synthèse, le compte rendu d'une réunion entière. */
 export const longue = (type: AssistantBody['type']) => type === 'lot' || type === 'mails' || type === 'synthese' || type === 'boucle' || type === 'traduction' || type === 'compte_rendu';
 /** Ce qui passe au modèle fort quand l'admin en a choisi un : la synthèse d'un lot, une boucle, et les mails importants d'un paquet. */
@@ -111,6 +111,13 @@ export function messagesDe(b: AssistantBody): MessageIA[] {
       { role: 'user', content: `${consignesPrompt(b.consignes)}\nLa boucle :\n<mails>\n${donnees}\n</mails>` },
     ];
   }
+  if (b.type === 'etiquettes') {
+    const donnees = sansBalises(String(b.donnees ?? '').slice(0, MAX_DONNEES));
+    return [
+      { role: 'system', content: `Tu aides l'utilisateur à ranger ses mails. Réponds uniquement par un objet JSON de la forme imposée.\n${reglesEtiquettes()}` },
+      { role: 'user', content: `Le mail et les étiquettes :\n<mails>\n${donnees}\n</mails>` },
+    ];
+  }
   if (b.type === 'ajustement') {
     const donnees = sansBalises(String(b.donnees ?? '').slice(0, MAX_DONNEES));
     return [
@@ -165,7 +172,7 @@ export function prompt(b: AssistantBody): string {
 Données :
 ${donnees}`;
   }
-  if (b.type === 'mails' || b.type === 'lot' || b.type === 'synthese' || b.type === 'boucle' || b.type === 'relecture' || b.type === 'ajustement' || b.type === 'traduction') return messagesDe(b).map((m) => m.content).join('\n\n');
+  if (b.type === 'mails' || b.type === 'lot' || b.type === 'synthese' || b.type === 'boucle' || b.type === 'relecture' || b.type === 'ajustement' || b.type === 'etiquettes' || b.type === 'traduction') return messagesDe(b).map((m) => m.content).join('\n\n');
   if (b.type === 'compte_rendu') {
     return `Tu es « ${nomIA(b)} », le copilote de l'utilisateur. Voici le compte rendu qu'il vient de noter ou d'enregistrer (JSON ci-dessous : titre, date, jour de la semaine, genre, participants, projets rattachés, « notes » brutes, « transcription » : le texte d'un enregistrement audio de la réunion, parfois imparfait (mots mal compris, pas de ponctuation, plusieurs voix mêlées), « membres » (facultatif) : les membres de l'équipe, chacun avec sa « ref » et son nom, « projetsConnus » (facultatif) : ses projets, chacun avec sa « ref » et son nom, et « ouverts » : ses tâches et relances encore ouvertes qui y sont rattachées, chacune avec sa référence « ref »). Réponds uniquement par un objet JSON de la forme {"resume": "…", "decisions": ["…"], "actions": [{"genre": "tache|relance|habitude|mail", "titre": "…", "contact": "…", "responsable": "…", "priorite": "haute|moyenne|basse", "echeance": "AAAA-MM-JJ ou null", "frequence": "quotidien|hebdo|mensuel ou null", "jour": "nombre ou null", "heure": "HH:MM ou null", "corps": "…", "membre": "ref ou null", "projet": "ref ou null"}], "clotures": ["ref"]}.
 « resume » : 2 à 5 phrases en français${ton === 'neutre' ? '' : `, ton ${ton}`}, sans markdown, qui disent ce qui s'est dit et où en est le sujet. « decisions » : les décisions prises, une par entrée, courtes ; liste vide s'il n'y en a pas.
