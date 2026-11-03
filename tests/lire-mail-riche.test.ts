@@ -25,7 +25,7 @@ describe('lire un mail : Outlook', () => {
   const routes: [RegExp, unknown][] = [
     [/messages\/m1\/attachments\/a1$/, { id: 'a1', contentId: '<plan@x>', contentBytes: 'QUJD', contentType: 'image/png' }],
     [/messages\/m1\/attachments\/a2$/, { id: 'a2', contentId: 'logo@x', contentBytes: 'REVG', contentType: 'image/jpeg' }],
-    [/messages\/m1\/attachments\?/, { value: [{ id: 'a1', name: 'image001.png', size: 3, isInline: true, contentType: 'image/png' }, { id: 'a2', name: 'image002.jpg', size: 3, isInline: true, contentType: 'image/jpeg' }, { id: 'a3', name: 'devis.pdf', size: 3, isInline: false, contentType: 'application/pdf' }] }],
+    [/messages\/m1\/attachments\?/, { value: [{ id: 'a1', name: 'image001.png', size: 3, isInline: true, contentType: 'image/png' }, { id: 'a2', name: 'image002.jpg', size: 3, isInline: true, contentType: 'image/jpeg' }, { id: 'a3', name: 'devis.pdf', size: 3, isInline: false, contentType: 'application/pdf' }, { id: 'a4', name: 'trop-lourde.png', size: 9000000, isInline: true, contentType: 'image/png' }] }],
     [/messages\/m1\?/, { id: 'm1', subject: 'Devis', isRead: true, hasAttachments: false, body: { contentType: 'html', content: HTML }, from: { emailAddress: { name: 'Awa', address: 'a@x.com' } } }],
   ];
   it('pour l’écran : tableau, images jointes, signature à part, voix sans signature', async () => {

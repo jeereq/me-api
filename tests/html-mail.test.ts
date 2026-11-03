@@ -93,6 +93,48 @@ describe('mails HTML : signature et citation', () => {
     assert.equal(texte(c.signature), 'Awa');
     assert.ok(texte(c.cite).includes('Ancien message'));
   });
+  it('une seule signature : celles des anciens messages restent avec eux', () => {
+    const word = blocs('<p>Bonjour, voici.</p><p>Cordialement,</p><div style="border-top:solid #E1E1E1 1pt"><p><b>De&nbsp;:</b> Paul<br><b>Envoyé&nbsp;:</b> lundi</p></div><p>Message de Paul</p><div id="x_Signature"><p>Paul K</p></div><div style="border-top:solid"><p><b>De :</b> Awa<br><b>Envoyé :</b> dimanche</p></div><p>Message d’Awa</p><div id="x_x_Signature"><p>Awa D</p></div>');
+    assert.equal(texte(word.signature), '');
+    assert.equal(texte(word.blocs), 'Bonjour, voici.\n\nCordialement,');
+    assert.ok(texte(word.cite).includes('Paul K') && texte(word.cite).includes('Awa D'));
+    const chaine = blocs('<p>Oui.</p><div id="Signature"><p>Awa D</p></div><div id="x_Signature"><p>Paul K</p></div><div id="x_x_Signature"><p>Awa D</p></div>');
+    assert.equal(texte(chaine.signature), 'Awa D');
+    assert.equal(texte(chaine.cite), 'Paul K\n\nAwa D');
+  });
+  it('une signature imbriquée reste entière', () => {
+    const c = blocs('<p>Oui.</p><div id="Signature"><p>Awa</p><div class="ms-outlook-mobile-signature"><p>Directrice</p></div><p>Kinshasa</p></div>');
+    assert.equal(c.cite.length, 0);
+    assert.deepEqual(texte(c.signature).split('\n\n').sort(), ['Awa', 'Directrice', 'Kinshasa']);
+  });
+  it('version bureau et version mobile : seule celle qui se voit reste', () => {
+    const c = blocs('<style>.m{display:none}@media(max-width:480px){.d{display:none!important}.m{display:block!important}}</style><p>Oui.</p><div id="Signature"><div class="d"><p>Bureau</p></div><div class="m"><p>Mobile</p></div></div>');
+    assert.equal(texte(c.signature), 'Bureau');
+    assert.equal(texte(blocs('<p>Oui.</p><div id="Signature"><p>Awa</p><div style="height:0;overflow:hidden"><p>Caché</p></div></div>').signature), 'Awa');
+  });
+  it('une police à 0 seule ne cache rien', () => {
+    assert.equal(texte(blocs('<div style="font-size:0"><p style="font-size:14px">Colonne</p></div>').blocs), 'Colonne');
+  });
+  it('retire les doublons de la signature et du corps', () => {
+    const c = blocs('<p>Oui.</p><p>Awa Diallo</p><div id="Signature"><p>Awa Diallo</p><p>Directrice</p><p>Awa  Diallo</p><img src="https://x.com/l.png" width="90"><img src="https://x.com/l.png" width="90"></div>');
+    assert.equal(texte(c.blocs), 'Oui.');
+    assert.equal(texte(c.signature), 'Awa Diallo\n\nDirectrice');
+    const im = c.signature.find((b) => b.t === 'images') as Extract<BlocMail, { t: 'images' }>;
+    assert.equal(im.items.length, 1);
+  });
+  it('un bloc cité final se replie, une citation au milieu reste', () => {
+    const fin = blocs('<p>Oui.</p><div id="Signature"><p>Awa</p></div><blockquote><p>Ancien</p></blockquote>');
+    assert.equal(texte(fin.blocs), 'Oui.');
+    assert.equal(texte(fin.cite), 'Ancien');
+    const milieu = blocs('<blockquote><p>Question ?</p></blockquote><p>Ma réponse.</p>');
+    assert.equal(milieu.blocs[0].t, 'citation');
+    assert.equal(milieu.cite.length, 0);
+  });
+  it('un mail transféré sans un mot s’affiche déplié', () => {
+    const c = blocs('<div style="border-top:solid"><p><b>De :</b> Paul<br><b>Envoyé :</b> lundi</p></div><p>Le message transféré.</p>');
+    assert.ok(texte(c.blocs).includes('Le message transféré.'));
+    assert.equal(c.cite.length, 0);
+  });
   it('tolère le HTML mal fermé', () => {
     const c = blocs('<div><p>Un<p>Deux<ul><li>A<li>B</ul><table><tr><td>x<td>y<tr><td>1<td>2</table>');
     assert.deepEqual(c.blocs.map((b) => b.t), ['p', 'p', 'liste', 'table']);
