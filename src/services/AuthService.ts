@@ -15,7 +15,7 @@ import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
 
-type Compte = { id: string; email: string; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
+type Compte = { id: string; email: string; emailVerifie?: boolean; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
 
 const publicUser = (u: Compte) => ({ id: u.id, email: u.email, emailVerifie: u.emailVerifie, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
