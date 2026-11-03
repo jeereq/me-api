@@ -63,6 +63,8 @@ export type Regle = { id: string; nom: string; active: boolean; ordre: number; c
 export type LectureDossier = { dossier: string; boite?: string; suivant?: string; max: number; fuseau: string };
 /** Le fil d'un mail rattaché à une relance ou une tâche ; `moi` est l'adresse du compte (pour reconnaître un message envoyé). */
 export type LectureFil = { fil: string; fuseau: string; moi?: string };
+/** Un mail à marquer comme lu ou à archiver, avec tout son fil. */
+export type MailATrier = { mailId: string; fil?: string; boite?: string };
 export type Deplacement = { mailId: string; fil?: string; dossier: string; depuis?: string; boite?: string };
 
 export type Contexte = {
@@ -114,6 +116,10 @@ export interface Connecteur {
   mailDuFil?(jetons: Jetons, f: LectureFil): Promise<MailImporte | null>;
   /** Range un mail dans un autre dossier. */
   deplacer?(jetons: Jetons, d: Deplacement): Promise<void>;
+  /** Marque comme lu un mail et son fil, sans le télécharger. */
+  marquerLu?(jetons: Jetons, m: MailATrier): Promise<void>;
+  /** Sort un mail et son fil de la réception, et les marque comme lus. */
+  archiver?(jetons: Jetons, m: MailATrier): Promise<void>;
   /** Les règles de la boîte de réception. */
   regles?(jetons: Jetons): Promise<Regle[]>;
   /** Active ou coupe une règle. */

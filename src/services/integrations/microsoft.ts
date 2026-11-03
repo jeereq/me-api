@@ -5,7 +5,7 @@ import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, normali
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
 import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
-import { FIL_MAX, vide, type ChargementMails, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
+import { FIL_MAX, vide, type ChargementMails, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo, type MailATrier } from './types.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0/me';
 /** La racine des appels pour une boîte : la sienne (`/me`), ou une boîte partagée (`/users/{adresse}`). */
@@ -152,6 +152,25 @@ const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
   const { value = [] } = await json<{ value?: { id: string; name?: string; isDefaultCalendar?: boolean; hexColor?: string }[] }>('Outlook', `${GRAPH}/calendars?$select=id,name,isDefaultCalendar,hexColor&$top=50`, bearer(accessToken));
   return value.map((c) => ({ id: c.id, nom: c.name || 'Agenda', principal: c.isDefaultCalendar, visible: c.isDefaultCalendar !== false, couleur: c.hexColor && c.hexColor !== 'auto' ? c.hexColor : undefined }));
 };
+
+/** Les autres messages du fil : ceux qui sont non lus, et ceux rangés au même endroit que le mail. */
+async function filDe(accessToken: string, m: MailATrier) {
+  const base = racine(m.boite);
+  const auth = bearer(accessToken);
+  const lui = await json<{ conversationId?: string; parentFolderId?: string; isRead?: boolean }>('Outlook', `${base}/messages/${encodeURIComponent(m.mailId)}?$select=conversationId,parentFolderId,isRead`, auth);
+  const conv = m.fil ?? lui.conversationId;
+  const fil = conv
+    ? ((await json<{ value?: { id: string; isRead?: boolean; parentFolderId?: string }[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${conv.replace(/'/g, "''")}'`, $top: '25', $select: 'id,isRead,parentFolderId' })}`, auth).catch(() => ({ value: [] }))).value ?? [])
+    : [];
+  const autres = fil.filter((x) => x.id !== m.mailId);
+  return { nonLus: autres.filter((x) => x.isRead === false).map((x) => x.id), voisins: autres.filter((x) => x.parentFolderId === lui.parentFolderId).map((x) => x.id) };
+}
+
+async function marquerLus(accessToken: string, m: MailATrier, autres: string[]) {
+  const patch = (id: string) => json('Outlook', `${racine(m.boite)}/messages/${encodeURIComponent(id)}`, corpsJson(accessToken, 'PATCH', { isRead: true }));
+  await Promise.all(autres.map((id) => patch(id).catch(() => {})));
+  await patch(m.mailId);
+}
 
 export const microsoft: Connecteur = {
   fournisseur: 'MICROSOFT',
@@ -403,6 +422,20 @@ export const microsoft: Connecteur = {
 
   async deplacer({ accessToken }, d) {
     await json('Outlook', `${racine(d.boite)}/messages/${encodeURIComponent(d.mailId)}/move`, corpsJson(accessToken, 'POST', { destinationId: d.dossier }));
+  },
+
+  async marquerLu({ accessToken }, m) {
+    const { nonLus } = await filDe(accessToken, m);
+    await marquerLus(accessToken, m, nonLus);
+  },
+
+  async archiver({ accessToken }, m) {
+    const { nonLus, voisins } = await filDe(accessToken, m);
+    await marquerLus(accessToken, m, nonLus);
+    // Tout le fil rangé au même endroit part avec lui : sinon le plus ancien message le ramène dans la liste.
+    const url = (id: string) => `${racine(m.boite)}/messages/${encodeURIComponent(id)}/move`;
+    await Promise.all(voisins.map((id) => json('Outlook', url(id), corpsJson(accessToken, 'POST', { destinationId: 'archive' })).catch(() => {})));
+    await json('Outlook', url(m.mailId), corpsJson(accessToken, 'POST', { destinationId: 'archive' }));
   },
 
   async regles({ accessToken }) {
