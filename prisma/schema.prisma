@@ -78,6 +78,13 @@ model UsageVoix {
   @@id([cle, jour])
 }
 
+/// Petites valeurs propres au serveur, comme l'identifiant de la voix d'Eve créée chez ElevenLabs.
+model ReglageServeur {
+  cle    String   @id
+  valeur String
+  majLe  DateTime @default(now()) @updatedAt
+}
+
 model EnvoiSms {
   /// Renvoyé par aSMSC (« uid ») sur l'adresse de retour.
   id        String   @id @default(cuid())
