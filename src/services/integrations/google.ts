@@ -1,8 +1,8 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { base64Url, destinatairesReponse, lendemain, lireAdresses, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
+import { base64Url, destinatairesReponse, ErreurSaisie, lendemain, lireAdresses, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
-import { decoderEntites, htmlDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
+import { decoderEntites, htmlDeGmail, partieGmail, piecesDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
 import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
@@ -103,6 +103,14 @@ function corpsEvenement(e: { titre: string; date: string; debut?: string; fin?: 
     ? { start: { date: v.date }, end: { date: lendemain(v.date) } }
     : { start: { dateTime: `${v.date}T${v.debut}:00`, timeZone: e.fuseau }, end: { dateTime: `${v.date}T${v.fin}:00`, timeZone: e.fuseau } };
   return { summary: v.titre, ...(v.lieu ? { location: v.lieu } : {}), ...quand };
+}
+
+/** Envoie un message Gmail : un message avec pièces jointes passe par l'adresse d'envoi de fichiers, l'autre serait refusé au-delà de quelques Mo. */
+async function envoyerGmail(accessToken: string, message: string, fil?: string, avecPieces?: boolean) {
+  if (!avecPieces) return json<{ id: string; threadId: string }>('Gmail', `${GMAIL}/messages/send`, corpsJson(accessToken, 'POST', { raw: base64Url(message), ...(fil ? { threadId: fil } : {}) }));
+  const frontiere = `me-envoi-${Date.now().toString(36)}`;
+  const corps = [`--${frontiere}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify(fil ? { threadId: fil } : {}), `--${frontiere}`, 'Content-Type: message/rfc822', '', message, `--${frontiere}--`, ''].join('\r\n');
+  return json<{ id: string; threadId: string }>('Gmail', 'https://www.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart', { method: 'POST', signal: AbortSignal.timeout(120_000), headers: { ...bearer(accessToken).headers, 'Content-Type': `multipart/related; boundary=${frontiere}` }, body: corps });
 }
 
 const urlModifier = (m: { mailId: string; fil?: string }) => (m.fil ? `${GMAIL}/threads/${encodeURIComponent(m.fil)}/modify` : `${GMAIL}/messages/${encodeURIComponent(m.mailId)}/modify`);
@@ -235,14 +243,20 @@ export const google: Connecteur = {
   async repondre({ accessToken }, r) {
     // Sans choix, la réponse va à tout le monde, comme « Répondre à tous » : personne ne disparaît du fil.
     const tous = r.dest ?? (await this.destinataires!({ accessToken }, { mailId: r.mailId, boite: r.boite, moi: r.moi ?? [] }).then((d) => ({ a: d.a.map((p) => p.adresse), cc: d.cc.map((p) => p.adresse) })).catch(() => null));
-    const brut = base64Url(messageRfc822({ a: tous?.a.length ? tous.a : r.a, cc: tous?.a.length ? tous.cc : [], sujet: r.sujet, texte: r.texte, messageId: r.messageId, references: r.references }));
-    const env = await json<{ id: string; threadId: string }>('Gmail', `${GMAIL}/messages/send`, {
-      method: 'POST',
-      ...bearer(accessToken),
-      headers: { ...bearer(accessToken).headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw: brut, threadId: r.fil }),
-    });
+    const message = messageRfc822({ a: tous?.a.length ? tous.a : r.a, cc: tous?.a.length ? tous.cc : [], sujet: r.sujet, texte: r.texte, messageId: r.messageId, references: r.references, pieces: r.pieces });
+    const env = await envoyerGmail(accessToken, message, r.fil, !!r.pieces?.length);
     return { lien: lienMail(env.threadId || r.fil || env.id) };
+  },
+
+  async lirePiece({ accessToken }, { mailId, pieceId }) {
+    const auth = bearer(accessToken);
+    const url = `${GMAIL}/messages/${encodeURIComponent(mailId)}`;
+    const m = await json<Message>('Gmail', `${url}?format=full`, auth);
+    const p = partieGmail(m.payload, pieceId);
+    if (!p?.body?.attachmentId && !p?.body?.data) throw new ErreurSaisie('Cette pièce jointe n’est plus dans le mail.');
+    const donnee = p.body.data ?? (await json<{ data?: string }>('Gmail', `${url}/attachments/${encodeURIComponent(p.body.attachmentId ?? '')}`, { ...auth, signal: AbortSignal.timeout(120_000) })).data;
+    if (!donnee) throw new ErreurSaisie('Cette pièce jointe n’a pas pu être lue.');
+    return { nom: p.filename || 'piece-jointe', type: p.mimeType || 'application/octet-stream', octets: Buffer.from(donnee, 'base64url') };
   },
 
   async destinataires({ accessToken }, { mailId, moi }) {
@@ -295,6 +309,7 @@ export const google: Connecteur = {
       ...(lu ? { message: texteDeBlocs(lu.blocs) } : {}),
       ...(riche ? { riche } : {}),
       piecesJointes: piecesJointes.filter((n) => !sansImages.has(n)),
+      pieces: piecesDeGmail(m.payload, sansImages as Set<string>),
       lien: lienMail(m.threadId),
       libelles: nomsLibelles(m.labelIds, parId),
       fil: avant.map((x) => {
@@ -305,7 +320,7 @@ export const google: Connecteur = {
         const decoupe = messageDuFil(h.html, ou?.riche);
         // Les images du texte (logo de signature) ne sont pas des pièces jointes.
         const images = new Set(h.images.map((i) => i.filename).filter(Boolean));
-        return { id: x.id, de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, ...(decoupe ? { message: decoupe.message, ...(decoupe.riche ? { riche: decoupe.riche } : {}) } : {}), piecesJointes: c.piecesJointes.filter((n) => !images.has(n)) };
+        return { id: x.id, de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, ...(decoupe ? { message: decoupe.message, ...(decoupe.riche ? { riche: decoupe.riche } : {}) } : {}), piecesJointes: c.piecesJointes.filter((n) => !images.has(n)), pieces: piecesDeGmail(x.payload, images as Set<string>) };
       }),
     };
   },
@@ -392,7 +407,7 @@ export const google: Connecteur = {
   },
 
   async envoyer({ accessToken }, n) {
-    const env = await json<{ id: string; threadId: string }>('Gmail', `${GMAIL}/messages/send`, corpsJson(accessToken, 'POST', { raw: base64Url(messageNouveau(n)) }));
+    const env = await envoyerGmail(accessToken, messageNouveau(n), undefined, !!n.pieces?.length);
     return { lien: lienMail(env.threadId || env.id) };
   },
 

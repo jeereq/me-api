@@ -2,10 +2,33 @@ import { randomBytes } from 'crypto';
 import type { Request, Response } from 'express';
 
 import { IntegrationService, lireState } from '../services/IntegrationService.js';
+import { enTetesPiece, MAX_PIECES_OCTETS } from '../services/integrations/ecriture.js';
 import { expliquerRefus } from '../services/integrations/erreurs.js';
+import { lireFormulaire } from '../utils/formulaire.js';
+import { HttpError } from '../utils/http.js';
+import { envoyerMailSchema, repondreMailSchema } from '../validators/schemas.js';
 
 /** Renvoie vers l'app avec le résultat de la connexion. */
 const versApp = (retour: string, params: Record<string, string>) => `${retour}${retour.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`;
+
+/** Le résultat d'une vérification : un formulaire invalide est une erreur de saisie, pas une panne. */
+function valider<T>(r: { success: true; data: T } | { success: false; error: { issues: { message: string }[] } }): T {
+  if (!r.success) throw new HttpError(400, r.error.issues[0]?.message ?? 'Formulaire invalide.');
+  return r.data;
+}
+
+async function formulaireMail(req: Request) {
+  const form = await lireFormulaire(req, MAX_PIECES_OCTETS + 1024 * 1024, 'Pièces jointes trop lourdes : 20 Mo au plus par mail.');
+  let donnees: unknown;
+  try {
+    donnees = JSON.parse(String(form.get('donnees')));
+  } catch {
+    throw new HttpError(400, 'Formulaire illisible.');
+  }
+  const fichiers = form.getAll('pieces').flatMap((x) => (x instanceof File ? [x] : []));
+  const pieces = await Promise.all(fichiers.map(async (f) => ({ nom: f.name, type: f.type, octets: Buffer.from(await f.arrayBuffer()) })));
+  return { donnees, pieces };
+}
 
 export const IntegrationController = {
   liste: async (req: Request, res: Response) => {
@@ -68,6 +91,28 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
 
   repondre: async (req: Request, res: Response) => {
     res.json(await IntegrationService.repondre(req.user!.id, req.params.id, req.body.mail, req.body.texte, { a: req.body.a, cc: req.body.cc }));
+  },
+  /** Répondre avec des fichiers : le formulaire porte `donnees` (le JSON habituel) et les fichiers dans `pieces`. */
+  repondreAvecPieces: async (req: Request, res: Response) => {
+    const { donnees, pieces } = await formulaireMail(req);
+    const body = valider(repondreMailSchema.shape.body.safeParse(donnees));
+    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, body.mail, body.texte, { a: body.a, cc: body.cc }, pieces));
+  },
+  envoyerAvecPieces: async (req: Request, res: Response) => {
+    const { donnees, pieces } = await formulaireMail(req);
+    res.json(await IntegrationService.envoyer(req.user!.id, req.params.id, valider(envoyerMailSchema.shape.body.safeParse(donnees)), pieces));
+  },
+  lienPiece: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.lienPiece(req.user!.id, req.params.id, req.params.mail, req.params.piece, typeof req.body?.message === 'string' ? req.body.message.slice(0, 500) : undefined));
+  },
+  /** Ouvert par un lien, sans en-tête d'authentification : le lien signé en tient lieu. */
+  ouvrirPiece: async (req: Request, res: Response) => {
+    const p = await IntegrationService.ouvrirPiece(String(req.query.j ?? ''));
+    const en = enTetesPiece(p.nom, p.type);
+    res.setHeader('Content-Type', en.type);
+    res.setHeader('Content-Disposition', en.disposition);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.end(p.octets);
   },
   destinataires: async (req: Request, res: Response) => {
     res.json(await IntegrationService.destinataires(req.user!.id, req.params.id, req.params.mail));

@@ -4,6 +4,8 @@
  * Dates en texte « AAAA-MM-JJ », heures en « HH:MM ».
  */
 
+import { randomBytes } from 'node:crypto';
+
 export class ErreurSaisie extends Error {}
 
 /* ---------- Réponse à un mail ---------- */
@@ -13,6 +15,7 @@ export type Reponse = {
   a: string | string[];
   /** Les personnes en copie. */
   cc?: string[];
+  pieces?: PieceAJoindre[];
   sujet: string;
   texte: string;
   /** `Message-ID` du message d'origine : c'est lui qui raccroche la réponse au bon fil. */
@@ -38,6 +41,49 @@ export function enteteEncode(valeur: string): string {
 
 /** Une adresse seule : « Marie Dupont <marie@exemple.fr> » devient « marie@exemple.fr ». */
 export const adresseSeule = (v: string) => (v.match(/<([^>]+)>/)?.[1] ?? v).trim();
+
+/* ---------- Pièces jointes ---------- */
+
+export type PieceAJoindre = { nom: string; type: string; octets: Buffer };
+export const MAX_PIECES = 10;
+export const MAX_PIECES_OCTETS = 20 * 1024 * 1024;
+
+/** Un nom de fichier sans chemin ni retour à la ligne ni guillemet : il finit dans un en-tête. */
+export const nomDePiece = (nom: string) =>
+  nom
+    .replace(/^.*[\\/]/, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f"]/g, '')
+    .trim()
+    .slice(0, 200) || 'piece-jointe';
+
+/** Seuls les formats sans danger s'ouvrent dans le navigateur ; un fichier HTML ou SVG du mail ne doit pas s'exécuter sur l'adresse du serveur. */
+export function enTetesPiece(nom: string, type: string) {
+  const net = type.split(';')[0].trim().toLowerCase();
+  const aOuvrir = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain)$/.test(net);
+  const fichier = encodeURIComponent(nomDePiece(nom)).replace(/['()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return { type: aOuvrir ? net : 'application/octet-stream', disposition: `${aOuvrir ? 'inline' : 'attachment'}; filename*=UTF-8''${fichier}` };
+}
+
+/** Vérifie ce qu'on s'apprête à joindre : ni trop de fichiers, ni trop lourd, ni fichier vide. */
+export function verifierPieces(pieces: PieceAJoindre[]): PieceAJoindre[] {
+  if (pieces.length > MAX_PIECES) throw new ErreurSaisie(`${MAX_PIECES} pièces jointes au plus.`);
+  if (pieces.reduce((n, p) => n + p.octets.length, 0) > MAX_PIECES_OCTETS) throw new ErreurSaisie('Pièces jointes trop lourdes : 20 Mo au plus par mail.');
+  const vide = pieces.find((p) => !p.octets.length);
+  if (vide) throw new ErreurSaisie(`« ${vide.nom} » est vide.`);
+  return pieces.map((p) => ({ ...p, nom: nomDePiece(p.nom), type: /^[\w.+-]+\/[\w.+-]+$/.test(p.type) ? p.type : 'application/octet-stream' }));
+}
+
+/** Les en-têtes du message, puis son texte et ses pièces jointes. Sans pièce jointe, le message reste un simple texte. */
+function assembler(entetes: string[], texte: string, pieces: PieceAJoindre[] = [], frontiere = `me-${randomBytes(12).toString('hex')}`): string {
+  const simple = ['Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit'];
+  if (!pieces.length) return [...entetes, ...simple, '', texte].join('\r\n');
+  const parties = verifierPieces(pieces).map((p) => {
+    const nom = encodeURIComponent(p.nom).replace(/['()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+    return [`--${frontiere}`, `Content-Type: ${p.type}`, 'Content-Transfer-Encoding: base64', `Content-Disposition: attachment; filename*=UTF-8''${nom}`, '', (p.octets.toString('base64').match(/.{1,76}/g) ?? []).join('\r\n')].join('\r\n');
+  });
+  return [...entetes, `Content-Type: multipart/mixed; boundary="${frontiere}"`, '', `--${frontiere}`, ...simple, '', texte, ...parties, `--${frontiere}--`, ''].join('\r\n');
+}
 
 /** Une personne d'un mail. */
 export type Personne = { nom?: string; adresse: string };
@@ -103,11 +149,8 @@ export function messageRfc822(r: Reponse): string {
     r.messageId ? `In-Reply-To: ${r.messageId}` : '',
     r.messageId ? `References: ${[r.references, r.messageId].filter(Boolean).join(' ')}` : '',
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
   ].filter((l) => l !== '');
-  // La ligne vide sépare les en-têtes du texte : sans elle, le texte serait lu comme un en-tête.
-  return [...entetes, '', r.texte.trim()].join('\r\n');
+  return assembler(entetes, r.texte.trim(), r.pieces);
 }
 
 /* ---------- Nouveau mail ---------- */
@@ -125,21 +168,21 @@ export function adresses(v: string | undefined): string[] {
   return [...new Set(liste.map((x) => x.toLowerCase()))];
 }
 
-export type Nouveau = { a: string[]; cc?: string[]; sujet: string; texte: string };
+export type Nouveau = { a: string[]; cc?: string[]; sujet: string; texte: string; pieces?: PieceAJoindre[] };
 
 /** Vérifie un nouveau mail avant l'envoi : au moins un destinataire, un texte, et un objet (« (sans objet) » sinon). */
-export function verifierNouveau(m: Nouveau): Required<Nouveau> {
+export function verifierNouveau(m: Nouveau): Required<Omit<Nouveau, 'pieces'>> & Pick<Nouveau, 'pieces'> {
   if (!m.a.length) throw new ErreurSaisie('Indique à qui envoyer ce mail.');
   if (m.a.length + (m.cc?.length ?? 0) > 50) throw new ErreurSaisie('Cinquante destinataires au plus.');
   if (!m.texte.trim()) throw new ErreurSaisie('Écris ton message avant de l’envoyer.');
-  return { a: m.a, cc: m.cc ?? [], sujet: m.sujet.trim() || '(sans objet)', texte: m.texte.trim() };
+  return { a: m.a, cc: m.cc ?? [], sujet: m.sujet.trim() || '(sans objet)', texte: m.texte.trim(), ...(m.pieces?.length ? { pieces: verifierPieces(m.pieces) } : {}) };
 }
 
 /** Un nouveau mail au format RFC 2822, prêt à être envoyé par Gmail. */
 export function messageNouveau(m: Nouveau): string {
   const v = verifierNouveau(m);
-  const entetes = [`To: ${v.a.join(', ')}`, ...(v.cc.length ? [`Cc: ${v.cc.join(', ')}`] : []), `Subject: ${enteteEncode(v.sujet)}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit'];
-  return [...entetes, '', v.texte].join('\r\n');
+  const entetes = [`To: ${v.a.join(', ')}`, ...(v.cc.length ? [`Cc: ${v.cc.join(', ')}`] : []), `Subject: ${enteteEncode(v.sujet)}`, 'MIME-Version: 1.0'];
+  return assembler(entetes, v.texte, v.pieces);
 }
 
 /** Gmail attend le message en base64 « URL safe ». */

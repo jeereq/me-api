@@ -6,7 +6,7 @@ import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { boitesValides, chargementValide, choixValides, mailsApresTri, type MailImporte } from './integrations/choix.js';
-import { adresses, ErreurSaisie } from './integrations/ecriture.js';
+import { adresses, ErreurSaisie, type PieceAJoindre } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
@@ -348,18 +348,42 @@ export const IntegrationService = {
   },
 
   /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */
-  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }) {
+  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }, pieces: PieceAJoindre[] = []) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'repondre');
     const m = this._mailGarde(i, mailId);
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
     // Des destinataires choisis, vérifiés ; sans choix, la réponse va à toutes les personnes du mail.
     const dest = choix?.a?.length ? { a: adresses(choix.a.join(',')), cc: adresses((choix.cc ?? []).join(',')) } : undefined;
     // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.
-    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite, dest, moi: this._mesAdresses(i, m.boite) }), i, false);
+    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite, dest, moi: this._mesAdresses(i, m.boite), ...(pieces.length ? { pieces } : {}) }), i, false);
   },
 
   _mesAdresses(i: Integration, boite?: string) {
     return [i.compte, boite].filter((x): x is string => !!x);
+  },
+
+  /**
+   * Un lien court pour ouvrir une pièce jointe depuis l'app ou le navigateur, qui ne peuvent pas joindre un jeton de session à une adresse.
+   * `message` : un ancien message du fil ; la boîte (perso ou partagée) reste celle du mail de la liste.
+   */
+  async lienPiece(userId: string, id: string, mailId: string, pieceId: string, message?: string) {
+    const { i } = await this._pourEcrire(userId, id, 'lirePiece');
+    const boite = this._mailGarde(i, mailId)?.boite;
+    const jeton = jwt.sign({ typ: 'piece', userId, compte: id, mailId: message || mailId, pieceId, ...(boite ? { boite } : {}) }, process.env.JWT_SECRET as string, { expiresIn: '5m' });
+    return { url: `/api/integrations/pieces/ouvrir?j=${encodeURIComponent(jeton)}` };
+  },
+
+  /** La pièce jointe d'un lien : rien n'est gardé, elle est lue chez le service à chaque ouverture. */
+  async ouvrirPiece(jeton: string) {
+    let p: { typ?: string; userId: string; compte: string; mailId: string; pieceId: string; boite?: string };
+    try {
+      p = jwt.verify(jeton, process.env.JWT_SECRET as string) as typeof p;
+    } catch {
+      throw new HttpError(401, 'Ce lien a expiré : rouvre la pièce jointe depuis le mail.');
+    }
+    if (p.typ !== 'piece') throw new HttpError(401, 'Lien invalide.');
+    const { i, c, jetons } = await this._pourEcrire(p.userId, p.compte, 'lirePiece');
+    return this._ecrire(() => c.lirePiece!(jetons, { mailId: p.mailId, pieceId: p.pieceId, boite: p.boite }), i, false);
   },
 
   /** Qui recevrait une réponse à tous : pour le montrer et laisser choisir. */
@@ -419,9 +443,9 @@ export const IntegrationService = {
   },
 
   /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */
-  async envoyer(userId: string, id: string, m: { a: string; cc?: string; sujet?: string; texte: string }) {
+  async envoyer(userId: string, id: string, m: { a: string; cc?: string; sujet?: string; texte: string }, pieces: PieceAJoindre[] = []) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'envoyer');
-    return this._ecrire(() => c.envoyer!(jetons, { a: adresses(m.a), cc: adresses(m.cc), sujet: m.sujet ?? '', texte: m.texte }), i, false);
+    return this._ecrire(() => c.envoyer!(jetons, { a: adresses(m.a), cc: adresses(m.cc), sujet: m.sujet ?? '', texte: m.texte, ...(pieces.length ? { pieces } : {}) }), i, false);
   },
 
   async creerEvenement(userId: string, id: string, e: Omit<EcritureEvenement, 'fuseau'>) {

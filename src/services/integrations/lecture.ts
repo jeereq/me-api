@@ -49,7 +49,7 @@ export function nettoyerTexte(t: string): string {
   return net.length > TEXTE_MAX ? `${net.slice(0, TEXTE_MAX).trimEnd()}\n\n[…] La suite est dans le mail d'origine.` : net;
 }
 
-export type PartieGmail = { mimeType?: string; filename?: string; headers?: { name: string; value: string }[]; body?: { data?: string; attachmentId?: string; size?: number }; parts?: PartieGmail[] };
+export type PartieGmail = { partId?: string; mimeType?: string; filename?: string; headers?: { name: string; value: string }[]; body?: { data?: string; attachmentId?: string; size?: number }; parts?: PartieGmail[] };
 export type ImageGmail = { cid: string; mimeType?: string; filename?: string; attachmentId?: string; data?: string; size: number };
 
 /** Le HTML d'un message Gmail, et les images jointes que ce HTML peut afficher (« cid: »), par identifiant brut. */
@@ -83,4 +83,27 @@ export function texteDeGmail(payload: PartieGmail | undefined): { texte: string;
   parcourir(payload);
   const texte = plats.length ? nettoyerTexte(plats.join('\n\n')) : htmls.length ? htmlEnTexte(htmls.join('\n')) : '';
   return { texte, piecesJointes: pieces };
+}
+
+/** Les pièces jointes d'un message Gmail. Son repère est la partie du message : l'identifiant de pièce jointe de Gmail change d'une lecture à l'autre. */
+export function piecesDeGmail(payload: PartieGmail | undefined, sauf: Set<string> = new Set()): { id: string; nom: string; taille?: number; type?: string }[] {
+  const out: { id: string; nom: string; taille?: number; type?: string }[] = [];
+  const parcourir = (p: PartieGmail | undefined) => {
+    if (!p) return;
+    if (p.filename && p.partId && (p.body?.attachmentId || p.body?.size) && !sauf.has(p.filename)) out.push({ id: p.partId, nom: p.filename, ...(p.body?.size ? { taille: p.body.size } : {}), ...(p.mimeType ? { type: p.mimeType } : {}) });
+    p.parts?.forEach(parcourir);
+  };
+  parcourir(payload);
+  return out;
+}
+
+/** Une partie d'un message Gmail, par son repère. */
+export function partieGmail(payload: PartieGmail | undefined, partId: string): PartieGmail | null {
+  if (!payload) return null;
+  if (payload.partId === partId) return payload;
+  for (const p of payload.parts ?? []) {
+    const x = partieGmail(p, partId);
+    if (x) return x;
+  }
+  return null;
 }

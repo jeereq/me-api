@@ -1,5 +1,5 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { destinatairesReponse, ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
+import { destinatairesReponse, ErreurSaisie, lendemain as lendemainMS, verifierPieces, type PieceAJoindre, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteComplet, texteDeBlocs } from './html-mail.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
@@ -166,6 +166,38 @@ async function filDe(accessToken: string, m: MailATrier) {
   return { nonLus: autres.filter((x) => x.isRead === false).map((x) => x.id), voisins: autres.filter((x) => x.parentFolderId === lui.parentFolderId).map((x) => x.id) };
 }
 
+const SEUIL_PIECE = 3 * 1024 * 1024;
+const MORCEAU_PIECE = 3_276_800;
+
+/** Joint un fichier à un brouillon : directement sous 3 Mo, au-delà par une session d'envoi, morceau par morceau. */
+async function joindre(accessToken: string, base: string, brouillon: string, p: PieceAJoindre) {
+  const url = `${base}/messages/${encodeURIComponent(brouillon)}/attachments`;
+  if (p.octets.length < SEUIL_PIECE) {
+    await json('Outlook', url, corpsJson(accessToken, 'POST', { '@odata.type': '#microsoft.graph.fileAttachment', name: p.nom, contentType: p.type, contentBytes: p.octets.toString('base64') }));
+    return;
+  }
+  const { uploadUrl } = await json<{ uploadUrl: string }>('Outlook', `${url}/createUploadSession`, corpsJson(accessToken, 'POST', { AttachmentItem: { attachmentType: 'file', name: p.nom, size: p.octets.length, contentType: p.type } }));
+  for (let de = 0; de < p.octets.length; de += MORCEAU_PIECE) {
+    const morceau = p.octets.subarray(de, de + MORCEAU_PIECE);
+    // L'adresse de la session porte son propre droit : pas de jeton ici.
+    const res = await fetch(uploadUrl, { method: 'PUT', signal: AbortSignal.timeout(120_000), headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(morceau.length), 'Content-Range': `bytes ${de}-${de + morceau.length - 1}/${p.octets.length}` }, body: morceau });
+    if (!res.ok) throw new ErreurExterne(`« ${p.nom} » n’a pas pu être joint au mail.`);
+  }
+}
+
+/** Un brouillon prêt : ses destinataires, ses fichiers, puis l'envoi. Si quelque chose échoue, il est effacé : pas de brouillon oublié dans la boîte. */
+async function finirBrouillon(accessToken: string, base: string, id: string, pieces: PieceAJoindre[], changements?: object) {
+  const parti = `${base}/messages/${encodeURIComponent(id)}`;
+  try {
+    if (changements) await json('Outlook', parti, corpsJson(accessToken, 'PATCH', changements));
+    for (const p of pieces) await joindre(accessToken, base, id, p);
+    await json('Outlook', `${parti}/send`, corpsJson(accessToken, 'POST', {}));
+  } catch (e) {
+    await json('Outlook', parti, { ...bearer(accessToken), method: 'DELETE' }).catch(() => {});
+    throw e;
+  }
+}
+
 async function marquerLus(accessToken: string, m: MailATrier, autres: string[]) {
   const patch = (id: string) => json('Outlook', `${racine(m.boite)}/messages/${encodeURIComponent(id)}`, corpsJson(accessToken, 'PATCH', { isRead: true }));
   await Promise.all(autres.map((id) => patch(id).catch(() => {})));
@@ -295,22 +327,23 @@ export const microsoft: Connecteur = {
   async repondre({ accessToken }, r) {
     if (!r.texte.trim()) throw new ErreurSaisie('Écris ta réponse avant de l’envoyer.');
     const url = `${racine(r.boite)}/messages/${encodeURIComponent(r.mailId)}`;
-    // Sans choix, comme « Répondre à tous » : Graph reprend l'objet, le fil et toutes les personnes du mail.
-    if (!r.dest) {
+    // Sans choix ni fichier, comme « Répondre à tous » : Graph reprend l'objet, le fil et toutes les personnes du mail.
+    if (!r.dest && !r.pieces?.length) {
       await json('Outlook', `${url}/replyAll`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
       return {};
     }
-    // Avec un choix : un brouillon, dont on fixe les destinataires, pour envoyer exactement à ceux-là et à personne d'autre.
-    const brouillon = await json<{ id: string }>('Outlook', `${url}/createReply`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
-    const parti = `${racine(r.boite)}/messages/${encodeURIComponent(brouillon.id)}`;
-    try {
-      await json('Outlook', parti, corpsJson(accessToken, 'PATCH', { toRecipients: versGraph(r.dest.a), ccRecipients: versGraph(r.dest.cc) }));
-      await json('Outlook', `${parti}/send`, corpsJson(accessToken, 'POST', {}));
-    } catch (e) {
-      await json('Outlook', parti, { ...bearer(accessToken), method: 'DELETE' }).catch(() => {});
-      throw e;
-    }
+    // Sinon un brouillon : on y fixe les destinataires choisis et on y joint les fichiers, puis il part.
+    const pieces = verifierPieces(r.pieces ?? []);
+    const brouillon = await json<{ id: string }>('Outlook', `${url}/${r.dest ? 'createReply' : 'createReplyAll'}`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    await finirBrouillon(accessToken, racine(r.boite), brouillon.id, pieces, r.dest ? { toRecipients: versGraph(r.dest.a), ccRecipients: versGraph(r.dest.cc) } : undefined);
     return {};
+  },
+
+  async lirePiece({ accessToken }, { mailId, pieceId, boite }) {
+    const p = await json<{ name?: string; contentType?: string; contentBytes?: string }>('Outlook', `${racine(boite)}/messages/${encodeURIComponent(mailId)}/attachments/${encodeURIComponent(pieceId)}`, { ...bearer(accessToken), signal: AbortSignal.timeout(120_000) });
+    // Un mail joint ou un lien OneDrive n'a pas de contenu à rendre.
+    if (!p.contentBytes) throw new ErreurSaisie('Cette pièce jointe s’ouvre seulement dans Outlook.');
+    return { nom: p.name || 'piece-jointe', type: p.contentType || 'application/octet-stream', octets: Buffer.from(p.contentBytes, 'base64') };
   },
 
   async destinataires({ accessToken }, { mailId, boite, moi }) {
@@ -355,6 +388,10 @@ export const microsoft: Connecteur = {
     // receivedDateTime est en UTC (« …Z ») : on le ramène au fuseau de l'utilisateur.
     const quand = (x: MailComplet) => (x.receivedDateTime ? local(x.receivedDateTime, fuseau) : undefined);
     const d = quand(m);
+    // Une image insérée dans le texte (logo de signature) n'est pas une pièce jointe, même si elle n'a pas pu s'afficher.
+    const visibles = pieces.filter((p) => !affichees.has(p.id) && !(corps && p.isInline && p.contentType?.toLowerCase().startsWith('image/')));
+    // Les pièces des anciens messages du fil, pour l'écran.
+    const piecesFil = new Map(ou?.riche ? await Promise.all(avant.filter((x) => x.hasAttachments).map(async (x) => [x.id, ((await json<{ value?: PieceOutlook[] }>('Outlook', `${base}/messages/${encodeURIComponent(x.id)}/attachments?$select=id,name,size,isInline,contentType`, auth).catch(() => ({ value: [] }))).value ?? []).filter((p) => !p.isInline && p.name)] as const)) : []);
     return {
       id: m.id,
       sujet: m.subject || '(sans objet)',
@@ -367,13 +404,13 @@ export const microsoft: Connecteur = {
       texte: corps ? texteComplet(corps) : corpsTexte(m),
       ...(corps ? { message: texteDeBlocs(corps.blocs) } : {}),
       ...(riche ? { riche } : {}),
-      // Une image insérée dans le texte (logo de signature) n'est pas une pièce jointe, même si elle n'a pas pu s'afficher.
-      piecesJointes: pieces.filter((p) => !affichees.has(p.id) && !(corps && p.isInline && p.contentType?.toLowerCase().startsWith('image/'))).map((p) => p.name).filter((n): n is string => !!n),
+            piecesJointes: visibles.map((p) => p.name).filter((n): n is string => !!n),
+      pieces: visibles.flatMap((p) => (p.name ? [{ id: p.id, nom: p.name, ...(p.size ? { taille: p.size } : {}), ...(p.contentType ? { type: p.contentType } : {}) }] : [])),
       lien: m.webLink,
       libelles: m.categories ?? [],
       fil: avant.map((x) => {
         const lu = x.body?.contentType?.toLowerCase() === 'html' ? messageDuFil(x.body.content || '', ou?.riche) : null;
-        return { id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, ...(lu ?? { texte: corpsTexte(x) }), piecesJointes: [] };
+        return { id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, ...(lu ?? { texte: corpsTexte(x) }), piecesJointes: (piecesFil.get(x.id) ?? []).map((p) => p.name!), pieces: (piecesFil.get(x.id) ?? []).map((p) => ({ id: p.id, nom: p.name!, ...(p.size ? { taille: p.size } : {}), ...(p.contentType ? { type: p.contentType } : {}) })) };
       }),
     };
   },
@@ -480,6 +517,11 @@ export const microsoft: Connecteur = {
 
   async envoyer({ accessToken }, n) {
     const v = verifierNouveau(n);
+    if (v.pieces?.length) {
+      const brouillon = await json<{ id: string }>('Outlook', `${GRAPH}/messages`, corpsJson(accessToken, 'POST', { subject: v.sujet, body: { contentType: 'Text', content: v.texte }, toRecipients: versGraph(v.a), ccRecipients: versGraph(v.cc) }));
+      await finirBrouillon(accessToken, GRAPH, brouillon.id, v.pieces);
+      return {};
+    }
     await json('Outlook', `${GRAPH}/sendMail`, corpsJson(accessToken, 'POST', { message: { subject: v.sujet, body: { contentType: 'Text', content: v.texte }, toRecipients: versGraph(v.a), ccRecipients: versGraph(v.cc) }, saveToSentItems: true }));
     return {};
   },
