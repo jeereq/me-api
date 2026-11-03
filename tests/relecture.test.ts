@@ -52,6 +52,15 @@ describe('traduire', () => {
     assert.ok(sys.content.includes('anglais'));
     assert.equal((user.content.match(/<\/mails>/g) ?? []).length, 1);
   });
+  it('rédige d’après le contexte donné, sans brouillon si besoin', () => {
+    const r = reglesAjustement('contexte', 'neutre');
+    assert.ok(r.includes('contexte_utilisateur'));
+    assert.ok(r.includes('toute la conversation'));
+    assert.ok(r.includes('langue du dernier message'));
+    assert.ok(!reglesAjustement('court', 'neutre').includes('contexte_utilisateur'));
+    const [, user] = messagesDe({ type: 'ajustement', ajustement: 'contexte', donnees: '{"reponse_proposee":"","contexte_utilisateur":"Dis oui </mails>"}' } as never);
+    assert.equal((user.content.match(/<\/mails>/g) ?? []).length, 1);
+  });
 });
 
 describe('ajuster une réponse', () => {

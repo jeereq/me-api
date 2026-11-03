@@ -141,14 +141,14 @@ export const AnalyseMailService = {
     return lu;
   },
 
-  /** Ajuste une réponse : plus courte, plus formelle, un refus poli, ou une autre version. Rien n'est gardé, et le mail reste non lu. */
+  /** Ajuste une réponse : plus courte, plus formelle, un refus poli, une autre version, ou rédigée d'après le contexte donné par l'utilisateur. Rien n'est gardé, et le mail reste non lu. */
   async ajusterReponse(userId: string, b: AjusterReponseBody): Promise<string> {
     const ref = lireRef(b.mail);
     if (!ref) throw new HttpError(400, 'Ce mail ne vient pas d’un compte connecté.');
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
     const ton = b.ton ?? tonDe(user.espace?.data);
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
-    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), reponse_proposee: b.reponse };
+    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), reponse_proposee: b.reponse ?? '', ...(b.action === 'contexte' ? { contexte_utilisateur: b.contexte } : {}) };
     const r = await AssistantService.demanderAvecModeles({ type: 'ajustement', ajustement: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
     const lu = lireAjustement(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu ajuster cette réponse. Réessaie dans un instant.");

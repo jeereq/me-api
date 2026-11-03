@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { consignesPropres } from '../src/services/analyse-mails.js';
+import { ajusterReponseSchema } from '../src/validators/schemas.js';
 import {
   AGE_MAX_JOURS,
   analyserLot,
@@ -304,5 +305,19 @@ describe('validation des demandes', () => {
     assert.equal(ok({ analyseAuto: false }), true);
     assert.equal(ok({ analyseAuto: 'oui' }), false);
     assert.equal(ok({}), false);
+  });
+});
+
+describe('ajuster une réponse : ce qu’il faut envoyer', () => {
+  const ok = (body: object) => ajusterReponseSchema.safeParse({ body: { mail: 'ext:g1:a', ...body } }).success;
+  it('un contexte suffit, sans brouillon', () => {
+    assert.equal(ok({ action: 'contexte', contexte: 'Dis que je passe jeudi' }), true);
+    assert.equal(ok({ action: 'contexte', contexte: '  ' }), false);
+    assert.equal(ok({ action: 'contexte', reponse: 'Bonjour' }), false);
+  });
+  it('les autres ajustements demandent un brouillon', () => {
+    assert.equal(ok({ action: 'court', reponse: 'Bonjour' }), true);
+    assert.equal(ok({ action: 'court' }), false);
+    assert.equal(ok({ action: 'court', contexte: 'x' }), false);
   });
 });
