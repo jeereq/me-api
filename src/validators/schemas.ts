@@ -9,6 +9,15 @@ export const registerSchema = z.object({ body: z.object({ email, password, nom: 
 export const confirmerSmsSchema = z.object({ body: z.object({ email, code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{6}$/, 'Le code a 6 chiffres.') }) });
 export const loginSchema = z.object({ body: z.object({ email, password: z.string().min(1, 'Mot de passe requis') }) });
 export const emailSchema = z.object({ body: z.object({ email }) });
+export const contactSchema = z.object({
+  body: z.object({
+    nom: z.string({ required_error: 'Ton nom est requis.' }).trim().min(1, 'Ton nom est requis.').max(80),
+    email,
+    telephone: z.string().trim().max(30).regex(/^[+\d\s().-]*$/, 'Numéro invalide.').optional(),
+    message: z.string({ required_error: 'Ton message est requis.' }).trim().min(10, 'Ton message est trop court.').max(3000, 'Ton message est trop long.'),
+    site: z.string().max(200).optional(),
+  }),
+});
 const jeton = z.string({ required_error: 'Lien incomplet' }).min(10, 'Lien incomplet').max(200);
 export const jetonSchema = z.object({ body: z.object({ jeton }) });
 export const reinitialiserSchema = z.object({ body: z.object({ jeton, password }) });
