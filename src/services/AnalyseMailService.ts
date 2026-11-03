@@ -1,11 +1,11 @@
 import type { Prisma } from '@prisma/client';
 
-import type { AnalyseBoucleBody, AnalyseMailsBody, RelireReponseBody } from '../validators/schemas.js';
+import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, RelireReponseBody } from '../validators/schemas.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
-import { donneesBoucle, lireBoucle, lireRelecture, type AnalyseBoucle, type RelectureReponse } from './analyse-mails.js';
+import { donneesBoucle, lireAjustement, lireBoucle, lireRelecture, type AnalyseBoucle, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -14,6 +14,7 @@ import {
   AUTO_PAR_PASSAGE,
   contexteDepuisEspace,
   empreinte,
+  etatDAnalyse,
   limiteAge,
   lireRef,
   mailPourIA,
@@ -138,6 +139,28 @@ export const AnalyseMailService = {
     const lu = lireRelecture(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu relire cette réponse. Réessaie dans un instant.");
     return lu;
+  },
+
+  /** Ajuste une réponse : plus courte, plus formelle, un refus poli, ou une autre version. Rien n'est gardé, et le mail reste non lu. */
+  async ajusterReponse(userId: string, b: AjusterReponseBody): Promise<string> {
+    const ref = lireRef(b.mail);
+    if (!ref) throw new HttpError(400, 'Ce mail ne vient pas d’un compte connecté.');
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
+    const ton = b.ton ?? tonDe(user.espace?.data);
+    const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
+    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), reponse_proposee: b.reponse };
+    const r = await AssistantService.demanderAvecModeles({ type: 'ajustement', ajustement: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
+    const lu = lireAjustement(r.texte);
+    if (!lu) throw new HttpError(502, "L'IA n'a pas pu ajuster cette réponse. Réessaie dans un instant.");
+    return lu;
+  },
+
+  /** Ce qui est déjà analysé parmi ces mails, pour le montrer dans la liste. Rien n'est lu chez le service, et aucune demande ne part à l'IA. */
+  async etats(userId: string, mails: string[]) {
+    const refs = mails.map(lireRef).filter((r): r is NonNullable<typeof r> => !!r);
+    if (!refs.length) return [];
+    const lignes = await prisma.analyseMail.findMany({ where: { userId, majLe: { gte: limiteAge() }, mailId: { in: refs.map((r) => r.mailId) } }, select: { integrationId: true, mailId: true, resultat: true } });
+    return lignes.flatMap((l) => etatDAnalyse(refMail(l.integrationId, l.mailId), l.resultat) ?? []);
   },
 
   /**

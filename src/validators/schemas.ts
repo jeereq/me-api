@@ -73,7 +73,9 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'traduction', 'compte_rendu']),
+    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'traduction', 'compte_rendu']),
+    /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
+    ajustement: z.enum(['court', 'formel', 'decliner', 'refaire']).optional(),
     /** Pour « traduction » : la langue voulue. */
     langue: z.enum(['fr', 'en', 'pt']).optional(),
     /** Pour « lot » et « synthese » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
@@ -134,6 +136,13 @@ export type AnalyseBoucleBody = z.infer<typeof analyseBoucleSchema>['body'];
 /** Relire une réponse avant son envoi : le mail auquel elle répond, et le brouillon. */
 export const relireReponseSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), reponse: z.string().trim().min(1).max(8000), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
 export type RelireReponseBody = z.infer<typeof relireReponseSchema>['body'];
+
+/** Ajuster une réponse : le mail, le brouillon, et ce qu'il faut en faire. */
+export const ajusterReponseSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), reponse: z.string().trim().min(1).max(8000), action: z.enum(['court', 'formel', 'decliner', 'refaire']), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
+export type AjusterReponseBody = z.infer<typeof ajusterReponseSchema>['body'];
+
+/** Ce qui est déjà analysé parmi les mails affichés. */
+export const etatsAnalyseSchema = z.object({ body: z.object({ mails: z.array(z.string().min(1).max(500)).max(300) }) });
 
 /** Traduire des textes : assez peu à la fois pour que la réponse de l'IA tienne entière. */
 export const MAX_TRADUCTION = 16_000;

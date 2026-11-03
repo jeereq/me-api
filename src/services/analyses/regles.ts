@@ -13,7 +13,7 @@ import { consignesPropres, texteUtile } from '../analyse-mails.js';
 /** Combien de temps une analyse est gardée. */
 export const AGE_MAX_JOURS = 30;
 /** À changer quand le prompt ou le schéma de l'analyse change : les analyses gardées sont alors refaites. */
-export const VERSION_ANALYSE = 'v1';
+export const VERSION_ANALYSE = 'v2';
 
 /** Au plus autant de mails par demande, comme l'app (une réponse JSON plus longue devient lente et coûteuse). */
 export const MAX_MAILS_DEMANDE = 10;
@@ -239,4 +239,11 @@ export async function analyserLot(refs: string[], contexte: { aujourdhui: string
     illisibles,
     modeles,
   };
+}
+
+/** Ce que l'app montre d'un mail déjà analysé, dans la liste. Les analyses de boucle ont leur propre clé et leur propre forme. */
+export function etatDAnalyse(ref: string, resultat: unknown): { id: string; urgence: string; action: string; resume: string; reponse: string } | null {
+  const r = resultat as { urgence?: unknown; action?: unknown; resume?: unknown; reponse?: unknown } | null;
+  if (!r || typeof r.action !== 'string' || typeof r.urgence !== 'string') return null;
+  return { id: ref, urgence: r.urgence, action: r.action, resume: typeof r.resume === 'string' ? r.resume : '', reponse: r.action === 'repondre' && typeof r.reponse === 'string' ? r.reponse : '' };
 }
