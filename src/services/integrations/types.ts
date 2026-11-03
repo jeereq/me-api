@@ -2,6 +2,7 @@ import type { Fournisseur } from '@prisma/client';
 import type { RechercheMails } from './recherche.js';
 
 import type { AgendaDispo, MailImporte } from './choix.js';
+import type { MailRiche } from './html-mail.js';
 
 export type { AgendaDispo, MailImporte };
 
@@ -133,11 +134,12 @@ export interface Connecteur {
 export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: string; texte: string; messageId?: string; references?: string; /** Boîte partagée d'où part la réponse. */ boite?: string };
 /** Où se trouve un mail : son fil, et la boîte partagée qui le contient (absente = la boîte du compte). */
 /** `garderNonLu` : lu pour l'analyse du copilote, le mail reste « non lu » dans la boîte. */
-export type OuMail = { fil?: string; boite?: string; garderNonLu?: boolean };
+/** `riche` : pour l'écran, avec la mise en forme et les images jointes ; le copilote n'a besoin que du texte. */
+export type OuMail = { fil?: string; boite?: string; garderNonLu?: boolean; riche?: boolean };
 export type Etiquetage = OuMail & { mailId: string; ajouter: string[]; retirer: string[] };
 /** Un message plus ancien du même fil, lu avec le mail ouvert. */
 export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; piecesJointes: string[] };
-/** Un mail lu en entier : le texte brut (sans mise en forme) et le nom des pièces jointes. */
+/** Un mail lu en entier : le texte brut, sa mise en forme quand il est en HTML, et le nom des pièces jointes. */
 export type ContenuMail = {
   id: string;
   sujet: string;
@@ -148,6 +150,7 @@ export type ContenuMail = {
   date?: string;
   heure?: string;
   texte: string;
+  riche?: MailRiche;
   piecesJointes: string[];
   lien?: string;
   /** Étiquettes posées sur le mail (libellés Gmail, catégories Outlook). */

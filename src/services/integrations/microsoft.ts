@@ -1,6 +1,7 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { ErreurSaisie, lendemain as lendemainMS, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
+import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, normaliserCid, remplirImages, texteComplet } from './html-mail.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
 import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
@@ -47,6 +48,9 @@ type MailComplet = { id: string; subject?: string; webLink?: string; isRead?: bo
 const ecrireAdresse = (a: Adresse) => (a.emailAddress?.name && a.emailAddress.address ? `${a.emailAddress.name} <${a.emailAddress.address}>` : a.emailAddress?.address || a.emailAddress?.name || '');
 const versGraph = (l: string[]) => l.map((address) => ({ emailAddress: { address } }));
 const corpsTexte = (m: MailComplet) => (m.body?.contentType?.toLowerCase() === 'html' ? htmlEnTexte(m.body?.content || '') : nettoyerTexte(m.body?.content || ''));
+
+type PieceOutlook = { id: string; name?: string; size?: number; isInline?: boolean; contentType?: string };
+type ImageOutlook = { id: string; contentId?: string; contentBytes?: string; contentType?: string };
 
 const CHAMPS_LISTE = 'subject,from,toRecipients,receivedDateTime,sentDateTime,webLink,isRead,conversationId,categories,bodyPreview,hasAttachments';
 
@@ -279,11 +283,26 @@ export const microsoft: Connecteur = {
   async lireMail({ accessToken }, mailId, fuseau, ou) {
     const base = racine(ou?.boite);
     const url = `${base}/messages/${encodeURIComponent(mailId)}`;
+    const auth = bearer(accessToken);
     const texte = bearer(accessToken, { Prefer: 'outlook.body-content-type="text"' });
     const champs = 'subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,isRead,webLink,categories,conversationId,isDraft';
-    // Graph sait rendre le corps en texte ; s'il renvoie quand même du HTML, on le convertit.
-    const m = await json<MailComplet>('Outlook', `${url}?$select=${champs}`, texte);
-    const pieces = m.hasAttachments ? ((await json<{ value?: { name?: string }[] }>('Outlook', `${url}/attachments?$select=name`, bearer(accessToken)).catch(() => ({ value: [] }))).value ?? []) : [];
+    // Le mail ouvert arrive en HTML, pour garder ses tableaux, ses images et sa signature ; les plus anciens du fil restent en texte.
+    const m = await json<MailComplet>('Outlook', `${url}?$select=${champs}`, auth);
+    const corps = m.body?.contentType?.toLowerCase() === 'html' ? htmlEnBlocs(m.body.content || '') : null;
+    const cids = corps ? cidsDe(corps) : [];
+    // Graph annonce « sans pièce jointe » un mail qui n'a que des images dans son texte : on regarde quand même.
+    const pieces = m.hasAttachments || cids.length ? ((await json<{ value?: PieceOutlook[] }>('Outlook', `${url}/attachments?$select=id,name,size,isInline,contentType`, auth).catch(() => ({ value: [] }))).value ?? []) : [];
+    // contentId et contentBytes ne se demandent qu'une pièce à la fois.
+    const lues = ou?.riche && cids.length
+      ? await Promise.all(pieces.filter((p) => p.id && p.contentType?.toLowerCase().startsWith('image/') && (p.size ?? 0) <= MAX_IMAGE_OCTETS).slice(0, MAX_IMAGES).map((p) => json<ImageOutlook>('Outlook', `${url}/attachments/${encodeURIComponent(p.id)}`, auth).catch(() => null)))
+      : [];
+    const voulues = new Set(cids);
+    const parCid = new Map(lues.flatMap((x) => (x?.contentId && x.contentBytes && voulues.has(normaliserCid(x.contentId)) ? [[normaliserCid(x.contentId), x] as const] : [])));
+    const affichees = new Set([...parCid.values()].map((x) => x.id));
+    const riche = corps && ou?.riche ? enMailRiche(await remplirImages(corps, (cid) => {
+      const x = parCid.get(cid);
+      return x?.contentBytes ? { type: x.contentType, base64: x.contentBytes } : null;
+    })) : undefined;
     if (m.isRead === false && !ou?.garderNonLu) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
     // Les messages plus anciens de la conversation (sans tri côté Graph, qui refuse filtre et tri sur ces champs ensemble).
     const conv = m.conversationId
@@ -307,8 +326,9 @@ export const microsoft: Connecteur = {
       cc: (m.ccRecipients ?? []).map(ecrireAdresse).filter(Boolean),
       date: d?.date,
       heure: d?.heure,
-      texte: corpsTexte(m),
-      piecesJointes: pieces.map((p) => p.name).filter((n): n is string => !!n),
+      texte: corps ? texteComplet(corps) : corpsTexte(m),
+      ...(riche ? { riche } : {}),
+      piecesJointes: pieces.filter((p) => !affichees.has(p.id)).map((p) => p.name).filter((n): n is string => !!n),
       lien: m.webLink,
       libelles: m.categories ?? [],
       fil: avant.map((x) => ({ id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, texte: corpsTexte(x), piecesJointes: [] })),

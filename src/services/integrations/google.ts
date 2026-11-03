@@ -1,7 +1,8 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
-import { decoderEntites, texteDeGmail, type PartieGmail } from './lecture.js';
+import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, normaliserCid, remplirImages } from './html-mail.js';
+import { decoderEntites, htmlDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
 import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
@@ -247,6 +248,17 @@ export const google: Connecteur = {
     const tous = fil?.messages ?? [];
     const m = tous.find((x) => x.id === mailId) ?? (await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, auth));
     const { texte, piecesJointes } = texteDeGmail(m.payload);
+    const { html, images } = htmlDeGmail(m.payload);
+    const corps = ou?.riche ? htmlEnBlocs(html) : null;
+    const voulues = new Set(corps ? cidsDe(corps) : []);
+    const utilisees = images.filter((x) => voulues.has(normaliserCid(x.cid)));
+    const riche = corps ? enMailRiche(await remplirImages(corps, async (cid) => {
+      const im = utilisees.find((x) => normaliserCid(x.cid) === cid);
+      if (!im || im.size > MAX_IMAGE_OCTETS) return null;
+      const donnee = im.data ?? (await json<{ data?: string }>('Gmail', `${GMAIL}/messages/${encodeURIComponent(m.id)}/attachments/${encodeURIComponent(im.attachmentId ?? '')}`, auth)).data;
+      return donnee ? { type: im.mimeType, base64: donnee.replace(/-/g, '+').replace(/_/g, '/') } : null;
+    })) : undefined;
+    const sansImages = new Set(utilisees.map((x) => x.filename).filter(Boolean));
     // Ouvert dans Me = lu. Un compte connecté sans ce droit reste « non lu » chez Gmail, sans bloquer la lecture.
     // Tout le fil, comme Gmail : la liste de Me signale un fil non lu tant qu'un de ses messages l'est, même ancien.
     const nonLu = [m, ...tous].some((x) => x.labelIds?.includes('UNREAD'));
@@ -269,7 +281,8 @@ export const google: Connecteur = {
       date: d?.date,
       heure: d?.heure,
       texte,
-      piecesJointes,
+      ...(riche ? { riche } : {}),
+      piecesJointes: piecesJointes.filter((n) => !sansImages.has(n)),
       lien: lienMail(m.threadId),
       libelles: nomsLibelles(m.labelIds, parId),
       fil: avant.map((x) => {

@@ -334,7 +334,7 @@ export const IntegrationService = {
   async lireMail(userId: string, id: string, mailId: string, garderNonLu = false) {
     const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'lireMail');
     const garde = this._mailGarde(i, mailId);
-    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite, garderNonLu }), i, false);
+    const contenu = await this._ecrire(() => c.lireMail!(jetons, mailId, fuseau, { fil: garde?.fil, boite: garde?.boite, garderNonLu, riche: true }), i, false);
     if (garde?.nonLu && !garderNonLu) await this._majMail(i, mailId, { nonLu: false });
     return { mail: { ...contenu, ...(garde?.boite ? { boite: garde.boite } : {}) } };
   },
