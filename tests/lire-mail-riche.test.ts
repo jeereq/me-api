@@ -56,6 +56,56 @@ describe('lire un mail : Outlook', () => {
   });
 });
 
+describe('lire un fil : la limite de la signature vaut pour chaque ancien message', () => {
+  const ancien = '<p>Bonjour Awa,</p><p>Le devis me va.</p><div id="Signature"><p>Paul Kasongo</p><p>+243 81 000 0000</p></div>';
+  it('Outlook : le message seul, la signature à part, en HTML', async () => {
+    const vus: string[] = [];
+    repondre([
+      [/messages\?/, { value: [{ id: 'm0', receivedDateTime: '2026-11-01T10:00:00Z', body: { contentType: 'html', content: ancien }, from: { emailAddress: { name: 'Paul' } } }] }],
+      [/messages\/m1\?/, { id: 'm1', isRead: true, conversationId: 'c1', receivedDateTime: '2026-11-02T10:00:00Z', body: { contentType: 'html', content: '<p>Merci Paul.</p>' } }],
+    ], vus);
+    const m = await microsoft.lireMail!(JETONS, 'm1', 'UTC', { garderNonLu: true, riche: true });
+    const f = m.fil![0];
+    assert.equal(f.message, 'Bonjour Awa,\n\nLe devis me va.');
+    assert.ok(f.texte.includes('Paul Kasongo'));
+    assert.ok(!JSON.stringify(f.riche!.blocs).includes('Paul Kasongo'));
+    assert.ok(JSON.stringify(f.riche!.signature).includes('Paul Kasongo'));
+    assert.equal(m.message, 'Merci Paul.');
+  });
+  it('pour le copilote : le message seul, sans mise en forme', async () => {
+    repondre([
+      [/messages\?/, { value: [{ id: 'm0', receivedDateTime: '2026-11-01T10:00:00Z', body: { contentType: 'html', content: ancien } }] }],
+      [/messages\/m1\?/, { id: 'm1', isRead: true, conversationId: 'c1', receivedDateTime: '2026-11-02T10:00:00Z', body: { contentType: 'html', content: '<p>Merci.</p>' } }],
+    ]);
+    const m = await microsoft.lireMail!(JETONS, 'm1', 'UTC', { garderNonLu: true });
+    assert.equal(m.fil![0].riche, undefined);
+    assert.equal(m.fil![0].message, 'Bonjour Awa,\n\nLe devis me va.');
+  });
+  it('un ancien message en texte reste en texte', async () => {
+    repondre([
+      [/messages\?/, { value: [{ id: 'm0', receivedDateTime: '2026-11-01T10:00:00Z', body: { contentType: 'text', content: 'Salut' } }] }],
+      [/messages\/m1\?/, { id: 'm1', isRead: true, conversationId: 'c1', receivedDateTime: '2026-11-02T10:00:00Z', body: { contentType: 'text', content: 'Merci' } }],
+    ]);
+    const m = await microsoft.lireMail!(JETONS, 'm1', 'UTC', { garderNonLu: true, riche: true });
+    assert.equal(m.fil![0].texte, 'Salut');
+    assert.equal(m.fil![0].riche, undefined);
+  });
+  it('Gmail : chaque message du fil, images du texte hors des pièces jointes', async () => {
+    const part = (html: string, extra: object[] = []) => ({ mimeType: 'multipart/mixed', parts: [{ mimeType: 'text/plain', body: { data: b64('brut') } }, { mimeType: 'text/html', body: { data: b64(html) } }, ...extra] });
+    const logo = { mimeType: 'image/png', filename: 'logo.png', headers: [{ name: 'Content-ID', value: '<logo@x>' }], body: { attachmentId: 'a', size: 3 } };
+    repondre([
+      [/threads\/t1\?/, { messages: [{ id: 'g0', threadId: 't1', internalDate: '1', labelIds: [], payload: { ...part('<p>Le devis me va.</p><div class="gmail_signature">Paul <img src="cid:logo@x" width="90"></div>', [logo]), headers: [{ name: 'From', value: 'Paul <p@x.com>' }] } }, { id: 'g1', threadId: 't1', internalDate: '2', labelIds: [], payload: { ...part('<p>Merci.</p>'), headers: [] } }] }],
+    ]);
+    const m = await google.lireMail!(JETONS, 'g1', 'UTC', { fil: 't1', garderNonLu: true, riche: true });
+    const f = m.fil![0];
+    assert.equal(f.message, 'Le devis me va.');
+    assert.equal(f.texte, 'brut');
+    assert.ok(JSON.stringify(f.riche!.signature).includes('Paul'));
+    assert.ok(!JSON.stringify(f.riche).includes('cid:'));
+    assert.deepEqual(f.piecesJointes, []);
+  });
+});
+
 describe('lire un mail : Gmail', () => {
   it('pour l’écran : image jointe chargée, et retirée des pièces jointes', async () => {
     const payload = {

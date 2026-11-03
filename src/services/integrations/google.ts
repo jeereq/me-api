@@ -1,7 +1,7 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { base64Url, lendemain, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
-import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, normaliserCid, remplirImages } from './html-mail.js';
+import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
 import { decoderEntites, htmlDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
 import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
@@ -251,7 +251,8 @@ export const google: Connecteur = {
     const m = tous.find((x) => x.id === mailId) ?? (await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, auth));
     const { texte, piecesJointes } = texteDeGmail(m.payload);
     const { html, images } = htmlDeGmail(m.payload);
-    const corps = ou?.riche ? htmlEnBlocs(html) : null;
+    const lu = htmlEnBlocs(html);
+    const corps = ou?.riche ? lu : null;
     const voulues = new Set(corps ? cidsDe(corps) : []);
     const utilisees = images.filter((x) => voulues.has(normaliserCid(x.cid)));
     const riche = corps ? enMailRiche(await remplirImages(corps, async (cid) => {
@@ -283,6 +284,7 @@ export const google: Connecteur = {
       date: d?.date,
       heure: d?.heure,
       texte,
+      ...(lu ? { message: texteDeBlocs(lu.blocs) } : {}),
       ...(riche ? { riche } : {}),
       piecesJointes: piecesJointes.filter((n) => !sansImages.has(n)),
       lien: lienMail(m.threadId),
@@ -291,7 +293,11 @@ export const google: Connecteur = {
         const c = texteDeGmail(x.payload);
         const q = quand(x);
         const exp = entete(x, 'From');
-        return { id: x.id, de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, piecesJointes: c.piecesJointes };
+        const h = htmlDeGmail(x.payload);
+        const decoupe = messageDuFil(h.html, ou?.riche);
+        // Les images du texte (logo de signature) ne sont pas des pièces jointes.
+        const images = new Set(h.images.map((i) => i.filename).filter(Boolean));
+        return { id: x.id, de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, ...(decoupe ? { message: decoupe.message, ...(decoupe.riche ? { riche: decoupe.riche } : {}) } : {}), piecesJointes: c.piecesJointes.filter((n) => !images.has(n)) };
       }),
     };
   },

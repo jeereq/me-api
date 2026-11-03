@@ -144,7 +144,8 @@ export type ReponseMail = { mailId: string; fil?: string; a: string; sujet: stri
 export type OuMail = { fil?: string; boite?: string; garderNonLu?: boolean; riche?: boolean };
 export type Etiquetage = OuMail & { mailId: string; ajouter: string[]; retirer: string[] };
 /** Un message plus ancien du même fil, lu avec le mail ouvert. */
-export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; piecesJointes: string[] };
+/** `message` : ce que la personne a écrit, sans sa signature ni le message cité. `riche` : le même message mis en forme, pour l'écran. */
+export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; message?: string; riche?: MailRiche; piecesJointes: string[] };
 /** Un mail lu en entier : le texte brut, sa mise en forme quand il est en HTML, et le nom des pièces jointes. */
 export type ContenuMail = {
   id: string;
@@ -156,6 +157,8 @@ export type ContenuMail = {
   date?: string;
   heure?: string;
   texte: string;
+  /** Le message seul, sans signature ni citation : c'est lui que lit le copilote. */
+  message?: string;
   riche?: MailRiche;
   piecesJointes: string[];
   lien?: string;

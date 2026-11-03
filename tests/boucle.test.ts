@@ -11,6 +11,10 @@ describe('boucle de mails', () => {
     assert.equal(d.moi, 'moi@x.com');
     assert.equal(d.sujet, 'Devis');
   });
+  it('préfère le message seul, sans signature', () => {
+    const d = donneesBoucle({ texte: 'Ok\nAwa', message: 'Ok', fil: [{ de: 'P', texte: 'Jeudi ?\nPaul Kasongo', message: 'Jeudi ?' }, { de: 'A', texte: 'Vu', message: '' }] }, o);
+    assert.deepEqual(d.messages.map((m) => m.texte), ['Jeudi ?', 'Vu', 'Ok']);
+  });
   it('se limite aux derniers messages', () => {
     const fil = Array.from({ length: 20 }, (_, i) => ({ de: 'A', texte: `m${i}` }));
     const d = donneesBoucle({ texte: 'fin', fil }, o);

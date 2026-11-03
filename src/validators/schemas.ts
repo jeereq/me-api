@@ -73,7 +73,9 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'compte_rendu']),
+    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'traduction', 'compte_rendu']),
+    /** Pour « traduction » : la langue voulue. */
+    langue: z.enum(['fr', 'en', 'pt']).optional(),
     /** Pour « lot » et « synthese » : le périmètre choisi, en clair (« les mails de @ovh.com en octobre »). */
     perimetre: z.string().max(300).optional(),
     ton: z.string().max(40).optional(),
@@ -132,6 +134,19 @@ export type AnalyseBoucleBody = z.infer<typeof analyseBoucleSchema>['body'];
 /** Relire une réponse avant son envoi : le mail auquel elle répond, et le brouillon. */
 export const relireReponseSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), reponse: z.string().trim().min(1).max(8000), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() }) });
 export type RelireReponseBody = z.infer<typeof relireReponseSchema>['body'];
+
+/** Traduire des textes : assez peu à la fois pour que la réponse de l'IA tienne entière. */
+export const MAX_TRADUCTION = 16_000;
+export const traduireSchema = z.object({
+  body: z.object({
+    langue: z.enum(['fr', 'en', 'pt']),
+    textes: z
+      .array(z.string().min(1).max(MAX_TRADUCTION))
+      .min(1)
+      .max(60)
+      .refine((l) => l.reduce((n, t) => n + t.length, 0) <= MAX_TRADUCTION, 'Trop de texte à traduire d’un coup.'),
+  }),
+});
 
 /** Lecture d'un justificatif par l'IA : son identifiant Cloudinary, et de quoi bien lire (date du jour, devise, catégories). */
 export const analyseJustificatifSchema = z.object({

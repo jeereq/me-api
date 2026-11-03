@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 
 import { HttpError } from '../utils/http.js';
 import { AnalyseMailService } from '../services/AnalyseMailService.js';
+import { lireTraduction, type LangueTraduction } from '../services/analyse-mails.js';
 import { AssistantService } from '../services/AssistantService.js';
 import { aDroit, etatAbonnement, messageReserve, SELECT_ABONNEMENT } from '../services/abonnements/offres.js';
 import { dureeComptee, ReunionService } from '../services/ReunionService.js';
@@ -86,6 +87,15 @@ export const AssistantController = {
   analyserBoucle: async (req: Request, res: Response) => {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
     res.json(await AnalyseMailService.analyserBoucle(req.user!.id, req.body));
+  },
+  /** Traduire un mail, une réponse ou une analyse. Rien n'est gardé. */
+  traduire: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    const { langue, textes } = req.body as { langue: LangueTraduction; textes: string[] };
+    const r = await AssistantService.demanderAvecModeles({ type: 'traduction', langue, donnees: JSON.stringify({ textes }) });
+    const traduits = lireTraduction(r.texte, textes);
+    if (!traduits) throw new HttpError(502, "L'IA n'a pas pu traduire ce texte. Réessaie dans un instant.");
+    res.json({ textes: traduits });
   },
   /** Relire une réponse avant de l'envoyer. */
   relireReponse: async (req: Request, res: Response) => {

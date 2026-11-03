@@ -6,13 +6,14 @@ import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js
 import { analyseMailsLimiter, assistantLimiter, transcriptionLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { analyseBoucleSchema, relireReponseSchema, analyseMailsSchema, assistantSchema } from '../validators/schemas.js';
+import { analyseBoucleSchema, relireReponseSchema, traduireSchema, analyseMailsSchema, assistantSchema } from '../validators/schemas.js';
 
 const router = Router();
 router.use(authenticateJWT);
 router.get('/', asyncHandler(AssistantController.status));
 router.get('/modeles', requireAdmin, asyncHandler(AssistantController.modeles));
 router.post('/', requirePro('assistant'), assistantLimiter, validateRequest(assistantSchema), asyncHandler(AssistantController.demander));
+router.post('/traduire', requirePro('assistant'), analyseMailsLimiter, validateRequest(traduireSchema), asyncHandler(AssistantController.traduire));
 router.post('/mails/relire', requirePro('assistant'), analyseMailsLimiter, validateRequest(relireReponseSchema), asyncHandler(AssistantController.relireReponse));
 router.post('/mails/boucle', requirePro('assistant'), analyseMailsLimiter, validateRequest(analyseBoucleSchema), asyncHandler(AssistantController.analyserBoucle));
 router.post('/mails', requirePro('assistant'), analyseMailsLimiter, validateRequest(analyseMailsSchema), asyncHandler(AssistantController.analyserMails));
