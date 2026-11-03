@@ -85,6 +85,9 @@ export const SmsService = {
   },
 
   async retirer(userId: string) {
+    // Sans email confirmé, le numéro est le seul moyen d'entrer dans le compte.
+    const u = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, emailVerifie: true, telephone: true, googleId: true } });
+    if (u.telephone && !u.googleId && !(u.email && u.emailVerifie)) throw new HttpError(400, 'Ajoute et confirme un email avant de retirer ton numéro.');
     await prisma.user.update({ where: { id: userId }, data: { telephone: null, telephoneEnAttente: null, smsVerificationId: null, smsVerificationLe: null } });
     return this.etat(userId);
   },

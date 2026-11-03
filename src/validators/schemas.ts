@@ -9,7 +9,10 @@ const password = z.string({ required_error: 'Mot de passe requis' }).min(8, 'Le 
 const identifiant = z
   .object({ identifiant: z.string().trim().min(3).max(320).optional(), email: z.string().trim().max(320).optional() })
   .refine((b) => !!(b.identifiant || b.email), { message: 'Email ou téléphone requis' });
-export const registerSchema = z.object({ body: z.object({ email, password, nom: z.string().trim().max(80).optional(), confirmation: z.enum(['email', 'sms']).optional(), telephone: z.string().trim().max(30).optional() }) });
+/** Un email, ou un numéro confirmé par SMS : le compte peut ne pas avoir d'email. */
+export const registerSchema = z.object({
+  body: z.object({ email: email.optional(), password, nom: z.string().trim().max(80).optional(), confirmation: z.enum(['email', 'sms']).optional(), telephone: z.string().trim().max(30).optional() }).refine((b) => !!b.email || (b.confirmation === 'sms' && !!b.telephone), { message: 'Email ou téléphone requis', path: ['email'] }),
+});
 export const confirmerSmsSchema = z.object({ body: identifiant.and(z.object({ code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{6}$/, 'Le code a 6 chiffres.') })) });
 export const loginSchema = z.object({ body: identifiant.and(z.object({ password: z.string().min(1, 'Mot de passe requis').max(1000) })) });
 export const identifiantSchema = z.object({ body: identifiant });
@@ -48,7 +51,7 @@ const nomApp = z
   })
   .optional();
 export const updateMeSchema = z.object({
-  body: z.object({ nom: z.string().trim().max(80).optional(), fuseau: z.string().max(60).refine(fuseauValide, 'Fuseau horaire inconnu').optional(), nomApp, motDePasseActuel: z.string().optional(), nouveauMotDePasse: password.optional() }),
+  body: z.object({ email: email.optional(), nom: z.string().trim().max(80).optional(), fuseau: z.string().max(60).refine(fuseauValide, 'Fuseau horaire inconnu').optional(), nomApp, motDePasseActuel: z.string().optional(), nouveauMotDePasse: password.optional() }),
 });
 
 const document = z.record(z.unknown(), { invalid_type_error: 'Document JSON attendu' });

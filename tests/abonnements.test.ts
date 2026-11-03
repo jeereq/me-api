@@ -127,6 +127,8 @@ describe('essai unique par personne', () => {
     assert.deepEqual(a, b);
     assert.doesNotMatch(a[0], /awa/);
     assert.notDeepEqual(empreintesCompte({ email: 'awa.diallo@gmail.com' }, 'autre'), a);
+    assert.equal(empreintesCompte({ email: null, telephone: '243812345678' }, 'secret').length, 1);
+    assert.deepEqual(empreintesCompte({ email: null }, 'secret'), []);
     assert.equal(empreintesCompte({ email: 'x@y.cd', googleId: '123' }, 'secret').length, 2);
   });
 });

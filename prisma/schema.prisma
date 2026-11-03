@@ -17,7 +17,8 @@ enum Role {
 /// Un compte « me ». Le premier compte créé devient admin.
 model User {
   id           String   @id @default(cuid())
-  email        String   @unique
+  /// Absent pour un compte créé avec son seul numéro de téléphone.
+  email        String?  @unique
   /// Absent pour un compte créé avec Google (sans mot de passe).
   passwordHash String?
   nom          String   @default("")

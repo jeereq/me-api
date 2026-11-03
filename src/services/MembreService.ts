@@ -16,7 +16,7 @@ async function assertPasDernierAdmin(id: string) {
   if (cible.role === 'ADMIN' && (await prisma.user.count({ where: { role: 'ADMIN' } })) <= 1) throw new HttpError(400, 'Il faut garder au moins un admin.');
 }
 
-const CHAMPS_GESTION = { id: true, email: true, nom: true, emailVerifie: true, createdAt: true, ...SELECT_ABONNEMENT } as const;
+const CHAMPS_GESTION = { id: true, email: true, telephone: true, nom: true, emailVerifie: true, createdAt: true, ...SELECT_ABONNEMENT } as const;
 const PAR_PAGE = 50;
 const jourFr = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const nomOffre = (f: Formule, p: Palier) => (f === 'finances' ? 'Finances' : p ? `Pro ${p}` : 'Pro');
@@ -75,7 +75,7 @@ export const MembreService = {
     const u = await prisma.user.findUnique({ where: { id }, select: { id: true, ...SELECT_ABONNEMENT } });
     if (!u) throw new HttpError(404, 'Compte introuvable.');
     const admin = await prisma.user.findUniqueOrThrow({ where: { id: par.id }, select: { nom: true, email: true } });
-    const parNom = admin.nom || admin.email;
+    const parNom = admin.nom || admin.email || 'Admin';
     const note = a.note || null;
     let journal: { action: string; formule?: string; palier?: number; duree: string | null; finApres: Date | null };
     let avis: { titre: string; corps: string };

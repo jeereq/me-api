@@ -23,7 +23,7 @@ export const authenticateJWT = async (req: Request, res: Response, next: NextFun
       res.status(401).json({ error: user.sessionsLe && ouverte < user.sessionsLe.getTime() ? 'Session fermée depuis un autre appareil, reconnecte-toi.' : 'Mot de passe changé, reconnecte-toi.' });
       return;
     }
-    req.user = { id: user.id, email: user.email, nom: user.nom, role: user.role };
+    req.user = { id: user.id, email: user.email ?? '', nom: user.nom, role: user.role };
     next();
   } catch {
     res.status(401).json({ error: 'Session expirée, reconnecte-toi.' });

@@ -190,6 +190,7 @@ Si l'envoi échoue, le message et les journaux (lignes `SMS`) donnent la cause :
 
 - **Numéro vérifié** : dans Mon compte › Notifications, un code créé par le serveur part au numéro comme un SMS ordinaire (seule son empreinte est gardée) ; les rappels n'y partent qu'une fois le code confirmé et l'option activée.
 - **Connexion par numéro** : un numéro vérifié sert d'identifiant avec le mot de passe. Il ne peut être lié qu'à un seul compte.
+- **Compte sans email** : l'inscription par SMS n'exige pas d'adresse. Sans email : pas de mails ni d'invitation d'équipe, jusqu'à en ajouter une dans Compte (`PATCH /api/auth/me { email }`) ; le numéro ne peut pas être retiré.
 - **Inscription au choix** : par email, ou par un code SMS. Avec le SMS, un seul compte par numéro, 5 inscriptions par heure et par IP, 50 sur 24 h (`SMS_INSCRIPTIONS_PAR_JOUR`), et aucun email tant que l'adresse n'est pas confirmée. L'admin peut couper ce choix dans Configuration.
 - **Mot de passe oublié** : le lien part aussi au numéro vérifié du compte, sans condition d'abonnement, dans la limite du jour.
 - **Mêmes rappels que l'email** : tous les rappels et les tâches confiées dans une équipe partent aussi par SMS. Le plus important vient d'abord.
