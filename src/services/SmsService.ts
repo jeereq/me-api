@@ -1,6 +1,7 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
+import { ConfigService } from './ConfigService.js';
 import { Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, placeSms, statutLivraison, texteCode, texteReinitialisation, type ConfigSms } from './sms/asmsc.js';
 
 /** Un code reçu par SMS sert 10 minutes. */
@@ -13,6 +14,12 @@ const secretCode = () => process.env.JWT_SECRET as string;
 export const maxParJour = (env: Record<string, string | undefined> = process.env) => {
   const n = Number(env.SMS_MAX_PAR_JOUR);
   return Number.isInteger(n) && n > 0 ? n : 5;
+};
+
+/** SMS d'inscription sur 24 h, tous comptes confondus. */
+export const maxInscriptionsParJour = (env: Record<string, string | undefined> = process.env) => {
+  const n = Number(env.SMS_INSCRIPTIONS_PAR_JOUR);
+  return Number.isInteger(n) && n > 0 ? n : 50;
 };
 
 function exiger(): ConfigSms {
@@ -93,6 +100,27 @@ export const SmsService = {
       await prisma.envoiSms.update({ where: { id: envoi.id }, data: { statut: 'echec' } });
       return false;
     }
+  },
+
+  /** Peut-on confirmer un compte par SMS ? Le service marche, et l'admin n'a coupé ni le SMS ni cette option. */
+  async inscriptionOuverte() {
+    if (!this.configure()) return false;
+    const canaux = ((await ConfigService.get()) as { canaux?: { sms?: boolean; inscriptionSms?: boolean } }).canaux;
+    return canaux?.sms !== false && canaux?.inscriptionSms !== false;
+  },
+
+  /** Le plafond du jour, tous comptes en attente confondus : un formulaire public ne doit pas pouvoir vider le solde. */
+  async plafondInscriptionsAtteint(maintenant = new Date()) {
+    const envoyes = await prisma.envoiSms.count({ where: { createdAt: { gte: new Date(maintenant.getTime() - JOUR_MS) }, user: { telephone: null, emailVerifie: false } } });
+    return envoyes >= maxInscriptionsParJour();
+  },
+
+  /** Le code qui confirme un compte tout juste créé, compté dans la limite du jour de ce compte. */
+  async codeInscription(userId: string, telephone: string) {
+    const cfg = exiger();
+    const code = creerCode();
+    await prisma.user.update({ where: { id: userId }, data: { telephoneEnAttente: telephone, smsVerificationId: empreinteCode(code, userId, telephone, secretCode()), smsVerificationLe: new Date() } });
+    return this.envoyer(userId, telephone, texteCode(cfg.marque, code));
   },
 
   /** Mot de passe oublié : le lien part aussi au numéro vérifié du compte, dans la limite du jour. Ne lève jamais. */

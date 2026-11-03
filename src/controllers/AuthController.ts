@@ -8,16 +8,22 @@ const versApp = (retour: string, params: Record<string, string>) => `${retour}${
 
 export const AuthController = {
   options: async (_req: Request, res: Response) => {
-    res.json(AuthService.options());
+    res.json(await AuthService.options());
   },
   register: async (req: Request, res: Response) => {
-    res.status(201).json(await AuthService.register(req.body.email, req.body.password, req.body.nom));
+    res.status(201).json(await AuthService.register(req.body.email, req.body.password, req.body.nom, { confirmation: req.body.confirmation, telephone: req.body.telephone }));
   },
   login: async (req: Request, res: Response) => {
     res.json(await AuthService.login(req.body.email, req.body.password));
   },
   verifier: async (req: Request, res: Response) => {
     res.json(await AuthService.verifier(req.body.jeton));
+  },
+  confirmerSms: async (req: Request, res: Response) => {
+    res.json(await AuthService.confirmerSms(req.body.email, req.body.code));
+  },
+  renvoyerCodeSms: async (req: Request, res: Response) => {
+    res.json(await AuthService.renvoyerCodeSms(req.body.email));
   },
   renvoyerVerification: async (req: Request, res: Response) => {
     res.json(await AuthService.renvoyerVerification(req.body.email));
