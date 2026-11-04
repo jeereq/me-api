@@ -2,7 +2,7 @@ import type { Fournisseur } from '@prisma/client';
 import type { RechercheMails } from './recherche.js';
 
 import type { AgendaDispo, MailImporte } from './choix.js';
-import type { PieceAJoindre, Personne } from './ecriture.js';
+import type { PieceAJoindre, Personne, SignatureMail } from './ecriture.js';
 import type { MailRiche } from './html-mail.js';
 
 export type { AgendaDispo, MailImporte };
@@ -22,6 +22,8 @@ export type LibelleDispo = { nom: string; couleur?: string };
 /** Une boîte partagée lue avec le compte (Microsoft 365) ; `erreur` dit pourquoi elle n'a pas pu l'être. */
 export type BoitePartagee = { adresse: string; erreur?: string };
 export type Elements = {
+  /** Le repère de la dernière relecture (voir `empreinte`). */
+  empreinte?: string;
   agenda: EvenementImporte[];
   taches: TacheImportee[];
   relances: RelanceImportee[];
@@ -48,6 +50,9 @@ export type PrefsCompte = {
   mails?: ChargementMails;
   /** Le copilote prépare à l'avance l'analyse des nouveaux mails non lus (voir AnalyseMailService). Choisi par l'utilisateur ; faux par défaut. */
   analyseAuto?: boolean;
+  /** Les signatures de ce compte, et celle mise par défaut. */
+  signatures?: SignatureMail[];
+  signatureDefaut?: string | null;
 };
 export type ChargementMails = { jours: number; max: number };
 /** Par défaut : 7 jours, 25 fils, comme avant ce réglage. */
@@ -101,6 +106,10 @@ export interface Connecteur {
 
   /** Envoie une réponse dans le fil d'un message. */
   repondre?(jetons: Jetons, r: ReponseMail): Promise<{ lien?: string }>;
+  /** Un repère léger de l'état de la boîte : s'il change, le compte vaut d'être relu. Un appel ou deux, jamais la lecture des mails. */
+  empreinte?(jetons: Jetons, o: { boitesPartagees?: string[] }): Promise<string>;
+  /** La signature déjà utilisée sur ce compte, en texte ; vide si aucune n'est trouvée. */
+  signature?(jetons: Jetons): Promise<string>;
   /** Une pièce jointe d'un mail, pour l'ouvrir. */
   lirePiece?(jetons: Jetons, p: { mailId: string; pieceId: string; boite?: string }): Promise<{ nom: string; type: string; octets: Buffer }>;
   /** Qui reçoit une réponse à tous, sans télécharger le mail. */

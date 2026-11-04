@@ -6,7 +6,7 @@ import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { boitesValides, chargementValide, choixValides, mailsApresTri, type MailImporte } from './integrations/choix.js';
-import { adresses, ErreurSaisie, type PieceAJoindre } from './integrations/ecriture.js';
+import { adresses, avecSignature, ErreurSaisie, signatureChoisie, signaturesValides, type PieceAJoindre, type SignatureMail } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ErreurExterne, exiger } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
@@ -24,12 +24,19 @@ export const connecteur = (nom: string) => {
   return c;
 };
 
+/** Une vérification par compte, au plus, sur cet intervalle : plusieurs appareils ouverts ne multiplient pas les appels au service. */
+const INTERVALLE_VERIFICATION = 25_000;
+const verifications = new Map<string, number>();
+
 const textes = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 const prefsCompte = (i: Integration): PrefsCompte => {
-  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown; mails?: { jours?: unknown; max?: unknown }; analyseAuto?: unknown } | null;
-  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees), mails: chargementValide(p?.mails), analyseAuto: p?.analyseAuto === true };
+  const p = i.prefs as { agendas?: unknown; boitesPartagees?: unknown; mails?: { jours?: unknown; max?: unknown }; analyseAuto?: unknown; signatures?: unknown; signatureDefaut?: unknown } | null;
+  const signatures = signaturesValides(p?.signatures);
+  return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees), mails: chargementValide(p?.mails), analyseAuto: p?.analyseAuto === true, signatures, signatureDefaut: signatures.some((x) => x.id === p?.signatureDefaut) ? (p?.signatureDefaut as string) : null };
 };
 const donneesDe = (i: Integration) => (i.donnees ?? vide()) as unknown as Elements;
+
+const signe = (i: Integration, texte: string, choix?: string | null) => avecSignature(texte, signatureChoisie(prefsCompte(i), choix));
 
 const publique = (i: Integration) => ({
   id: i.id,
@@ -53,6 +60,10 @@ const publique = (i: Integration) => ({
   chargement: prefsCompte(i).mails,
   /** Le copilote prépare à l'avance l'analyse des nouveaux mails non lus de ce compte (choisi par l'utilisateur, désactivé par défaut). */
   analyseAuto: prefsCompte(i).analyseAuto === true,
+  /** Les signatures de ce compte, celle par défaut, et si le service permet d'en reprendre une. */
+  signatures: prefsCompte(i).signatures ?? [],
+  signatureDefaut: prefsCompte(i).signatureDefaut ?? null,
+  signatureImportable: !!parFournisseur(i.fournisseur).signature,
   /** Ce que le service sait faire de plus avec la boîte : dossiers, règles. */
   dossiers: !!parFournisseur(i.fournisseur).dossiers,
   regles: !!parFournisseur(i.fournisseur).regles,
@@ -134,7 +145,7 @@ export const IntegrationService = {
   },
 
   /** Change le contexte (perso/pro), les agendas synchronisés et/ou les boîtes partagées lues, puis relit le compte. */
-  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[]; chargement?: { jours?: number; max?: number }; analyseAuto?: boolean }) {
+  async modifier(userId: string, id: string, patch: { ctx?: Ctx; agendas?: string[]; boitesPartagees?: string[]; chargement?: { jours?: number; max?: number }; analyseAuto?: boolean; signatures?: SignatureMail[]; signatureDefaut?: string | null }) {
     const i = await prisma.integration.findFirst({ where: { id, userId } });
     if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
     if (patch.boitesPartagees?.length && !parFournisseur(i.fournisseur).boitesPartagees)
@@ -146,13 +157,24 @@ export const IntegrationService = {
     if (patch.boitesPartagees) prefs.boitesPartagees = boitesValides(patch.boitesPartagees).filter((b) => b !== i.compte.toLowerCase());
     if (patch.chargement) prefs.mails = chargementValide({ ...prefs.mails, ...patch.chargement });
     if (patch.analyseAuto !== undefined) prefs.analyseAuto = patch.analyseAuto;
+    if (patch.signatures) prefs.signatures = signaturesValides(patch.signatures);
+    if (patch.signatureDefaut !== undefined) prefs.signatureDefaut = patch.signatureDefaut;
+    if (!prefs.signatures?.some((x) => x.id === prefs.signatureDefaut)) prefs.signatureDefaut = null;
     const relire = !!(patch.agendas || patch.boitesPartagees || patch.chargement);
-    // Choisir d'analyser à l'avance n'a pas besoin de relire le compte.
-    if (relire || patch.analyseAuto !== undefined) data.prefs = prefs as Prisma.InputJsonObject;
+    // Choisir d'analyser à l'avance ou ses signatures n'a pas besoin de relire le compte.
+    if (relire || patch.analyseAuto !== undefined || patch.signatures || patch.signatureDefaut !== undefined) data.prefs = prefs as Prisma.InputJsonObject;
     await prisma.integration.update({ where: { id }, data });
     // Les agendas, les boîtes et le chargement choisis ne changent rien tant que le compte n'a pas été relu.
     if (relire) await this.synchroniserUne(id).catch(() => {});
     return publique(await prisma.integration.findUniqueOrThrow({ where: { id } }));
+  },
+
+  /** La signature déjà utilisée sur ce compte, à reprendre dans Me. */
+  async signatureDuCompte(userId: string, id: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'signature');
+    const texte = await this._ecrire(() => c.signature!(jetons), i, false);
+    if (!texte.trim()) throw new HttpError(404, `Aucune signature trouvée sur ce compte ${c.nom}. Écris-la ici.`);
+    return { texte: texte.trim().slice(0, 2000) };
   },
 
   /** Les agendas du compte, avec ceux qui sont cochés : de quoi régler la synchronisation dans l'app. */
@@ -175,7 +197,7 @@ export const IntegrationService = {
   },
 
   /** Importe les éléments d'un compte connecté et les garde ; l'erreur éventuelle reste visible dans l'app. */
-  async synchroniserUne(id: string) {
+  async synchroniserUne(id: string, empreinte?: string) {
     const i = await prisma.integration.findUniqueOrThrow({ where: { id }, include: { user: { select: { fuseau: true, espace: { select: { data: true } } } } } });
     const cfg = (await prisma.config.findUnique({ where: { id: 1 } }))?.data as { delaiRelanceJours?: number } | undefined;
     try {
@@ -191,7 +213,8 @@ export const IntegrationService = {
       });
       // Les mails vus dans les dossiers restent : ils ne viennent pas de cet import.
       const vus = donneesDe(i).vus;
-      await prisma.integration.update({ where: { id }, data: { donnees: jsonPropre({ ...donnees, ...(vus?.length ? { vus } : {}) }) as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
+      const repere = empreinte ?? donneesDe(i).empreinte;
+      await prisma.integration.update({ where: { id }, data: { donnees: jsonPropre({ ...donnees, ...(vus?.length ? { vus } : {}), ...(repere ? { empreinte: repere } : {}) }) as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
     } catch (e) {
       const message = e instanceof ErreurExterne ? e.message : 'Synchronisation impossible pour l’instant.';
       if (!(e instanceof ErreurExterne)) console.error('Synchro', i.fournisseur, e);
@@ -202,6 +225,30 @@ export const IntegrationService = {
   async synchroniserCompte(userId: string) {
     const ids = await prisma.integration.findMany({ where: { userId }, select: { id: true } });
     for (const { id } of ids) await this.synchroniserUne(id);
+  },
+
+  /** Relit le compte si sa boîte a changé. Une panne ne remonte pas : la synchro planifiée dira l'erreur s'il y en a une. */
+  async _verifierUne(i: Integration) {
+    const c = parFournisseur(i.fournisseur);
+    if (!c.empreinte) return;
+    const depuis = verifications.get(i.id) ?? 0;
+    if (Date.now() - depuis < INTERVALLE_VERIFICATION) return;
+    verifications.set(i.id, Date.now());
+    try {
+      const e = await c.empreinte(await jetonsValides(i), { boitesPartagees: prefsCompte(i).boitesPartagees ?? [] });
+      if (e && e !== donneesDe(i).empreinte) await this.synchroniserUne(i.id, e);
+    } catch (err) {
+      if (!(err instanceof ErreurExterne)) console.error('Vérification', i.fournisseur, err);
+    }
+  },
+
+  /** Ce que l'app demande souvent, tant qu'elle est ouverte : un repère de la boîte, relue seulement s'il a changé. `version` change quand il y a du neuf à relire. */
+  async nouveautes(userId: string) {
+    const avant = await prisma.integration.findMany({ where: { userId } });
+    await Promise.all(avant.map((i) => this._verifierUne(i)));
+    const apres = await prisma.integration.findMany({ where: { userId }, select: { derniereSync: true } });
+    const dates = apres.flatMap((i) => (i.derniereSync ? [i.derniereSync.getTime()] : []));
+    return { version: dates.length ? String(Math.max(...dates)) : null };
   },
 
   async synchroniserTout() {
@@ -348,14 +395,14 @@ export const IntegrationService = {
   },
 
   /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */
-  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }, pieces: PieceAJoindre[] = []) {
+  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }, pieces: PieceAJoindre[] = [], signature?: string | null) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'repondre');
     const m = this._mailGarde(i, mailId);
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
     // Des destinataires choisis, vérifiés ; sans choix, la réponse va à toutes les personnes du mail.
     const dest = choix?.a?.length ? { a: adresses(choix.a.join(',')), cc: adresses((choix.cc ?? []).join(',')) } : undefined;
     // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.
-    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte, messageId: m.messageId, references: m.references, boite: m.boite, dest, moi: this._mesAdresses(i, m.boite), ...(pieces.length ? { pieces } : {}) }), i, false);
+    return this._ecrire(() => c.repondre!(jetons, { mailId: m.id, fil: m.fil, a: m.adresse || m.contact, sujet: m.sujet, texte: signe(i, texte, signature), messageId: m.messageId, references: m.references, boite: m.boite, dest, moi: this._mesAdresses(i, m.boite), ...(pieces.length ? { pieces } : {}) }), i, false);
   },
 
   _mesAdresses(i: Integration, boite?: string) {
@@ -443,9 +490,9 @@ export const IntegrationService = {
   },
 
   /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */
-  async envoyer(userId: string, id: string, m: { a: string; cc?: string; sujet?: string; texte: string }, pieces: PieceAJoindre[] = []) {
+  async envoyer(userId: string, id: string, m: { a: string; cc?: string; sujet?: string; texte: string; signature?: string | null }, pieces: PieceAJoindre[] = []) {
     const { i, c, jetons } = await this._pourEcrire(userId, id, 'envoyer');
-    return this._ecrire(() => c.envoyer!(jetons, { a: adresses(m.a), cc: adresses(m.cc), sujet: m.sujet ?? '', texte: m.texte, ...(pieces.length ? { pieces } : {}) }), i, false);
+    return this._ecrire(() => c.envoyer!(jetons, { a: adresses(m.a), cc: adresses(m.cc), sujet: m.sujet ?? '', texte: signe(i, m.texte, m.signature), ...(pieces.length ? { pieces } : {}) }), i, false);
   },
 
   async creerEvenement(userId: string, id: string, e: Omit<EcritureEvenement, 'fuseau'>) {
