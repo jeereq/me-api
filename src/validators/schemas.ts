@@ -73,7 +73,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'etiquettes', 'traduction', 'compte_rendu']),
+    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'etiquettes', 'traduction', 'compte_rendu']),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
     ajustement: z.enum(['court', 'formel', 'decliner', 'refaire', 'contexte']).optional(),
     /** Pour « traduction » : la langue voulue. */
@@ -87,6 +87,8 @@ export const assistantSchema = z.object({
     consignes: z.string().max(1000).optional(),
     donnees: z.string().max(200_000).optional(),
     question: z.string().max(2000).optional(),
+    /** Pour « conversation » : les derniers échanges, du plus ancien au plus récent. */
+    historique: z.array(z.object({ q: z.string().max(2000), r: z.string().max(4000) })).max(6).optional(),
     heure: z.string().max(20).optional(),
     contact: z.string().max(200).optional(),
     sujet: z.string().max(1000).optional(),
