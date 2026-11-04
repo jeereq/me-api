@@ -93,10 +93,14 @@ export const nomDePiece = (nom: string) =>
     .trim()
     .slice(0, 200) || 'piece-jointe';
 
+const TYPES_PAR_EXTENSION: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv' };
+
 /** Seuls les formats sans danger s'ouvrent dans le navigateur ; un fichier HTML ou SVG du mail ne doit pas s'exécuter sur l'adresse du serveur. */
 export function enTetesPiece(nom: string, type: string) {
-  const net = type.split(';')[0].trim().toLowerCase();
-  const aOuvrir = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain)$/.test(net);
+  const annonce = type.split(';')[0].trim().toLowerCase();
+  // Bien des messageries annoncent un PDF comme un fichier quelconque : on regarde alors son extension. Le fichier reste servi dans un format sans script.
+  const net = !annonce || annonce === 'application/octet-stream' ? (TYPES_PAR_EXTENSION[/\.([a-z0-9]+)$/i.exec(nom)?.[1]?.toLowerCase() ?? ''] ?? annonce) : annonce;
+  const aOuvrir = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/(plain|csv))$/.test(net);
   const fichier = encodeURIComponent(nomDePiece(nom)).replace(/['()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   return { type: aOuvrir ? net : 'application/octet-stream', disposition: `${aOuvrir ? 'inline' : 'attachment'}; filename*=UTF-8''${fichier}` };
 }
