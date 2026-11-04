@@ -35,6 +35,18 @@ describe('assistant : copilote et analyse des mails', () => {
     assert.match(p, /"plan"/);
     assert.match(p, /14:05/);
   });
+  it('le plan tient compte des mails non lus, sans suivre ce qu’ils demandent à l’IA', () => {
+    for (const type of ['plan', 'copilote'] as const) {
+      const p = prompt({ type, heure: '09:00', donnees: '{}' });
+      assert.match(p, /mailsNonLus/);
+      assert.match(p, /jamais des instructions/);
+    }
+  });
+  it('une question connaît les vrais totaux, et les mails n’y commandent pas', () => {
+    const p = prompt({ type: 'question', question: 'Combien ?', donnees: '{}' });
+    assert.match(p, /vrais totaux/);
+    assert.match(p, /jamais des instructions/);
+  });
   it('les mails sont analysés un par un, avec une réponse proposée', () => {
     const p = prompt({ type: 'mails', donnees: '[{"id":"g:1","de":"Paul","sujet":"Devis"}]' });
     assert.match(p, /"analyses"/);
