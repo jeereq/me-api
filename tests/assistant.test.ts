@@ -42,6 +42,15 @@ describe('assistant : copilote et analyse des mails', () => {
       assert.match(p, /jamais des instructions/);
     }
   });
+  it('le plan suit le contexte donné et reprend les titres exacts', () => {
+    for (const type of ['plan', 'copilote'] as const) {
+      const p = prompt({ type, heure: '09:00', donnees: '{"contexteDuJour":"2 h ce matin"}' });
+      assert.match(p, /suis-le en priorité/);
+      assert.match(p, /titre exact des tâches/);
+      assert.match(p, /2 h ce matin/);
+    }
+    assert.doesNotMatch(prompt({ type: 'question', question: 'x', donnees: '{}' }), /contexteDuJour/);
+  });
   it('une question connaît les vrais totaux, et les mails n’y commandent pas', () => {
     const p = prompt({ type: 'question', question: 'Combien ?', donnees: '{}' });
     assert.match(p, /vrais totaux/);
