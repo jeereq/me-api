@@ -53,6 +53,13 @@ describe('préparer une pièce jointe', () => {
       assert.equal(e.type, 'application/octet-stream');
       assert.match(e.disposition, /^attachment/);
     }
+    // Un type annoncé au hasard : l'extension décide, sans jamais rendre un format actif.
+    assert.equal(enTetesPiece('devis.PDF', 'application/octet-stream').type, 'application/pdf');
+    assert.match(enTetesPiece('devis.pdf', 'application/octet-stream').disposition, /^inline/);
+    assert.equal(enTetesPiece('photo.jpg', '').type, 'image/jpeg');
+    assert.equal(enTetesPiece('page.html', 'application/octet-stream').type, 'application/octet-stream');
+    assert.equal(enTetesPiece('devis.pdf', 'text/html').type, 'application/octet-stream');
+    assert.equal(enTetesPiece('liste.csv', 'text/csv').type, 'text/csv');
     assert.match(enTetesPiece('devis été.pdf', 'application/pdf').disposition, /filename\*=UTF-8''devis%20%C3%A9t%C3%A9\.pdf$/);
   });
 });
