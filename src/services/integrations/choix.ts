@@ -1,3 +1,4 @@
+import { estAutomatique } from '../../commun/mails-auto.js';
 /**
  * Ce que le serveur lit dans un compte connecté : quels agendas, et comment ranger les mails.
  * Module pur (aucun appel réseau), partagé par les connecteurs Google et Microsoft.
@@ -132,3 +133,26 @@ export function mailsApresTri<M extends { id: string; nonLu?: boolean }>(mails: 
   const faits = new Set(ids);
   return mails.filter((m) => action !== 'archiver' || !faits.has(m.id)).map((m) => (faits.has(m.id) ? { ...m, nonLu: false } : m));
 }
+
+/**
+ * Les mails à annoncer après une relecture : reçus, non lus, écrits par une personne, absents de la lecture d'avant et arrivés depuis.
+ * La date compte : un vieux mail peut revenir dans la liste quand un plus récent en sort, il n'est pas nouveau pour autant.
+ */
+export function mailsAAnnoncer(avant: Pick<MailImporte, 'id'>[], apres: MailImporte[], depuis: string): MailImporte[] {
+  const connus = new Set(avant.map((m) => m.id));
+  return apres
+    .filter((m) => m.sens === 'recu' && m.nonLu && !connus.has(m.id) && !estAutomatique(m) && `${m.date}T${m.heure ?? '23:59'}` >= depuis)
+    .sort((a, b) => `${b.date}T${b.heure ?? ''}`.localeCompare(`${a.date}T${a.heure ?? ''}`));
+}
+
+/** Ce que dit la notification : le mail s'il est seul, sinon un résumé. Sa clé empêche de l'envoyer deux fois. */
+export function annonceMails(integration: string, mails: Pick<MailImporte, 'id' | 'contact' | 'sujet'>[]) {
+  const [premier] = mails;
+  const cle = `mail:${integration}:${premier.id}`;
+  if (mails.length === 1) return { cle, titre: `Nouveau mail de ${premier.contact || 'quelqu’un'}`, corps: (premier.sujet || '(sans objet)').slice(0, 140), url: `/messages?lire=${encodeURIComponent(`ext:${integration}:${premier.id}`)}` };
+  const noms = [...new Set(mails.map((m) => m.contact).filter(Boolean))];
+  const reste = noms.length - 2;
+  const corps = noms.length > 2 ? `${noms.slice(0, 2).join(', ')} et ${reste} autre${reste > 1 ? 's' : ''}` : noms.join(' et ');
+  return { cle, titre: `${mails.length} nouveaux mails`, corps, url: '/messages' };
+}
+

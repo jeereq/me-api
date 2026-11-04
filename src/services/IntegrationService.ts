@@ -5,10 +5,11 @@ import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
-import { boitesValides, chargementValide, choixValides, mailsApresTri, type MailImporte } from './integrations/choix.js';
+import { boitesValides, chargementValide, choixValides, mailsAAnnoncer, mailsApresTri, type MailImporte } from './integrations/choix.js';
+import { NotificationService } from './NotificationService.js';
 import { adresses, avecSignature, ErreurSaisie, signatureChoisie, signaturesValides, type PieceAJoindre, type SignatureMail } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
-import { ErreurExterne, exiger } from './integrations/http.js';
+import { ErreurExterne, exiger, local } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
 import { slackConnecteur } from './integrations/slack.js';
 import { trello } from './integrations/trello.js';
@@ -26,6 +27,8 @@ export const connecteur = (nom: string) => {
 
 /** Une vérification par compte, au plus, sur cet intervalle : plusieurs appareils ouverts ne multiplient pas les appels au service. */
 const INTERVALLE_VERIFICATION = 25_000;
+/** Un mail arrivé juste avant la dernière relecture a pu lui échapper. */
+const MARGE_ANNONCE = 10 * 60 * 1000;
 const verifications = new Map<string, number>();
 
 const textes = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
@@ -197,8 +200,8 @@ export const IntegrationService = {
   },
 
   /** Importe les éléments d'un compte connecté et les garde ; l'erreur éventuelle reste visible dans l'app. */
-  async synchroniserUne(id: string, empreinte?: string) {
-    const i = await prisma.integration.findUniqueOrThrow({ where: { id }, include: { user: { select: { fuseau: true, espace: { select: { data: true } } } } } });
+  async synchroniserUne(id: string, o: { empreinte?: string; annoncer?: boolean } = {}) {
+    const i = await prisma.integration.findUniqueOrThrow({ where: { id }, include: { user: { select: { id: true, fuseau: true, espace: { select: { data: true } } } } } });
     const cfg = (await prisma.config.findUnique({ where: { id: 1 } }))?.data as { delaiRelanceJours?: number } | undefined;
     try {
       const jetons = await jetonsValides(i);
@@ -213,8 +216,13 @@ export const IntegrationService = {
       });
       // Les mails vus dans les dossiers restent : ils ne viennent pas de cet import.
       const vus = donneesDe(i).vus;
-      const repere = empreinte ?? donneesDe(i).empreinte;
+      const repere = o.empreinte ?? donneesDe(i).empreinte;
       await prisma.integration.update({ where: { id }, data: { donnees: jsonPropre({ ...donnees, ...(vus?.length ? { vus } : {}), ...(repere ? { empreinte: repere } : {}) }) as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
+      // Un compte qui vient d'être connecté n'a rien de nouveau : tout y serait annoncé. Une panne de notification ne casse pas la relecture.
+      if (o.annoncer && i.derniereSync) {
+        const d = local(new Date(i.derniereSync.getTime() - MARGE_ANNONCE), i.user.fuseau);
+        await NotificationService.nouveauxMails({ id: i.user.id, fuseau: i.user.fuseau, espace: i.user.espace }, i.id, mailsAAnnoncer(donneesDe(i).mails ?? [], donnees.mails ?? [], `${d.date}T${d.heure}`)).catch((e) => console.error('Annonce des mails', e));
+      }
     } catch (e) {
       const message = e instanceof ErreurExterne ? e.message : 'Synchronisation impossible pour l’instant.';
       if (!(e instanceof ErreurExterne)) console.error('Synchro', i.fournisseur, e);
@@ -228,7 +236,7 @@ export const IntegrationService = {
   },
 
   /** Relit le compte si sa boîte a changé. Une panne ne remonte pas : la synchro planifiée dira l'erreur s'il y en a une. */
-  async _verifierUne(i: Integration) {
+  async _verifierUne(i: Integration, annoncer = false) {
     const c = parFournisseur(i.fournisseur);
     if (!c.empreinte) return;
     const depuis = verifications.get(i.id) ?? 0;
@@ -236,7 +244,7 @@ export const IntegrationService = {
     verifications.set(i.id, Date.now());
     try {
       const e = await c.empreinte(await jetonsValides(i), { boitesPartagees: prefsCompte(i).boitesPartagees ?? [] });
-      if (e && e !== donneesDe(i).empreinte) await this.synchroniserUne(i.id, e);
+      if (e && e !== donneesDe(i).empreinte) await this.synchroniserUne(i.id, { empreinte: e, annoncer });
     } catch (err) {
       if (!(err instanceof ErreurExterne)) console.error('Vérification', i.fournisseur, err);
     }
@@ -251,6 +259,15 @@ export const IntegrationService = {
     return { version: dates.length ? String(Math.max(...dates)) : null };
   },
 
+  /** App fermée : regarde chaque boîte Pro et prévient de ce qui arrive. L'app ouverte fait ce travail elle-même et affiche le mail : pas besoin de notification en plus. */
+  async verifierTout() {
+    const liste = await prisma.integration.findMany({ include: { user: { select: { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true, espace: { select: { data: true } } } } } });
+    for (const i of liste) {
+      const notifs = (i.user.espace?.data as { notifs?: { mails?: boolean } } | null | undefined)?.notifs;
+      if (notifs?.mails !== false && etatAbonnement(i.user).pro) await this._verifierUne(i, true);
+    }
+  },
+
   async synchroniserTout() {
     const liste = await prisma.integration.findMany({
       select: { id: true, user: { select: { role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true } } },
@@ -258,7 +275,7 @@ export const IntegrationService = {
     // Les comptes connectés font partie de Pro : sans abonnement (ni essai), ils ne sont plus relus.
     // Un compte en échec ne doit pas empêcher la lecture des suivants.
     for (const { id, user } of liste) {
-      if (etatAbonnement(user).pro) await this.synchroniserUne(id).catch((e) => console.error('Synchro', id, e));
+      if (etatAbonnement(user).pro) await this.synchroniserUne(id, { annoncer: true }).catch((e) => console.error('Synchro', id, e));
     }
   },
 

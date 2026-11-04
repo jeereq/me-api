@@ -5,6 +5,7 @@ import { PushService } from './PushService.js';
 import { rappelsParSms, rappelSecondaire, texteRappels } from './sms/asmsc.js';
 import { SmsService } from './SmsService.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
+import { annonceMails, type MailImporte } from './integrations/choix.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
 import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
@@ -13,7 +14,7 @@ import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, ty
 const RATTRAPAGE_MIN = 45;
 const COULEURS: Record<string, string> = { agressif: '#FF6474', normal: '#62AEFF', coach: '#3EF0B0', hebdo: '#FFCB5C', briefing: '#38D9FF', passif: '#7F98A6' };
 
-type Prefs = { app?: boolean; email?: boolean; sms?: boolean };
+type Prefs = { app?: boolean; email?: boolean; sms?: boolean; mails?: boolean };
 /** Ce que dit l'avis selon ce qui est confié, au singulier, au pluriel, et où il mène. */
 const PHRASE_AFFECTATION: Record<Affectation['genre'], string> = { tache: "t'a confié une tâche", relance: "t'a confié une relance", rdv: "t'a affecté un rendez-vous" };
 const PLURIEL_AFFECTATION: Record<Affectation['genre'], string> = { tache: 'tâches', relance: 'relances', rdv: 'rendez-vous' };
@@ -107,6 +108,16 @@ export const NotificationService = {
     await SmsService.purger(maintenant);
     // On garde 60 jours d'historique.
     await prisma.notification.deleteMany({ where: { createdAt: { lt: new Date(maintenant.getTime() - 60 * 86400000) } } });
+  },
+
+  /** Prévient de mails arrivés : une notification et un push, jamais d'email ni de SMS. Coupé dans les réglages (`notifs.mails`). */
+  async nouveauxMails(u: { id: string; fuseau: string; espace?: { data: unknown } | null }, integration: string, mails: MailImporte[], maintenant = new Date()) {
+    const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
+    if (!mails.length || prefs.mails === false) return;
+    const a = annonceMails(integration, mails);
+    const { date, heure } = local(maintenant, u.fuseau);
+    const { count } = await prisma.notification.createMany({ data: [{ userId: u.id, cle: a.cle, titre: a.titre, corps: a.corps, mode: 'briefing', quand: `${date}T${heure}`, lu: prefs.app === false }], skipDuplicates: true });
+    if (count && prefs.app !== false) await PushService.envoyer(u.id, { titre: a.titre, corps: a.corps, mode: 'briefing', url: a.url, tag: a.cle });
   },
 
   /** Fin d'essai et fin de la période payée : un message par échéance, quels que soient les réglages de rappels. */

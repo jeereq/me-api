@@ -3,6 +3,7 @@
     "README.md",
     "calcul.ts",
     "jours.ts",
+    "mails-auto.ts",
     "modes.ts",
     "mot-de-passe.ts",
     "nom-app.ts",
