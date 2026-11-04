@@ -2,7 +2,7 @@ import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo
 import { base64Url, destinatairesReponse, ErreurSaisie, lendemain, lireAdresses, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
-import { decoderEntites, htmlDeGmail, partieGmail, piecesDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
+import { decoderEntites, htmlDeGmail, htmlEnTexte, partieGmail, piecesDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
 import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
@@ -246,6 +246,18 @@ export const google: Connecteur = {
     const message = messageRfc822({ a: tous?.a.length ? tous.a : r.a, cc: tous?.a.length ? tous.cc : [], sujet: r.sujet, texte: r.texte, messageId: r.messageId, references: r.references, pieces: r.pieces });
     const env = await envoyerGmail(accessToken, message, r.fil, !!r.pieces?.length);
     return { lien: lienMail(env.threadId || r.fil || env.id) };
+  },
+
+  // `historyId` change à chaque événement de la boîte : mail reçu, envoyé, lu, rangé.
+  async empreinte({ accessToken }) {
+    const p = await json<{ historyId?: string }>('Gmail', `${GMAIL}/profile`, bearer(accessToken));
+    return String(p.historyId ?? '');
+  },
+
+  async signature({ accessToken }) {
+    const { sendAs = [] } = await json<{ sendAs?: { isDefault?: boolean; isPrimary?: boolean; signature?: string }[] }>('Gmail', `${GMAIL}/settings/sendAs`, bearer(accessToken));
+    const adresse = sendAs.find((x) => x.isDefault && x.signature) ?? sendAs.find((x) => x.isPrimary && x.signature) ?? sendAs.find((x) => x.signature);
+    return adresse?.signature ? htmlEnTexte(adresse.signature) : '';
   },
 
   async lirePiece({ accessToken }, { mailId, pieceId }) {

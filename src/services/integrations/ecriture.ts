@@ -42,6 +42,42 @@ export function enteteEncode(valeur: string): string {
 /** Une adresse seule : « Marie Dupont <marie@exemple.fr> » devient « marie@exemple.fr ». */
 export const adresseSeule = (v: string) => (v.match(/<([^>]+)>/)?.[1] ?? v).trim();
 
+/* ---------- Signatures ---------- */
+
+export type SignatureMail = { id: string; nom: string; texte: string };
+export const MAX_SIGNATURES = 10;
+
+/** Les signatures d'un compte, relues : une entrée abîmée est ignorée. */
+export function signaturesValides(v: unknown): SignatureMail[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((s): s is SignatureMail => !!s && typeof s.id === 'string' && !!s.id && typeof s.nom === 'string' && typeof s.texte === 'string' && !!s.texte.trim())
+    .slice(0, MAX_SIGNATURES)
+    .map(({ id, nom, texte }) => ({ id, nom: nom.trim().slice(0, 60) || 'Signature', texte: texte.trim().slice(0, 2000) }));
+}
+
+/** La signature à mettre : celle choisie ; `null` : aucune ; rien de précisé (ou une signature retirée entre-temps) : celle par défaut. */
+export function signatureChoisie(p: { signatures?: SignatureMail[]; signatureDefaut?: string | null }, choix?: string | null): string | undefined {
+  if (choix === null) return undefined;
+  const l = p.signatures ?? [];
+  return (l.find((s) => s.id === choix) ?? l.find((s) => s.id === p.signatureDefaut))?.texte;
+}
+
+const compare = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Le texte suivi de sa signature. Déjà écrite à la fin du texte, elle n'est pas répétée. */
+export function avecSignature(texte: string, signature?: string | null): string {
+  const t = texte.trim();
+  const s = signature?.trim();
+  if (!s || compare(t).endsWith(compare(s))) return t;
+  return `${t}\n\n${s}`;
+}
+
+/* ---------- Texte dans une réponse Outlook ---------- */
+
+/** Graph lit le commentaire d'une réponse comme du HTML : sans ça, les retours à la ligne disparaissent et un « < » serait pris pour une balise. */
+export const texteEnHtml = (t: string) => t.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>');
+
 /* ---------- Pièces jointes ---------- */
 
 export type PieceAJoindre = { nom: string; type: string; octets: Buffer };

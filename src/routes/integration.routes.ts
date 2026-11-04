@@ -42,6 +42,7 @@ router.post('/:id/mails/:mail/libelles', validateRequest(etiqueterMailSchema), a
 // Avec des fichiers : un formulaire, lu et vérifié par le contrôleur.
 router.post('/:id/repondre/pieces', asyncHandler(IntegrationController.repondreAvecPieces));
 router.post('/:id/envoyer/pieces', asyncHandler(IntegrationController.envoyerAvecPieces));
+router.get('/:id/signature', asyncHandler(IntegrationController.signature));
 router.post('/:id/mails/:mail/pieces/:piece/lien', asyncHandler(IntegrationController.lienPiece));
 router.post('/:id/repondre', validateRequest(repondreMailSchema), asyncHandler(IntegrationController.repondre));
 router.post('/:id/envoyer', validateRequest(envoyerMailSchema), asyncHandler(IntegrationController.envoyer));

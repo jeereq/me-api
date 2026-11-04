@@ -188,9 +188,11 @@ export const patchIntegrationSchema = integrationParamsSchema.extend({
       agendas: z.array(z.string().min(1).max(300)).max(50).optional(),
       boitesPartagees: z.array(z.string().trim().email('Adresse de boîte partagée invalide.').max(320)).max(10, 'Dix boîtes partagées au plus.').optional(),
       chargement: z.object({ jours: z.number().int().min(1).max(90).optional(), max: z.number().int().min(10).max(100).optional() }).optional(),
+      signatures: z.array(z.object({ id: z.string().min(1).max(40), nom: z.string().trim().min(1).max(60), texte: z.string().trim().min(1, 'Écris le texte de la signature.').max(2000) })).max(10, 'Dix signatures au plus.').optional(),
+      signatureDefaut: z.string().max(40).nullable().optional(),
       analyseAuto: z.boolean().optional(),
     })
-    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined || b.chargement !== undefined || b.analyseAuto !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas », « boitesPartagees », « chargement » ou « analyseAuto ».' }),
+    .refine((b) => b.ctx !== undefined || b.agendas !== undefined || b.boitesPartagees !== undefined || b.chargement !== undefined || b.analyseAuto !== undefined || b.signatures !== undefined || b.signatureDefaut !== undefined, { message: 'Rien à modifier : donne « ctx », « agendas », « boitesPartagees », « chargement » ou « analyseAuto ».' }),
 });
 
 const DATE_TXT = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.');
@@ -205,7 +207,7 @@ const rendezvous = {
   journee: z.boolean().optional(),
 };
 
-export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000), /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ a: z.array(z.string().min(3).max(320)).min(1).max(50).optional(), cc: z.array(z.string().min(3).max(320)).max(50).optional() }) });
+export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000), /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ a: z.array(z.string().min(3).max(320)).min(1).max(50).optional(), cc: z.array(z.string().min(3).max(320)).max(50).optional(), /** La signature choisie ; `null` : aucune ; absente : celle par défaut. */ signature: z.string().max(40).nullable().optional() }) });
 export const lireMailSchema = z.object({ params: z.object({ id: z.string().min(1), mail: z.string().min(1).max(500) }) });
 /** `lu=0` : lire sans marquer comme lu (analyse des mails par le copilote). */
 export const lireMailQuerySchema = lireMailSchema.extend({ query: z.object({ lu: z.enum(['0', '1']).optional() }).passthrough() });
@@ -231,7 +233,7 @@ export const etiqueterMailSchema = lireMailSchema.extend({
     .refine((b) => (b.ajouter?.length ?? 0) + (b.retirer?.length ?? 0) > 0, { message: 'Choisis une étiquette à poser ou à retirer.' }),
 });
 export const envoyerMailSchema = integrationParamsSchema.extend({
-  body: z.object({ a: z.string().min(3, 'Indique à qui envoyer ce mail.').max(5000), cc: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), texte: z.string().min(1, 'Écris ton message avant de l’envoyer.').max(20_000) }),
+  body: z.object({ signature: z.string().max(40).nullable().optional(), a: z.string().min(3, 'Indique à qui envoyer ce mail.').max(5000), cc: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), texte: z.string().min(1, 'Écris ton message avant de l’envoyer.').max(20_000) }),
 });
 export const creerEvenementSchema = integrationParamsSchema.extend({ body: z.object(rendezvous) });
 export const modifierEvenementSchema = integrationParamsSchema.extend({ body: z.object({ ...rendezvous, id: z.string().min(1).max(500) }) });

@@ -1,7 +1,8 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
-import { destinatairesReponse, ErreurSaisie, lendemain as lendemainMS, verifierPieces, type PieceAJoindre, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
+import { destinatairesReponse, ErreurSaisie, lendemain as lendemainMS, texteEnHtml, verifierPieces, type PieceAJoindre, verifierNouveau, verifierRendezvous, verifierTache } from './ecriture.js';
 import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteComplet, texteDeBlocs } from './html-mail.js';
+import { decouperSignature } from '../../commun/signature.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
 import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
@@ -329,14 +330,36 @@ export const microsoft: Connecteur = {
     const url = `${racine(r.boite)}/messages/${encodeURIComponent(r.mailId)}`;
     // Sans choix ni fichier, comme « Répondre à tous » : Graph reprend l'objet, le fil et toutes les personnes du mail.
     if (!r.dest && !r.pieces?.length) {
-      await json('Outlook', `${url}/replyAll`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+      await json('Outlook', `${url}/replyAll`, corpsJson(accessToken, 'POST', { comment: texteEnHtml(r.texte) }));
       return {};
     }
     // Sinon un brouillon : on y fixe les destinataires choisis et on y joint les fichiers, puis il part.
     const pieces = verifierPieces(r.pieces ?? []);
-    const brouillon = await json<{ id: string }>('Outlook', `${url}/${r.dest ? 'createReply' : 'createReplyAll'}`, corpsJson(accessToken, 'POST', { comment: r.texte.trim() }));
+    const brouillon = await json<{ id: string }>('Outlook', `${url}/${r.dest ? 'createReply' : 'createReplyAll'}`, corpsJson(accessToken, 'POST', { comment: texteEnHtml(r.texte) }));
     await finirBrouillon(accessToken, racine(r.boite), brouillon.id, pieces, r.dest ? { toRecipients: versGraph(r.dest.a), ccRecipients: versGraph(r.dest.cc) } : undefined);
     return {};
+  },
+
+  // Les totaux de la réception, des envoyés et des boîtes partagées : un appel par dossier, sans lire un seul mail.
+  async empreinte({ accessToken }, { boitesPartagees = [] }) {
+    const auth = bearer(accessToken);
+    const dossier = (nom: string, boite?: string) => json<{ totalItemCount?: number; unreadItemCount?: number }>('Outlook', `${racine(boite)}/mailFolders/${nom}?$select=totalItemCount,unreadItemCount`, auth);
+    const moi = await Promise.all([dossier('inbox'), dossier('sentitems')]);
+    // Une boîte partagée refusée ne doit pas empêcher de voir les autres.
+    const autres = await Promise.all(boitesPartagees.map((b) => dossier('inbox', b).catch(() => null)));
+    return [...moi, ...autres].map((d) => (d ? `${d.totalItemCount ?? 0}/${d.unreadItemCount ?? 0}` : '-')).join(',');
+  },
+
+  // Graph ne donne pas la signature d'Outlook : on la retrouve à la fin des derniers mails envoyés.
+  async signature({ accessToken }) {
+    const { value = [] } = await json<{ value?: { uniqueBody?: { contentType?: string; content?: string } }[] }>('Outlook', `${GRAPH}/mailFolders/sentitems/messages?$top=5&$orderby=sentDateTime desc&$select=uniqueBody`, bearer(accessToken));
+    for (const m of value) {
+      const c = m.uniqueBody?.content ?? '';
+      const texte = m.uniqueBody?.contentType?.toLowerCase() === 'html' ? htmlEnTexte(c) : c;
+      const { signature } = decouperSignature(texte);
+      if (signature.trim() && !/^\s*(envoy[ée]\s+(de|depuis)|sent from|get outlook|obtenir outlook)/i.test(signature)) return signature.trim();
+    }
+    return '';
   },
 
   async lirePiece({ accessToken }, { mailId, pieceId, boite }) {
