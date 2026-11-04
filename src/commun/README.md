@@ -5,6 +5,7 @@ Ce dossier est la **seule source** du code qui doit donner le même résultat da
 | Fichier | Rôle |
 |---|---|
 | `calcul.ts` | Rappels d'une journée : `rappelsDuJour` (serveur : push et email) et `rappelsDesElements` (relances, tâches, habitudes, résumés, bilans), que l'app reprend pour programmer les notifications du téléphone |
+| `mails-auto.ts` | Reconnaître un mail envoyé par un robot (notifications, sans réponse possible) |
 | `modes.ts` | Modes de rappel et leurs règles |
 | `jours.ts` | Jours en texte « AAAA-MM-JJ » : décalage, semaine, habitude prévue, en retard, cochée |
 | `projets.ts` | Tâches de projet à rappeler (ni résumés ni tâches bloquées) |
