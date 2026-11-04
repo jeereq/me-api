@@ -29,7 +29,8 @@ export const connecteur = (nom: string) => {
 const INTERVALLE_VERIFICATION = 25_000;
 /** Un mail arrivé juste avant la dernière relecture a pu lui échapper. */
 const MARGE_ANNONCE = 10 * 60 * 1000;
-const verifications = new Map<string, number>();
+const PAUSE_ACCES_RETIRE = 60 * 60 * 1000;
+const prochaineVerification = new Map<string, number>();
 
 const textes = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
 const prefsCompte = (i: Integration): PrefsCompte => {
@@ -218,6 +219,7 @@ export const IntegrationService = {
       const vus = donneesDe(i).vus;
       const repere = o.empreinte ?? donneesDe(i).empreinte;
       await prisma.integration.update({ where: { id }, data: { donnees: jsonPropre({ ...donnees, ...(vus?.length ? { vus } : {}), ...(repere ? { empreinte: repere } : {}) }) as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
+      prochaineVerification.delete(id);
       // Un compte qui vient d'être connecté n'a rien de nouveau : tout y serait annoncé. Une panne de notification ne casse pas la relecture.
       if (o.annoncer && i.derniereSync) {
         const d = local(new Date(i.derniereSync.getTime() - MARGE_ANNONCE), i.user.fuseau);
@@ -239,14 +241,18 @@ export const IntegrationService = {
   async _verifierUne(i: Integration, annoncer = false) {
     const c = parFournisseur(i.fournisseur);
     if (!c.empreinte) return;
-    const depuis = verifications.get(i.id) ?? 0;
-    if (Date.now() - depuis < INTERVALLE_VERIFICATION) return;
-    verifications.set(i.id, Date.now());
+    if (Date.now() < (prochaineVerification.get(i.id) ?? 0)) return;
+    prochaineVerification.set(i.id, Date.now() + INTERVALLE_VERIFICATION);
     try {
       const e = await c.empreinte(await jetonsValides(i), { boitesPartagees: prefsCompte(i).boitesPartagees ?? [] });
       if (e && e !== donneesDe(i).empreinte) await this.synchroniserUne(i.id, { empreinte: e, annoncer });
     } catch (err) {
       if (!(err instanceof ErreurExterne)) console.error('Vérification', i.fournisseur, err);
+      // Accès retiré ou expiré : insister ne sert à rien. On le dit dans l'app tout de suite et on espace les essais jusqu'à la reconnexion.
+      else if (err.auth) {
+        prochaineVerification.set(i.id, Date.now() + PAUSE_ACCES_RETIRE);
+        if (i.erreur !== err.message) await prisma.integration.update({ where: { id: i.id }, data: { erreur: err.message } }).catch(() => {});
+      }
     }
   },
 
