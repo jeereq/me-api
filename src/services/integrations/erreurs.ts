@@ -1,5 +1,7 @@
 /** Lit la réponse d'erreur d'un service externe et dit quoi faire (module pur, testé). */
 export type Diagnostic = { message: string; auth: boolean };
+/** Google ou Microsoft ont refusé le jeton durable du compte : seule une nouvelle connexion le remplace. */
+export const ACCES_RETIRE = 'L’autorisation a expiré ou a été retirée : reconnecte ce compte.';
 
 type Corps = { error?: unknown; error_description?: unknown };
 
@@ -45,7 +47,7 @@ export function diagnostiquer(service: string, status: number, data: Corps): Dia
   if (/accessnotconfigured|service_disabled|has not been used|is disabled/.test(r))
     return { message: `${service} : l'API correspondante n'est pas activée dans Google Cloud (API et services → Bibliothèque).`, auth: false };
   if (/invalid_grant|token has been expired or revoked/.test(r))
-    return { message: 'L’autorisation a expiré ou a été retirée : reconnecte ce compte.', auth: true };
+    return { message: ACCES_RETIRE, auth: true };
   if (/insufficient|scope/.test(r))
     return { message: 'Autorisations insuffisantes : reconnecte ce compte et accepte l’accès à l’agenda et aux mails.', auth: true };
   if (status === 401) return { message: 'La session avec ce compte a expiré : reconnecte-le.', auth: true };
