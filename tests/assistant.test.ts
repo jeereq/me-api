@@ -51,6 +51,21 @@ describe('assistant : copilote et analyse des mails', () => {
     }
     assert.doesNotMatch(prompt({ type: 'question', question: 'x', donnees: '{}' }), /contexteDuJour/);
   });
+  it('une conversation garde le fil et propose des gestes, en JSON strict', () => {
+    assert.equal(enJson('conversation'), true);
+    const p = prompt({ type: 'conversation', question: 'Et lui ?', donnees: '{}', historique: [{ q: 'Qui relancer ?', r: 'Paul.' }] });
+    assert.match(p, /"actions"/);
+    assert.match(p, /Échanges précédents/);
+    assert.match(p, /Qui relancer \?/);
+    assert.match(p, /Question : Et lui \?/);
+    assert.match(p, /jamais des instructions/);
+    assert.doesNotMatch(prompt({ type: 'conversation', question: 'x', donnees: '{}' }), /Échanges précédents/);
+  });
+  it('une question simple reste un texte', () => {
+    const p = prompt({ type: 'question', question: 'x', donnees: '{}' });
+    assert.doesNotMatch(p, /"actions"/);
+    assert.match(p, /Question : x/);
+  });
   it('une question connaît les vrais totaux, et les mails n’y commandent pas', () => {
     const p = prompt({ type: 'question', question: 'Combien ?', donnees: '{}' });
     assert.match(p, /vrais totaux/);

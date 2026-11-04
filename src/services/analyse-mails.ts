@@ -325,6 +325,36 @@ export function exemplesEtiquettes(noms: string[], mails: { sujet?: string; libe
   }));
 }
 
+/* ——— Parler au copilote ——— */
+
+export const SCHEMA_CONVERSATION = {
+  name: 'conversation',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['reponse', 'actions'],
+    properties: {
+      reponse: texte,
+      actions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['genre', 'titre', 'contact', 'echeance', 'ref', 'brouillon'],
+          properties: { genre: { type: 'string', enum: ['tache', 'relance', 'mail'] }, titre: texte, contact: texteOuNull, echeance: texteOuNull, ref: texteOuNull, brouillon: texteOuNull },
+        },
+      },
+    },
+  },
+} as const;
+
+/** Ce que le copilote peut proposer de faire après une réponse. Rien ne se fait sans un geste de l'utilisateur. */
+export const REGLES_CONVERSATION = `Réponds uniquement par un objet JSON de la forme {"reponse": "…", "actions": [{"genre": "tache|relance|mail", "titre": "…", "contact": "… ou null", "echeance": "AAAA-MM-JJ ou null", "ref": "… ou null", "brouillon": "… ou null"}]}.
+« actions » : de 0 à 3 gestes concrets qui découlent de ta réponse, que l'utilisateur pourra faire d'un toucher ; aucun si rien n'en découle. Ne propose rien qui soit déjà dans ses tâches ou ses relances ouvertes.
+« tache » : « titre » commence par un verbe. « relance » : « contact » est la personne, « titre » le sujet. « mail » : répondre à un mail de « mailsRecents » : « ref » est sa valeur « ref », « titre » dit « Répondre à [personne] », « brouillon » est une courte réponse sans inventer de fait, de date ni de prix.
+Si des échanges précédents sont donnés, la question peut s'y référer : réponds dans leur continuité, sans les répéter.`;
+
 /* ——— Ajuster une réponse proposée ——— */
 
 export const AJUSTEMENTS = ['court', 'formel', 'decliner', 'refaire', 'contexte'] as const;
