@@ -9,6 +9,7 @@ import { boitesValides, chargementValide, choixValides, mailsAAnnoncer, mailsApr
 import { NotificationService } from './NotificationService.js';
 import { adresses, avecSignature, ErreurSaisie, signatureChoisie, signaturesValides, type PieceAJoindre, type SignatureMail } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
+import { ACCES_RETIRE } from './integrations/erreurs.js';
 import { ErreurExterne, exiger, local } from './integrations/http.js';
 import { microsoft } from './integrations/microsoft.js';
 import { slackConnecteur } from './integrations/slack.js';
@@ -107,7 +108,11 @@ async function jetonsValides(i: Integration) {
   const accessToken = dechiffrer(i.accessToken);
   const refreshToken = i.refreshToken ? dechiffrer(i.refreshToken) : null;
   if (!i.expiresAt || i.expiresAt.getTime() > Date.now() + 5 * 60 * 1000 || !refreshToken || !c.rafraichir) return { accessToken, refreshToken };
-  const t = await c.rafraichir(refreshToken);
+  const t = await c.rafraichir(refreshToken).catch(async (e: unknown) => {
+    // Un accès retiré ne revient pas tout seul : le compte le dit, et on ne redemande rien au service avant qu'il soit reconnecté.
+    if (e instanceof ErreurExterne && e.message === ACCES_RETIRE) await prisma.integration.update({ where: { id: i.id }, data: { erreur: ACCES_RETIRE } });
+    throw e;
+  });
   await prisma.integration.update({
     where: { id: i.id },
     data: { accessToken: chiffrer(t.accessToken), refreshToken: t.refreshToken ? chiffrer(t.refreshToken) : i.refreshToken, expiresAt: t.expiresAt ?? null },
@@ -202,6 +207,7 @@ export const IntegrationService = {
   /** Importe les éléments d'un compte connecté et les garde ; l'erreur éventuelle reste visible dans l'app. */
   async synchroniserUne(id: string, o: { empreinte?: string; annoncer?: boolean } = {}) {
     const i = await prisma.integration.findUniqueOrThrow({ where: { id }, include: { user: { select: { id: true, fuseau: true, espace: { select: { data: true } } } } } });
+    if (i.erreur === ACCES_RETIRE) return;
     const cfg = (await prisma.config.findUnique({ where: { id: 1 } }))?.data as { delaiRelanceJours?: number } | undefined;
     try {
       const jetons = await jetonsValides(i);
@@ -242,6 +248,7 @@ export const IntegrationService = {
     const depuis = verifications.get(i.id) ?? 0;
     if (Date.now() - depuis < INTERVALLE_VERIFICATION) return;
     verifications.set(i.id, Date.now());
+    if (i.erreur === ACCES_RETIRE) return;
     try {
       const e = await c.empreinte(await jetonsValides(i), { boitesPartagees: prefsCompte(i).boitesPartagees ?? [] });
       if (e && e !== donneesDe(i).empreinte) await this.synchroniserUne(i.id, { empreinte: e, annoncer });
@@ -287,7 +294,11 @@ export const IntegrationService = {
     if (!i) throw new HttpError(404, 'Compte connecté introuvable.');
     const c = parFournisseur(i.fournisseur);
     if (typeof c[quoi] !== 'function') throw new HttpError(400, `${c.nom} ne permet pas cette action depuis Me.`);
-    return { i, c, jetons: await jetonsValides(i), fuseau: i.user.fuseau };
+    if (i.erreur === ACCES_RETIRE) throw new HttpError(403, ACCES_RETIRE);
+    const jetons = await jetonsValides(i).catch((e: unknown) => {
+      throw e instanceof ErreurExterne ? new HttpError(e.auth ? 403 : 502, e.message) : e;
+    });
+    return { i, c, jetons, fuseau: i.user.fuseau };
   },
 
   /** Transforme l'erreur d'un service externe en message lisible (et dit quand il faut reconnecter le compte). */
