@@ -1,11 +1,11 @@
 import type { Prisma } from '@prisma/client';
 
-import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, ProposerEtiquettesBody, RelireReponseBody } from '../validators/schemas.js';
+import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, ProposerEtiquettesBody, RedigerMailBody, RelireNouveauBody, RelireReponseBody } from '../validators/schemas.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
-import { donneesBoucle, exemplesEtiquettes, lireAjustement, lireBoucle, lireEtiquettes, lireRelecture, type AnalyseBoucle, type RelectureReponse } from './analyse-mails.js';
+import { donneesBoucle, exemplesEtiquettes, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -38,6 +38,13 @@ const prefsAuto = { prefs: { path: ['analyseAuto'], equals: true } } as const;
  * garde chaque analyse 30 jours (rouvrir ne coûte rien) et peut préparer à l'avance celle des nouveaux mails.
  * Le texte des mails n'est jamais gardé, seulement ce que l'IA en a tiré.
  */
+/** Ce que l'IA reçoit d'un nouveau mail : à qui et son objet ; il n'y a pas de conversation à lire. */
+async function nouveauMailDe(userId: string, b: { a?: string; sujet?: string; boite?: string; ton?: string }) {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
+  const destinataires = (b.a ?? '').split(/[,;]/).map((x) => x.trim()).filter(Boolean).slice(0, 20);
+  return { user, ton: b.ton ?? tonDe(user.espace?.data), donnees: { aujourdhui: jour(0, user.fuseau), boite: b.boite ?? 'pro', destinataires, objet: b.sujet?.trim() ?? '' } };
+}
+
 export const AnalyseMailService = {
   /**
    * Analyse jusqu'à dix mails (`ext:<compte>:<mail>`) du compte. Un mail qui n'est pas à lui, ou qui n'est plus lisible, n'a pas d'analyse.
@@ -152,6 +159,24 @@ export const AnalyseMailService = {
     const r = await AssistantService.demanderAvecModeles({ type: 'ajustement', ajustement: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
     const lu = lireAjustement(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu ajuster cette réponse. Réessaie dans un instant.");
+    return lu;
+  },
+
+  /** Écrit ou ajuste un nouveau mail, et son objet. Rien n'est gardé. */
+  async redigerMail(userId: string, b: RedigerMailBody): Promise<RedactionMail> {
+    const { user, ton, donnees } = await nouveauMailDe(userId, b);
+    const r = await AssistantService.demanderAvecModeles({ type: 'redaction', redaction: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify({ ...donnees, brouillon: b.texte ?? '', ...(b.action === 'contexte' ? { contexte_utilisateur: b.contexte } : {}) }) });
+    const lu = lireRedaction(r.texte);
+    if (!lu) throw new HttpError(502, "L'IA n'a pas pu écrire ce mail. Réessaie dans un instant.");
+    return lu;
+  },
+
+  /** Relit un nouveau mail avant son envoi. Rien n'est gardé. */
+  async relireNouveau(userId: string, b: RelireNouveauBody): Promise<RelectureReponse> {
+    const { user, ton, donnees } = await nouveauMailDe(userId, b);
+    const r = await AssistantService.demanderAvecModeles({ type: 'relecture_nouveau', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify({ ...donnees, reponse_proposee: b.texte }) });
+    const lu = lireRelecture(r.texte);
+    if (!lu) throw new HttpError(502, "L'IA n'a pas pu relire ce mail. Réessaie dans un instant.");
     return lu;
   },
 

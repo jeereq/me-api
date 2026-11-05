@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { adresses, adresseSeule, base64Url, enteteEncode, ErreurSaisie, lendemain, messageNouveau, messageRfc822, plusMinutes, sujetReponse, verifierNouveau, verifierRendezvous, verifierTache } from '../src/services/integrations/ecriture.js';
+import { avecSignature, adresses, adresseSeule, base64Url, enteteEncode, ErreurSaisie, lendemain, messageNouveau, messageRfc822, plusMinutes, sujetReponse, verifierNouveau, verifierRendezvous, verifierTache } from '../src/services/integrations/ecriture.js';
 
 describe('objet d’une réponse', () => {
   it('ajoute « Re: » une seule fois', () => {
@@ -120,5 +120,13 @@ describe('nouveau mail', () => {
     assert.match(messageNouveau({ a: ['paul@exemple.fr'], sujet: ' ', texte: 'Salut' }), /Subject: \(sans objet\)/);
     assert.throws(() => verifierNouveau({ a: [], sujet: 'x', texte: 'y' }), ErreurSaisie);
     assert.throws(() => verifierNouveau({ a: ['paul@exemple.fr'], sujet: 'x', texte: '  ' }), ErreurSaisie);
+  });
+});
+
+describe('signature et repère de prénom', () => {
+  it('ne laisse jamais partir [Ton prénom]', () => {
+    assert.equal(avecSignature('Merci.\n\nCordialement,\n[Ton prénom]', 'Jeereq T.'), 'Merci.\n\nCordialement,\n\nJeereq T.');
+    assert.equal(avecSignature('Merci.\n[Votre prénom]'), 'Merci.');
+    assert.equal(avecSignature('Merci.', 'Jeereq T.'), 'Merci.\n\nJeereq T.');
   });
 });

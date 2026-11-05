@@ -111,6 +111,16 @@ export const AssistantController = {
   etatsAnalyse: async (req: Request, res: Response) => {
     res.json({ etats: await AnalyseMailService.etats(req.user!.id, req.body.mails) });
   },
+  /** Écrire ou ajuster un nouveau mail. */
+  redigerMail: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json(await AnalyseMailService.redigerMail(req.user!.id, req.body));
+  },
+  /** Relire un nouveau mail avant de l'envoyer. */
+  relireNouveau: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json(await AnalyseMailService.relireNouveau(req.user!.id, req.body));
+  },
   /** Relire une réponse avant de l'envoyer. */
   relireReponse: async (req: Request, res: Response) => {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
