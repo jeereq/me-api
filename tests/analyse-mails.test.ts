@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { preparerMails, SCHEMA_LOT, SCHEMA_MAILS, texteUtile } from '../src/services/analyse-mails.js';
+import { ACTIONS_REDACTION, lireRedaction, preparerMails, reglesAnalyse, reglesRedaction, reglesRelecture, reglesRelectureNouveau, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_REDACTION, SCHEMA_RELECTURE, texteUtile } from '../src/services/analyse-mails.js';
 import { corpsRequete, formatRefuse, messagesDe, schemaDe } from '../src/services/AssistantService.js';
 
 describe('texte utile d’un mail', () => {
@@ -101,5 +101,27 @@ describe('prompt protégé et réponse imposée', () => {
     };
     verifier(SCHEMA_MAILS.schema, 'mails');
     verifier(SCHEMA_LOT.schema, 'lot');
+  });
+});
+
+describe('écrire un nouveau mail', () => {
+  it('lit l’objet et le message', () => {
+    assert.deepEqual(lireRedaction('{"objet":"Devis","message":"Bonjour"}'), { objet: 'Devis', message: 'Bonjour' });
+    assert.deepEqual(lireRedaction('{"message":"Bonjour"}'), { objet: '', message: 'Bonjour' });
+    assert.equal(lireRedaction('{"objet":"Devis"}'), null);
+    assert.equal(lireRedaction('pas du json'), null);
+  });
+  it('n’ajoute jamais de signature', () => {
+    for (const a of ACTIONS_REDACTION) assert.match(reglesRedaction(a, 'neutre'), /ni signature/);
+    assert.match(reglesRelectureNouveau('neutre'), /son absence n'est pas un point/);
+    assert.match(reglesRelecture('neutre'), /son absence n'est pas un point/);
+    assert.doesNotMatch(reglesAnalyse('neutre'), /Ton prénom/);
+  });
+  it('impose sa forme et passe par le modèle fort', () => {
+    assert.deepEqual(schemaDe('redaction'), { type: 'json_schema', json_schema: SCHEMA_REDACTION });
+    assert.deepEqual(schemaDe('relecture_nouveau'), { type: 'json_schema', json_schema: SCHEMA_RELECTURE });
+    const m = messagesDe({ type: 'redaction', redaction: 'contexte', donnees: '{}' } as Parameters<typeof messagesDe>[0]);
+    assert.match(m[0].content, /nouveau mail/);
+    assert.match(m[0].content, /contexte_utilisateur/);
   });
 });

@@ -73,7 +73,9 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'ajustement', 'etiquettes', 'traduction', 'compte_rendu']),
+    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'etiquettes', 'traduction', 'compte_rendu']),
+    /** Pour « redaction » : ce qu'il faut faire du nouveau mail. */
+    redaction: z.enum(['contexte', 'court', 'formel', 'refaire']).optional(),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
     ajustement: z.enum(['court', 'formel', 'decliner', 'refaire', 'contexte']).optional(),
     /** Pour « traduction » : la langue voulue. */
@@ -146,6 +148,18 @@ export const ajusterReponseSchema = z.object({
     .refine((b) => (b.action === 'contexte' ? !!b.contexte : !!b.reponse), { message: 'Rien à rédiger.' }),
 });
 export type AjusterReponseBody = z.infer<typeof ajusterReponseSchema>['body'];
+
+const nouveauMail = { a: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), boite: z.enum(['perso', 'pro']).optional(), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() };
+/** Écrire un nouveau mail avec le copilote. Avec un contexte, le brouillon peut être vide. */
+export const redigerMailSchema = z.object({
+  body: z
+    .object({ ...nouveauMail, texte: z.string().trim().max(8000).optional(), action: z.enum(['contexte', 'court', 'formel', 'refaire']), contexte: z.string().trim().max(2000).optional() })
+    .refine((b) => (b.action === 'contexte' ? !!b.contexte : !!b.texte), { message: 'Rien à rédiger.' }),
+});
+export type RedigerMailBody = z.infer<typeof redigerMailSchema>['body'];
+/** Relire un nouveau mail avant de l'envoyer. */
+export const relireNouveauSchema = z.object({ body: z.object({ ...nouveauMail, texte: z.string().trim().min(1).max(8000) }) });
+export type RelireNouveauBody = z.infer<typeof relireNouveauSchema>['body'];
 
 /** Proposer des étiquettes : le mail, celles du compte, et celles qu'il porte déjà. */
 export const proposerEtiquettesSchema = z.object({ body: z.object({ mail: z.string().min(1).max(500), existantes: z.array(z.string().min(1).max(200)).max(200), posees: z.array(z.string().min(1).max(200)).max(50) }) });

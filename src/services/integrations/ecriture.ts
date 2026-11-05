@@ -67,7 +67,8 @@ const compare = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** Le texte suivi de sa signature. Déjà écrite à la fin du texte, elle n'est pas répétée. */
 export function avecSignature(texte: string, signature?: string | null): string {
-  const t = texte.trim();
+  // Un brouillon d'analyse pouvait finir par ce repère : il ne doit jamais partir.
+  const t = texte.trim().replace(/\s*\[\s*(?:ton|votre)\s+pr[ée]nom\s*\]$/i, '');
   const s = signature?.trim();
   if (!s || compare(t).endsWith(compare(s))) return t;
   return `${t}\n\n${s}`;
