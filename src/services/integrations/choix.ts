@@ -156,3 +156,10 @@ export function annonceMails(integration: string, mails: Pick<MailImporte, 'id' 
   return { cle, titre: `${mails.length} nouveaux mails`, corps, url: '/messages' };
 }
 
+/**
+ * Le mail auquel répondre parmi ceux gardés. La liste montre un message par fil : quand un nouveau message arrive,
+ * il prend la place du précédent, et la réponse part alors au dernier message du même fil.
+ */
+export function mailGarde<M extends { id: string; fil?: string }>(mails: M[], id: string, fil?: string): M | undefined {
+  return mails.find((m) => m.id === id) ?? (fil ? mails.find((m) => m.fil === fil) : undefined);
+}

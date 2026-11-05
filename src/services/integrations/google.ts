@@ -1,6 +1,6 @@
 import { agendasALire, appliquerLibelles, extrait, rangerMails, type AgendaDispo, type MailImporte } from './choix.js';
 import { base64Url, destinatairesReponse, ErreurSaisie, lendemain, lireAdresses, messageNouveau, messageRfc822, verifierRendezvous, verifierTache } from './ecriture.js';
-import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
+import { bearer, ErreurExterne, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
 import { decoderEntites, htmlDeGmail, htmlEnTexte, partieGmail, piecesDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
 import { requetePersonneGmail } from './personnes.js';
@@ -91,6 +91,11 @@ const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
 };
 
 const entete = (m: Message, nom: string) => m.payload?.headers?.find((h) => h.name.toLowerCase() === nom.toLowerCase())?.value || '';
+/** Le mail n'existe plus chez le service ; seul un accès retiré reste une erreur. */
+const sansAuth = (e: unknown): never[] => {
+  if (e instanceof ErreurExterne && e.auth) throw e;
+  return [];
+};
 const lienMail = (threadId: string) => `https://mail.google.com/mail/u/0/#all/${threadId}`;
 /** Les adresses d'un en-tête « To » ou « Cc » : « Marie <marie@x.fr>, paul@y.fr ». */
 const listeAdresses = (h: string) => h.split(',').map((x) => x.trim()).filter(Boolean);
@@ -412,6 +417,14 @@ export const google: Connecteur = {
     const [m] = await lireMeta(auth, [dernier.id]);
     const parId = await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>());
     return versMailImporte(m, f.fuseau, parId, !!m.labelIds?.includes('SENT'));
+  },
+
+  async mailParId({ accessToken }, m) {
+    const auth = bearer(accessToken);
+    const [lu] = await lireMeta(auth, [encodeURIComponent(m.mailId)]).catch(sansAuth);
+    if (!lu) return null;
+    const parId = await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>());
+    return versMailImporte(lu, m.fuseau, parId, !!lu.labelIds?.includes('SENT'));
   },
 
   async deplacer({ accessToken }, d) {

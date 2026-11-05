@@ -5,7 +5,7 @@ import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
-import { boitesValides, chargementValide, choixValides, mailsAAnnoncer, mailsApresTri, type MailImporte } from './integrations/choix.js';
+import { boitesValides, chargementValide, choixValides, mailGarde, mailsAAnnoncer, mailsApresTri, type MailImporte } from './integrations/choix.js';
 import { NotificationService } from './NotificationService.js';
 import { personnesTrouvees } from './integrations/personnes.js';
 import { adresses, avecSignature, ErreurSaisie, signatureChoisie, signaturesValides, type PieceAJoindre, type SignatureMail } from './integrations/ecriture.js';
@@ -437,11 +437,18 @@ export const IntegrationService = {
     return this.regles(userId, id);
   },
 
-  /** Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé. */
-  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }, pieces: PieceAJoindre[] = [], signature?: string | null) {
-    const { i, c, jetons } = await this._pourEcrire(userId, id, 'repondre');
-    const m = this._mailGarde(i, mailId);
-    if (!m) throw new HttpError(404, "Ce mail n'est plus dans les messages relus ; actualise la boîte et réessaie.");
+  /**
+   * Envoie une réponse dans le fil d'un mail importé. Le contact et l'objet viennent du message gardé ; s'il a quitté la liste
+   * (un message plus récent du fil a pris sa place, il est sorti de la période), le dernier du fil ou le service les donne.
+   */
+  async repondre(userId: string, id: string, mailId: string, texte: string, choix?: { a?: string[]; cc?: string[] }, pieces: PieceAJoindre[] = [], signature?: string | null, fil?: string) {
+    const { i, c, jetons, fuseau } = await this._pourEcrire(userId, id, 'repondre');
+    const d = donneesDe(i);
+    const moi = i.compte ?? undefined;
+    const m =
+      mailGarde([...(d.mails ?? []), ...(d.vus ?? [])] as MailImporte[], mailId, fil) ??
+      (await this._ecrire(async () => (await c.mailParId?.(jetons, { mailId, fuseau, moi, boites: prefsCompte(i).boitesPartagees })) ?? (fil ? await c.mailDuFil?.(jetons, { fil, fuseau, moi }) : null) ?? null, i, false));
+    if (!m) throw new HttpError(404, "Ce mail n'est plus dans ta boîte : il a peut-être été déplacé ou supprimé.");
     // Des destinataires choisis, vérifiés ; sans choix, la réponse va à toutes les personnes du mail.
     const dest = choix?.a?.length ? { a: adresses(choix.a.join(',')), cc: adresses((choix.cc ?? []).join(',')) } : undefined;
     // Relire le compte après un envoi ne sert à rien : la réponse part dans les messages envoyés, pas dans la réception.

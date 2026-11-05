@@ -221,7 +221,7 @@ const rendezvous = {
   journee: z.boolean().optional(),
 };
 
-export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000), /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ a: z.array(z.string().min(3).max(320)).min(1).max(50).optional(), cc: z.array(z.string().min(3).max(320)).max(50).optional(), /** La signature choisie ; `null` : aucune ; absente : celle par défaut. */ signature: z.string().max(40).nullable().optional() }) });
+export const repondreMailSchema = integrationParamsSchema.extend({ body: z.object({ mail: z.string().min(1).max(500), /** Le fil du mail : il peut avoir changé de dernier message depuis l'ouverture. */ fil: z.string().max(500).optional(), texte: z.string().min(1, 'Écris ta réponse avant de l’envoyer.').max(20_000), /** Les destinataires choisis ; absents, la réponse va à toutes les personnes du mail. */ a: z.array(z.string().min(3).max(320)).min(1).max(50).optional(), cc: z.array(z.string().min(3).max(320)).max(50).optional(), /** La signature choisie ; `null` : aucune ; absente : celle par défaut. */ signature: z.string().max(40).nullable().optional() }) });
 export const lireMailSchema = z.object({ params: z.object({ id: z.string().min(1), mail: z.string().min(1).max(500) }) });
 /** `lu=0` : lire sans marquer comme lu (analyse des mails par le copilote). */
 export const lireMailQuerySchema = lireMailSchema.extend({ query: z.object({ lu: z.enum(['0', '1']).optional() }).passthrough() });

@@ -512,6 +512,19 @@ export const microsoft: Connecteur = {
     return versMailImporte(m, f.fuseau, undefined, envoye);
   },
 
+  async mailParId({ accessToken }, m) {
+    const envoye = (x: Mail) => !!m.moi && x.from?.emailAddress?.address?.toLowerCase() === m.moi.toLowerCase();
+    // Sa propre boîte d'abord, puis les boîtes partagées : l'identifiant ne dit pas où le mail se trouve.
+    for (const boite of [undefined, ...(m.boites ?? [])]) {
+      const lu = await json<Mail>('Outlook', `${racine(boite)}/messages/${encodeURIComponent(m.mailId)}?$select=${CHAMPS_LISTE}`, bearer(accessToken)).catch((e: unknown) => {
+        if (e instanceof ErreurExterne && e.auth && !boite) throw e;
+        return null;
+      });
+      if (lu) return versMailImporte(lu, m.fuseau, boite, envoye(lu));
+    }
+    return null;
+  },
+
   async deplacer({ accessToken }, d) {
     await json('Outlook', `${racine(d.boite)}/messages/${encodeURIComponent(d.mailId)}/move`, corpsJson(accessToken, 'POST', { destinationId: d.dossier }));
   },
