@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 
+import { chiffrerAnciennes } from '../services/protection-donnees.js';
 import { AnalyseMailService } from '../services/AnalyseMailService.js';
 import { avecVerrou } from '../utils/verrou.js';
 
@@ -30,6 +31,8 @@ export function initAnalysesCron() {
       await avecVerrou('analyses-mails-menage', 600, async () => {
         const r = await AnalyseMailService.purger();
         if (r.effacees) console.log(`Analyses de mails : ${r.effacees} analyse(s) de plus de ${r.jours} jours effacée(s).`);
+        const c = await chiffrerAnciennes();
+        if (c.comptes || c.analyses) console.log(`Coffre : ${c.comptes} compte(s) et ${c.analyses} analyse(s) chiffrés.`);
       });
     } catch (e) {
       console.error('Ménage des analyses de mails', e);

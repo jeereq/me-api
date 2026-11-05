@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 
 import type { Prisma } from '@prisma/client';
 
+import { horsCoffre } from '../utils/coffre.js';
 import { dechiffrer } from '../utils/crypto.js';
 import { empreintesCompte } from './abonnements/essai-unique.js';
 import { etatAbonnement, finEssai, type ChampsAbonnement } from './abonnements/offres.js';
@@ -263,7 +264,7 @@ export const AuthService = {
       exporteLe: new Date().toISOString(),
       compte: { email: u.email, telephone: u.telephone, nom: u.nom, nomApp: u.nomApp, role: u.role, fuseau: u.fuseau, emailVerifie: u.emailVerifie, connexionGoogle: !!u.googleId, creeLe: u.createdAt },
       espace: u.espace?.data ?? null,
-      comptesConnectes: u.integrations,
+      comptesConnectes: u.integrations.map((i) => ({ ...i, donnees: horsCoffre(i.donnees) })),
       notifications: u.notifications,
       appareilsPush: u.abonnementsPush,
       envoisSms: u.envoisSms,

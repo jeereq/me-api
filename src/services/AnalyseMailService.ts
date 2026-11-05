@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 
 import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, ProposerEtiquettesBody, RedigerMailBody, RelireNouveauBody, RelireReponseBody } from '../validators/schemas.js';
+import { enCoffre, horsCoffre } from '../utils/coffre.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
@@ -64,7 +65,7 @@ export const AnalyseMailService = {
     const cle = empreinte(ton, b.consignes);
     const contexteMails = permises.map((r) => {
       const { integrationId, mailId } = lireRef(r)!;
-      const garde = ((comptes.get(integrationId)!.donnees as { mails?: { id: string; contact?: string; adresse?: string; fil?: string }[]; vus?: { id: string; contact?: string; adresse?: string; fil?: string }[] } | null) ?? {});
+      const garde = horsCoffre<{ mails?: { id: string; contact?: string; adresse?: string; fil?: string }[]; vus?: { id: string; contact?: string; adresse?: string; fil?: string }[] }>(comptes.get(integrationId)!.donnees) ?? {};
       const m = [...(garde.mails ?? []), ...(garde.vus ?? [])].find((x) => x.id === mailId);
       return { contact: m?.contact, adresse: m?.adresse, cleFil: `${integrationId}:${m?.fil ?? mailId}` };
     });
@@ -83,7 +84,10 @@ export const AnalyseMailService = {
           const out = new Map<string, AnalyseIA>();
           for (const [integrationId, mailIds] of parCompte) {
             const lignes = await prisma.analyseMail.findMany({ where: { integrationId, mailId: { in: mailIds }, empreinte: cle, majLe: { gte: limiteAge() } } });
-            for (const l of lignes) out.set(refMail(integrationId, l.mailId), { ...(l.resultat as object), id: refMail(integrationId, l.mailId) } as AnalyseIA);
+            for (const l of lignes) {
+              const lu = horsCoffre<object>(l.resultat);
+              if (lu) out.set(refMail(integrationId, l.mailId), { ...lu, id: refMail(integrationId, l.mailId) } as AnalyseIA);
+            }
           }
           return out;
         },
@@ -95,7 +99,7 @@ export const AnalyseMailService = {
         demander: (donnees) => AssistantService.demanderAvecModeles({ type: 'mails', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees }),
         garder: async (ref, analyse, modeles) => {
           const { integrationId, mailId } = lireRef(ref)!;
-          const resultat = jsonPropre(analyse) as unknown as Prisma.InputJsonObject;
+          const resultat = enCoffre(jsonPropre(analyse)) as unknown as Prisma.InputJsonObject;
           await prisma.analyseMail.upsert({
             where: { integrationId_mailId: { integrationId, mailId } },
             create: { userId, integrationId, mailId, empreinte: cle, modele: modeles.join('+'), resultat },
@@ -119,7 +123,8 @@ export const AnalyseMailService = {
     const cle = empreinte(ton, b.consignes);
     const mailId = `boucle:${ref.mailId}`;
     const gardee = await prisma.analyseMail.findFirst({ where: { userId, integrationId: ref.integrationId, mailId, empreinte: cle, majLe: { gte: limiteAge() } } });
-    if (gardee) return { ...(gardee.resultat as AnalyseBoucle & { messages: number }), enCache: true };
+    const relue = gardee ? horsCoffre<AnalyseBoucle & { messages: number }>(gardee.resultat) : null;
+    if (relue) return { ...relue, enCache: true };
 
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
     const donnees = donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: moiDe(compte, garde?.boite), boite: ctx, extrait: garde?.extrait });
@@ -128,7 +133,7 @@ export const AnalyseMailService = {
     const lu = lireBoucle(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu lire cette boucle. Réessaie dans un instant.");
     const resultat = { ...lu, messages: donnees.messages.length, dernier: dernierDe(contenu, moiDe(compte, garde?.boite)) };
-    const json = jsonPropre(resultat) as unknown as Prisma.InputJsonObject;
+    const json = enCoffre(jsonPropre(resultat)) as unknown as Prisma.InputJsonObject;
     await prisma.analyseMail.upsert({
       where: { integrationId_mailId: { integrationId: ref.integrationId, mailId } },
       create: { userId, integrationId: ref.integrationId, mailId, empreinte: cle, modele: r.modeles.join('+'), resultat: json },
@@ -192,7 +197,7 @@ export const AnalyseMailService = {
       prisma.integration.findFirst({ where: { id: ref.integrationId, userId }, select: { donnees: true } }),
     ]);
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
-    const gardes = ((integration?.donnees ?? {}) as { mails?: { sujet?: string; libelles?: string[] }[] }).mails ?? [];
+    const gardes = horsCoffre<{ mails?: { sujet?: string; libelles?: string[] }[] }>(integration?.donnees)?.mails ?? [];
     const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), etiquettes: exemplesEtiquettes(b.existantes, gardes), posees: b.posees };
     const r = await AssistantService.demanderAvecModeles({ type: 'etiquettes', donnees: JSON.stringify(donnees) });
     const lu = lireEtiquettes(r.texte, b.existantes, b.posees);
@@ -205,7 +210,7 @@ export const AnalyseMailService = {
     const refs = mails.map(lireRef).filter((r): r is NonNullable<typeof r> => !!r);
     if (!refs.length) return [];
     const lignes = await prisma.analyseMail.findMany({ where: { userId, majLe: { gte: limiteAge() }, mailId: { in: refs.map((r) => r.mailId) } }, select: { integrationId: true, mailId: true, resultat: true } });
-    return lignes.flatMap((l) => etatDAnalyse(refMail(l.integrationId, l.mailId), l.resultat) ?? []);
+    return lignes.flatMap((l) => etatDAnalyse(refMail(l.integrationId, l.mailId), horsCoffre(l.resultat)) ?? []);
   },
 
   /**
@@ -227,7 +232,7 @@ export const AnalyseMailService = {
       // Les comptes connectés et l'assistant font partie de Pro : sans abonnement (ni essai), rien n'est préparé.
       if (!etatAbonnement(c.user).pro) continue;
       try {
-        const recus = ((c.donnees as { mails?: Parameters<typeof mailsAPreparer>[0] } | null)?.mails ?? []).filter((m) => m?.id);
+        const recus = (horsCoffre<{ mails?: Parameters<typeof mailsAPreparer>[0] }>(c.donnees)?.mails ?? []).filter((m) => m?.id);
         const user = await prisma.user.findUniqueOrThrow({ where: { id: c.userId }, select: { espace: { select: { data: true } } } });
         const cle = empreinte(tonDe(user.espace?.data), undefined);
         const deja = new Set(
