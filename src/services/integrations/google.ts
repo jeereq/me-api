@@ -18,6 +18,8 @@ const SCOPES = [
   'openid',
   'email',
   'https://www.googleapis.com/auth/calendar.events',
+  // `calendar.events` ne donne pas la liste des agendas.
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/tasks',
 ];
@@ -82,9 +84,22 @@ const SYSTEME: [string, string, GenreDossier][] = [
   ['TRASH', 'Corbeille', 'supprimes'],
 ];
 
+/** Un droit refusé par l'utilisateur sur un service : rien à lire de ce côté, les autres services continuent. */
+const sansDroit = <T,>(vide: T) => (e: unknown): T => {
+  if (e instanceof ErreurExterne && e.auth) return vide;
+  throw e;
+};
+
 /** La liste des agendas du compte, nommée comme dans Google Agenda. */
 const listeAgendas = async (accessToken: string): Promise<AgendaDispo[]> => {
-  const { items = [] } = await json<{ items?: Cal[] }>('Google Agenda', `${CAL}/users/me/calendarList?minAccessRole=reader`, bearer(accessToken));
+  let items: Cal[] = [];
+  try {
+    ({ items = [] } = await json<{ items?: Cal[] }>('Google Agenda', `${CAL}/users/me/calendarList?minAccessRole=reader`, bearer(accessToken)));
+  } catch (e) {
+    // Un compte connecté sans le droit de voir la liste garde l'agenda principal, et surtout ses mails et ses tâches.
+    if (!(e instanceof ErreurExterne && e.auth)) throw e;
+    return [{ id: 'primary', nom: 'Agenda principal', principal: true, visible: true }];
+  }
   return items.map((c) => ({ id: c.id, nom: c.summaryOverride || c.summary || c.id, principal: c.primary, visible: c.selected !== false, couleur: c.backgroundColor }));
 };
 
@@ -165,7 +180,8 @@ export const google: Connecteur = {
       const timeMax = new Date(Date.now() + 14 * 86400000).toISOString();
       for (const cal of cals) {
         const q = new URLSearchParams({ timeMin, timeMax, singleEvents: 'true', orderBy: 'startTime', maxResults: '100', timeZone: fuseau });
-        const { items: evs = [] } = await json<{ items?: Event[] }>('Google Agenda', `${CAL}/calendars/${encodeURIComponent(cal.id)}/events?${q}`, auth);
+        // L'agenda décoché sur l'écran de Google n'empêche pas de lire les mails et les tâches.
+        const { items: evs = [] } = await json<{ items?: Event[] }>('Google Agenda', `${CAL}/calendars/${encodeURIComponent(cal.id)}/events?${q}`, auth).catch(sansDroit<{ items?: Event[] }>({}));
         for (const e of evs) {
           if (e.status === 'cancelled') continue;
           const base = { id: `${cal.id}:${e.id}`, titre: e.summary || '(sans titre)', lieu: e.location, source: 'google_agenda' as const, lien: e.htmlLink, agenda: cal.nom };
@@ -216,7 +232,7 @@ export const google: Connecteur = {
     // Google Tasks : les tâches ouvertes des listes du compte, pour les cocher depuis Me.
     const gtaches = prefs('google_taches');
     if (gtaches.actif && gtaches.imports.includes('taches')) {
-      const { items: listes = [] } = await json<{ items?: { id: string; title?: string }[] }>('Google Tasks', `${TASKS}/users/@me/lists?maxResults=50`, auth);
+      const { items: listes = [] } = await json<{ items?: { id: string; title?: string }[] }>('Google Tasks', `${TASKS}/users/@me/lists?maxResults=50`, auth).catch(sansDroit<{ items?: { id: string; title?: string }[] }>({}));
       for (const l of listes.filter((x) => passe(gtaches.filtre, x.title)).slice(0, 5)) {
         const q = new URLSearchParams({ showCompleted: 'false', showHidden: 'false', maxResults: '50' });
         const { items: tc = [] } = await json<{ items?: { id: string; title?: string; due?: string; status?: string }[] }>('Google Tasks', `${TASKS}/lists/${encodeURIComponent(l.id)}/tasks?${q}`, auth);
