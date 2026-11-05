@@ -4,6 +4,7 @@ import { bearer, ErreurExterne, form, jour, json, local, passe, urlRetour } from
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteComplet, texteDeBlocs } from './html-mail.js';
 import { decouperSignature } from '../../commun/signature.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
+import { requetePersonneOutlook } from './personnes.js';
 import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type ChargementMails, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo, type MailATrier } from './types.js';
@@ -373,6 +374,13 @@ export const microsoft: Connecteur = {
     const m = await json<{ from?: Adresse; replyTo?: Adresse[]; toRecipients?: Adresse[]; ccRecipients?: Adresse[] }>('Outlook', `${racine(boite)}/messages/${encodeURIComponent(mailId)}?$select=from,replyTo,toRecipients,ccRecipients`, bearer(accessToken));
     const personnes = (l: Adresse[] = []) => l.flatMap((x) => (x.emailAddress?.address ? [{ ...(x.emailAddress.name ? { nom: x.emailAddress.name } : {}), adresse: x.emailAddress.address }] : []));
     return destinatairesReponse({ de: personnes(m.from ? [m.from] : []), repondreA: personnes(m.replyTo), a: personnes(m.toRecipients), cc: personnes(m.ccRecipients) }, moi);
+  },
+
+  async personnes({ accessToken }, q) {
+    const p = new URLSearchParams({ $search: requetePersonneOutlook(q), $top: '25', $select: 'from,toRecipients,ccRecipients' });
+    const { value = [] } = await json<{ value?: { from?: Adresse; toRecipients?: Adresse[]; ccRecipients?: Adresse[] }[] }>('Outlook', `${racine()}/messages?${p}`, bearer(accessToken));
+    const personnes = (l: Adresse[]) => l.flatMap((x) => (x.emailAddress?.address ? [{ ...(x.emailAddress.name ? { nom: x.emailAddress.name } : {}), adresse: x.emailAddress.address }] : []));
+    return value.map((m) => personnes([...(m.from ? [m.from] : []), ...(m.toRecipients ?? []), ...(m.ccRecipients ?? [])]));
   },
 
   async lireMail({ accessToken }, mailId, fuseau, ou) {

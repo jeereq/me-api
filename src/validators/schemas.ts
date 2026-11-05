@@ -217,6 +217,7 @@ export const dossiersSchema = integrationParamsSchema.extend({ query: z.object({
 export const mailsDossierSchema = z.object({ params: z.object({ id: z.string().min(1), dossier: z.string().min(1).max(500) }), query: z.object({ boite: boiteQuery, suivant: z.string().max(2000).optional() }).passthrough() });
 const jourQuery = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date attendue au format AAAA-MM-JJ.').optional();
 /** Chercher les mails d'un lot à analyser : au moins un critère (personne, domaine, dossier, boîte, période, non lus, pièce jointe ou objet). */
+export const personnesSchema = z.object({ query: z.object({ q: z.string().trim().min(2).max(100) }).passthrough() });
 export const chercherMailsSchema = integrationParamsSchema.extend({
   query: z
     .object({ de: z.string().max(320).optional(), domaine: z.string().max(253).optional(), dossier: z.string().max(500).optional(), boite: boiteQuery, depuis: jourQuery, jusqua: jourQuery, nonLus: z.enum(['1']).optional(), pj: z.enum(['1']).optional(), objet: z.string().trim().max(200).optional(), suivant: z.string().max(2000).optional(), max: z.string().regex(/^\d{1,3}$/).optional() })
