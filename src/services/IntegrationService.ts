@@ -5,7 +5,7 @@ import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
-import { boitesValides, chargementValide, choixValides, mailGarde, mailsAAnnoncer, mailsApresTri, type MailImporte } from './integrations/choix.js';
+import { boitesValides, chargementValide, choixValides, mailGarde, mailsAAnnoncer, mailsApresTri, prefsDeSource, type MailImporte } from './integrations/choix.js';
 import { NotificationService } from './NotificationService.js';
 import { personnesTrouvees } from './integrations/personnes.js';
 import { adresses, avecSignature, ErreurSaisie, signatureChoisie, signaturesValides, type PieceAJoindre, type SignatureMail } from './integrations/ecriture.js';
@@ -96,12 +96,7 @@ export function retourAutorise(retour: string) {
 /** Réglages de l'écran Agendas & outils, lus dans l'espace de l'utilisateur. */
 function lirePrefs(espace: unknown): (k: SourceKey) => Prefs {
   const sources = ((espace as { sources?: Record<string, { actif?: boolean; imports?: string[]; filtre?: string }> } | null)?.sources ?? {});
-  return (k) => {
-    const s = sources[k];
-    // Source jamais réglée dans l'app : on importe tout ce qu'elle propose.
-    if (!s) return { actif: true, imports: ['agenda', 'taches', 'relances'], filtre: [] };
-    return { actif: s.actif !== false, imports: (s.imports ?? []) as Prefs['imports'], filtre: (s.filtre || '').split(',').map((x) => x.trim()).filter(Boolean) };
-  };
+  return (k) => prefsDeSource(sources[k]) as Prefs;
 }
 
 async function jetonsValides(i: Integration) {

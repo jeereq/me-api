@@ -8,12 +8,12 @@
  */
 import { createHash } from 'node:crypto';
 
-import { consignesPropres, texteUtile } from '../analyse-mails.js';
+import { consignesPropres, sansHeureInventee, texteUtile } from '../analyse-mails.js';
 
 /** Combien de temps une analyse est gardée. */
 export const AGE_MAX_JOURS = 30;
 /** À changer quand le prompt ou le schéma de l'analyse change : les analyses gardées sont alors refaites. */
-export const VERSION_ANALYSE = 'v3';
+export const VERSION_ANALYSE = 'v4';
 
 /** Au plus autant de mails par demande, comme l'app (une réponse JSON plus longue devient lente et coûteuse). */
 export const MAX_MAILS_DEMANDE = 10;
@@ -215,7 +215,7 @@ const LECTURES_PARALLELES = 5;
  * Les analyses de ces mails, dans l'ordre demandé : celles déjà gardées d'abord, les autres lues puis envoyées à l'IA en une demande.
  * Un mail illisible, ou que l'IA oublie, n'a pas d'analyse (il est listé dans `illisibles` s'il n'a pas pu être lu).
  */
-export async function analyserLot(refs: string[], contexte: { aujourdhui: string; crm?: ContexteCrm }, d: Dependances): Promise<Reponse> {
+export async function analyserLot(refs: string[], contexte: { aujourdhui: string; crm?: ContexteCrm; consignes?: string }, d: Dependances): Promise<Reponse> {
   const uniques = [...new Set(refs)];
   const gardees = await d.gardees(uniques);
   const aFaire = uniques.filter((r) => !gardees.has(r));
@@ -231,7 +231,8 @@ export async function analyserLot(refs: string[], contexte: { aujourdhui: string
   const fraiches = new Map<string, AnalyseIA>();
   let modeles: string[] = [];
   if (lus.length) {
-    const reponse = await d.demander(JSON.stringify({ aujourdhui: contexte.aujourdhui, ...(contexte.crm ? { crm: contexte.crm } : {}), mails: lus }));
+    const donnees = JSON.stringify({ aujourdhui: contexte.aujourdhui, ...(contexte.crm ? { crm: contexte.crm } : {}), mails: lus });
+    const reponse = await d.demander(donnees);
     modeles = reponse.modeles;
     let liste: unknown;
     try {
@@ -244,7 +245,8 @@ export async function analyserLot(refs: string[], contexte: { aujourdhui: string
     for (const a of liste) {
       const id = a && typeof a === 'object' ? String((a as { id?: unknown }).id ?? '') : '';
       if (!demandes.has(id) || fraiches.has(id)) continue;
-      fraiches.set(id, a as AnalyseIA);
+      const analyse = a as AnalyseIA;
+      fraiches.set(id, typeof analyse.reponse === 'string' ? { ...analyse, reponse: sansHeureInventee(analyse.reponse, `${donnees} ${contexte.consignes ?? ''}`) } : analyse);
     }
     for (const [ref, a] of fraiches) await d.garder(ref, a, modeles);
   }
