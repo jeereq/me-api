@@ -40,7 +40,9 @@ describe('boucle de mails', () => {
     assert.equal(r.attenteDetail, 'Valider');
     const fini = lireBoucle(JSON.stringify({ ...reponse, attente: 'autre' }))!;
     assert.equal(fini.attente, 'personne');
-    assert.equal(fini.attenteDetail, '');
+    // La raison reste : elle dit pourquoi il n'y a pas à répondre.
+    assert.equal(fini.attenteDetail, 'Valider');
+    assert.equal(fini.reponse, '');
   });
   it('refuse une réponse illisible', () => {
     assert.equal(lireBoucle('pas du json'), null);

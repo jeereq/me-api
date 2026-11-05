@@ -13,7 +13,7 @@ import { consignesPropres, texteUtile } from '../analyse-mails.js';
 /** Combien de temps une analyse est gardée. */
 export const AGE_MAX_JOURS = 30;
 /** À changer quand le prompt ou le schéma de l'analyse change : les analyses gardées sont alors refaites. */
-export const VERSION_ANALYSE = 'v2';
+export const VERSION_ANALYSE = 'v3';
 
 /** Au plus autant de mails par demande, comme l'app (une réponse JSON plus longue devient lente et coûteuse). */
 export const MAX_MAILS_DEMANDE = 10;
@@ -22,6 +22,7 @@ export const MAX_TEXTE_MAIL = 4000;
 export const MAX_PRECEDENTS = 3;
 export const MAX_TEXTE_PRECEDENT = 600;
 export const MAX_PIECES_JOINTES = 10;
+export const MAX_PERSONNES = 15;
 
 /** Analyse préparée à l'avance : seulement les mails reçus non lus des 3 derniers jours, 10 par compte et 100 par passage au plus. */
 export const AUTO_JOURS = 3;
@@ -74,10 +75,23 @@ export type MailLisible = {
   message?: string;
   piecesJointes?: string[];
   fil?: { de?: string; date?: string; texte?: string; message?: string }[];
+  a?: string[];
+  cc?: string[];
 };
 
+/**
+ * Qui écrit et à qui : où se trouve l'utilisateur sur ce mail (`a` : destinataire direct, `cc` : en copie, `absent` : liste
+ * ou copie cachée), et si le message vient de lui. C'est ce qui décide en premier s'il a à répondre.
+ */
+export function placeSurMail(m: Pick<MailLisible, 'de' | 'adresse' | 'a' | 'cc'>, moi: string[]) {
+  const miennes = new Set(moi.map((x) => adresseDe(x)).filter(Boolean));
+  const parmi = (l?: string[]) => (l ?? []).some((x) => miennes.has(adresseDe(x)));
+  const place: 'a' | 'cc' | 'absent' = parmi(m.a) ? 'a' : parmi(m.cc) ? 'cc' : 'absent';
+  return { place, de_moi: miennes.has(adresseDe(m.adresse || m.de)) };
+}
+
 /** Un mail lu en entier, ramené à ce qui sert à l'analyse : texte nettoyé, derniers messages du fil, pièces jointes. */
-export function mailPourIA(ref: string, m: MailLisible, boite: string, extrait?: string) {
+export function mailPourIA(ref: string, m: MailLisible, boite: string, extrait?: string, moi: string[] = []) {
   const texte = texteUtile(m.message?.trim() || m.texte || extrait || '').slice(0, MAX_TEXTE_MAIL);
   const precedents = (m.fil ?? [])
     .slice(-MAX_PRECEDENTS)
@@ -91,6 +105,9 @@ export function mailPourIA(ref: string, m: MailLisible, boite: string, extrait?:
     ...(m.date ? { date: m.date } : {}),
     sujet: m.sujet ?? '',
     boite,
+    ...(m.a?.length ? { a: m.a.slice(0, MAX_PERSONNES) } : {}),
+    ...(m.cc?.length ? { cc: m.cc.slice(0, MAX_PERSONNES) } : {}),
+    ...(moi.length ? placeSurMail(m, moi) : {}),
     texte,
     ...(precedents.length ? { precedents } : {}),
     ...(pj.length ? { pj } : {}),

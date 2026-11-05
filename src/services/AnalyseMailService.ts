@@ -5,7 +5,7 @@ import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
-import { donneesBoucle, exemplesEtiquettes, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
+import { dernierDe, donneesBoucle, exemplesEtiquettes, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -38,6 +38,9 @@ const prefsAuto = { prefs: { path: ['analyseAuto'], equals: true } } as const;
  * garde chaque analyse 30 jours (rouvrir ne coûte rien) et peut préparer à l'avance celle des nouveaux mails.
  * Le texte des mails n'est jamais gardé, seulement ce que l'IA en a tiré.
  */
+/** Mes adresses sur ce mail : celle du compte, et la boîte partagée où il se trouve. */
+const moiDe = (compte?: string, boite?: string) => [compte, boite].filter(Boolean).join(',') || undefined;
+
 /** Ce que l'IA reçoit d'un nouveau mail : à qui et son objet ; il n'y a pas de conversation à lire. */
 async function nouveauMailDe(userId: string, b: { a?: string; sujet?: string; boite?: string; ton?: string }) {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
@@ -86,8 +89,8 @@ export const AnalyseMailService = {
         },
         lire: async (ref) => {
           const { integrationId, mailId } = lireRef(ref)!;
-          const { contenu, ctx, garde } = await IntegrationService.lirePourAnalyse(userId, integrationId, mailId);
-          return mailPourIA(ref, contenu, ctx, garde?.extrait);
+          const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, integrationId, mailId);
+          return mailPourIA(ref, contenu, ctx, garde?.extrait, [compte, garde?.boite].filter((x): x is string => !!x));
         },
         demander: (donnees) => AssistantService.demanderAvecModeles({ type: 'mails', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees }),
         garder: async (ref, analyse, modeles) => {
@@ -119,12 +122,12 @@ export const AnalyseMailService = {
     if (gardee) return { ...(gardee.resultat as AnalyseBoucle & { messages: number }), enCache: true };
 
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
-    const donnees = donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait });
+    const donnees = donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: moiDe(compte, garde?.boite), boite: ctx, extrait: garde?.extrait });
     if (!donnees.messages.length) throw new HttpError(422, 'Ce mail ne contient pas de texte à analyser.');
     const r = await AssistantService.demanderAvecModeles({ type: 'boucle', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
     const lu = lireBoucle(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu lire cette boucle. Réessaie dans un instant.");
-    const resultat = { ...lu, messages: donnees.messages.length };
+    const resultat = { ...lu, messages: donnees.messages.length, dernier: dernierDe(contenu, moiDe(compte, garde?.boite)) };
     const json = jsonPropre(resultat) as unknown as Prisma.InputJsonObject;
     await prisma.analyseMail.upsert({
       where: { integrationId_mailId: { integrationId: ref.integrationId, mailId } },
