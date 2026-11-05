@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { addDays, missionDuJour, rappelsDesElements, rappelsDuJour, serieDuJour, type ConfigRappels, type EspaceRappels } from '../src/commun/calcul.js';
+import { addDays, missionDuJour, dateLisible, rappelsDesElements, rappelsDuJour, serieDuJour, type ConfigRappels, type EspaceRappels } from '../src/commun/calcul.js';
 
 // Le 26 octobre 2026 est un lundi : le 25 est un dimanche, le 1er novembre aussi.
 const LUNDI = '2026-10-26';
@@ -77,8 +77,8 @@ describe('rappelsDuJour : modes des tâches et relances', () => {
 
   it('mode agressif : prévenu à J-3 et J-1, matin et soir du jour J, puis « en retard » chaque jour', () => {
     const e = espace({ relances: [relance({ mode: 'agressif', date: addDays(LUNDI, 3) })] });
-    assert.deepEqual(titres(rappelsDuJour(e, cfg, LUNDI).filter((x) => x.mode === 'agressif')), ['Dans 3 j : Relancer Marie']);
-    assert.deepEqual(titres(rappelsDuJour(e, cfg, addDays(LUNDI, 2)).filter((x) => x.mode === 'agressif')), ['Dans 1 j : Relancer Marie']);
+    assert.deepEqual(titres(rappelsDuJour(e, cfg, LUNDI).filter((x) => x.mode === 'agressif')), ['Dans 3 jours : Relancer Marie']);
+    assert.deepEqual(titres(rappelsDuJour(e, cfg, addDays(LUNDI, 2)).filter((x) => x.mode === 'agressif')), ['Demain : Relancer Marie']);
     assert.equal(rappelsDuJour(e, cfg, addDays(LUNDI, 1)).filter((x) => x.mode === 'agressif').length, 0);
 
     const jourJ = rappelsDuJour(e, cfg, addDays(LUNDI, 3)).filter((x) => x.mode === 'agressif');
@@ -266,13 +266,13 @@ describe('heure précise des tâches, relances et habitudes', () => {
 
   it('mode normal : le rappel du jour J part à l’heure de la tâche, et la rappelle', () => {
     const r = rappelsDesElements(espace({ taches: [tache({ echeance: LUNDI, heure: '14:30' })] }), cfg, LUNDI);
-    assert.deepEqual(r.map((x) => [x.heure, x.titre, x.corps]), [['14:30', 'Payer la facture', 'À 14 h 30. Tâche à faire']]);
+    assert.deepEqual(r.map((x) => [x.heure, x.titre, x.corps]), [['14:30', 'Payer la facture', 'À 14 h 30.']]);
   });
 
   it('mode ferme : l’heure de la relance, puis le rappel du soir s’il tombe après', () => {
     const tot = rappelsDesElements(espace({ relances: [relance({ mode: 'agressif', heure: '10:00' })] }), cfg, LUNDI);
     assert.deepEqual(tot.map((x) => x.heure), ['10:00', '19:00']);
-    assert.equal(tot[0].corps, 'À 10 h. Devis');
+    assert.equal(tot[0].corps, 'À 10 h. Devis.');
     const tard = rappelsDesElements(espace({ relances: [relance({ mode: 'agressif', heure: '20:15' })] }), cfg, LUNDI);
     assert.deepEqual(tard.map((x) => x.heure), ['20:15']);
   });
@@ -292,5 +292,39 @@ describe('heure précise des tâches, relances et habitudes', () => {
     assert.deepEqual(coach.map((x) => [x.heure, x.titre]), [['18:00', 'Sport'], ['19:00', 'Coach Me']]);
     assert.match(coach[1].corps, /Lire/);
     assert.doesNotMatch(coach[1].corps, /Sport/);
+  });
+});
+
+describe('détails d’un rappel', () => {
+  it('relance : date lisible, sujet, relances passées et note', () => {
+    const e = espace({ relances: [relance({ mode: 'agressif', date: LUNDI, sujet: 'Devis toiture', note: 'Montant : 1 200 $', nbRelances: 2, statut: 'relance', derniereRelance: addDays(LUNDI, -7) })] });
+    const r = rappelsDesElements(e, cfg, addDays(LUNDI, 2)).find((x) => x.titre.startsWith('En retard'))!;
+    assert.match(r.corps, /^Prévu lundi \d+ \S+, il y a 2 jours\. Devis toiture\. Déjà relancé 2 fois, en dernier lundi/);
+    assert.match(r.corps, /À savoir : Montant : 1 200 \$\.$/);
+    assert.doesNotMatch(r.corpsSms!, /Montant/);
+    assert.equal(r.ecran, '/relances');
+    const [j] = rappelsDesElements(e, cfg, LUNDI);
+    assert.match(j.corps, /À faire aujourd'hui\. Devis toiture\./);
+    assert.ok(j.corpsSms && !j.corpsSms.includes('Montant'));
+  });
+  it('tâche : projet et priorité à la place de « Tâche à faire », et écran', () => {
+    const e = espace({ projets: [{ id: 'p', nom: 'Toiture' }], taches: [tache({ echeance: LUNDI, priorite: 'haute', projet: 'p', statut: 'en_attente', mode: 'normal' })] });
+    const r = rappelsDesElements(e, cfg, LUNDI);
+    assert.ok(r.some((x) => /Projet Toiture\. Priorité haute\./.test(x.corps) && x.ecran === '/taches'), JSON.stringify(r));
+  });
+  it('coupe une longue note entre deux mots', () => {
+    const e = espace({ taches: [tache({ echeance: LUNDI, note: `${'mot '.repeat(40)}fin` })] });
+    const [r] = rappelsDesElements(e, cfg, LUNDI);
+    assert.ok(r.corps.length < 130, r.corps);
+    assert.match(r.corps, /mot…$/);
+  });
+  it('mission : les actions nommées dès le rappel du matin', () => {
+    const b = rappelsDuJour(espace({ taches: [tache({ echeance: LUNDI, priorite: 'haute' })] }), cfg, LUNDI).find((x) => x.titre === 'Ta mission du jour est prête');
+    assert.match(b!.corps, /^1 action : Payer la facture\. Jusqu'à \d+ pts à gagner\./);
+    assert.equal(b!.ecran, '/');
+  });
+  it('dit la date en français', () => {
+    assert.equal(dateLisible('2026-11-03'), 'mardi 3 novembre');
+    assert.equal(dateLisible('2026-11-01T10:00:00Z'), 'dimanche 1er novembre');
   });
 });

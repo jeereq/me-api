@@ -1,6 +1,8 @@
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
+import { adresseApp } from './comptes/emails.js';
 import { EmailService } from './EmailService.js';
+import { emailRappels } from './rappels-email.js';
 import { PushService } from './PushService.js';
 import { rappelsParSms, rappelSecondaire, texteRappels } from './sms/asmsc.js';
 import { SmsService } from './SmsService.js';
@@ -12,40 +14,14 @@ import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, ty
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
 const RATTRAPAGE_MIN = 45;
-const COULEURS: Record<string, string> = { agressif: '#FF6474', normal: '#62AEFF', coach: '#3EF0B0', hebdo: '#FFCB5C', briefing: '#38D9FF', passif: '#7F98A6' };
 
 type Prefs = { app?: boolean; email?: boolean; sms?: boolean; mails?: boolean };
 /** Ce que dit l'avis selon ce qui est confié, au singulier, au pluriel, et où il mène. */
 const PHRASE_AFFECTATION: Record<Affectation['genre'], string> = { tache: "t'a confié une tâche", relance: "t'a confié une relance", rdv: "t'a affecté un rendez-vous" };
 const PLURIEL_AFFECTATION: Record<Affectation['genre'], string> = { tache: 'tâches', relance: 'relances', rdv: 'rendez-vous' };
 const URL_AFFECTATION: Record<Affectation['genre'], string> = { tache: '/taches', relance: '/relances', rdv: '/calendrier' };
-const echapper = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-const PIED_RAPPELS = 'Tu reçois cet email parce que les rappels par email sont activés dans Me (Mon compte).';
 const dateFr = (d: string) => d.split('-').reverse().join('/');
-
-function email(rappels: Rappel[], nom: string, pied = PIED_RAPPELS) {
-  const sujet = rappels.length === 1 ? rappels[0].titre : `${rappels.length} rappels de Me`;
-  const texte = `${nom ? `Bonjour ${nom},\n\n` : ''}${rappels.map((r) => `• ${r.titre}\n  ${r.corps}`).join('\n\n')}\n\n— Me, ton assistant personnel${pied === PIED_RAPPELS ? '' : `\n${pied}`}`;
-  const lignes = rappels
-    .map(
-      (r) =>
-        `<tr><td style="padding:14px 16px;border-left:3px solid ${COULEURS[r.mode] || '#38D9FF'};background:#0A141C;border-radius:8px">` +
-        `<div style="font-weight:700;color:#DCF3FF;font-size:15px">${echapper(r.titre)}</div>` +
-        `<div style="color:#86A7B8;font-size:13px;margin-top:4px">${echapper(r.corps)}</div></td></tr><tr><td style="height:10px"></td></tr>`,
-    )
-    .join('');
-  const html =
-    `<div style="background:#04080C;padding:28px 16px;font-family:-apple-system,Segoe UI,Roboto,sans-serif">` +
-    `<div style="max-width:520px;margin:0 auto">` +
-    `<div style="font-size:30px;font-weight:800;color:#DCF3FF">Me<span style="color:#38D9FF">.</span></div>` +
-    `<div style="color:#38D9FF;font-family:monospace;font-size:11px;letter-spacing:2px;margin:4px 0 20px">TES RAPPELS</div>` +
-    (nom ? `<p style="color:#DCF3FF;font-size:15px">Bonjour ${echapper(nom)},</p>` : '') +
-    `<table role="presentation" width="100%" cellspacing="0" cellpadding="0">${lignes}</table>` +
-    `<p style="color:#86A7B8;font-size:12px;margin-top:18px">${echapper(pied)}</p>` +
-    `</div></div>`;
-  return { sujet, texte, html };
-}
 
 export const NotificationService = {
   /** Crée les rappels arrivés à échéance pour chaque compte, puis les envoie par email si activé. */
@@ -92,11 +68,12 @@ export const NotificationService = {
       if (enPush.length && prefs.app !== false) {
         // Un seul push par passage : le rappel s'il est seul, sinon un résumé.
         const m = enPush.length === 1 ? { titre: enPush[0].titre, corps: enPush[0].corps, mode: enPush[0].mode } : { titre: `${enPush.length} rappels`, corps: enPush.map((r) => r.titre).join(' · '), mode: enPush[0].mode };
-        await PushService.envoyer(u.id, { ...m, tag: enPush[0].cle });
+        await PushService.envoyer(u.id, { ...m, tag: enPush[0].cle, ...(enPush.length === 1 && enPush[0].ecran ? { url: enPush[0].ecran } : {}) });
       }
       const parMail = nouveaux.filter((r) => r.canaux?.email !== false && horsApp(r));
       if (parMail.length && parMailPossible) {
-        const m = email(parMail, u.nom);
+        const app = adresseApp();
+        const m = emailRappels(parMail, u.nom, undefined, app ? `${app}${parMail.length === 1 ? (parMail[0].ecran ?? '/notifications') : '/notifications'}` : undefined);
         if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) {
           await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: parMail.map((r) => r.cle) } }, data: { parEmail: true } });
         }
@@ -140,7 +117,7 @@ export const NotificationService = {
       skipDuplicates: true,
     });
     if (!cree.count || !avis.parEmail || !u.emailVerifie || !EmailService.configure()) return;
-    const m = email([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
+    const m = emailRappels([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
     if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
   },
 
@@ -186,7 +163,7 @@ export const NotificationService = {
       }
       if (mailActif && prefs.email !== false && u.emailVerifie) {
         const sujet = avis.length === 1 ? avis[0].titre : resume;
-        const m = email(avis, u.nom, `Tu reçois cet email parce que quelque chose t'a été confié dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
+        const m = emailRappels(avis, u.nom, `Tu reçois cet email parce que quelque chose t'a été confié dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
         if (await EmailService.envoyer(u.email, sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId, cle: { in: avis.map((r) => r.cle) } }, data: { parEmail: true } });
       }
       if (smsActif && prefs.sms === true && u.telephone && aDroit(etatAbonnement(u), 'sms')) await SmsService.envoyer(userId, u.telephone, avis.length === 1 ? texteRappels(avis) : resume);
@@ -213,7 +190,7 @@ export const NotificationService = {
     const push = await PushService.envoyer(userId, { titre: r.titre, corps: r.corps, mode: r.mode, tag: r.cle });
     if (!EmailService.configure()) return { email: false, push, raison: "SendGrid n'est pas configuré sur le serveur." };
     if (!u.emailVerifie) return { email: false, push, raison: 'Confirme ton adresse email pour en recevoir.' };
-    const m = email([r], u.nom);
+    const m = emailRappels([r], u.nom);
     const ok = await EmailService.envoyer(u.email, m.sujet, m.texte, m.html);
     if (!ok) throw new HttpError(502, "SendGrid a refusé l'envoi : vérifie la clé et l'expéditeur.");
     return { email: true, push };

@@ -76,8 +76,8 @@ export function preparerTexte(brut: string): { texte: string; encodage: Encodage
 }
 
 /** Le SMS d'un passage des rappels : le rappel s'il est seul, sinon leur nombre et leurs titres. */
-export function texteRappels(rappels: { titre: string; corps: string }[]): string {
-  if (rappels.length === 1) return `${rappels[0].titre}. ${rappels[0].corps}`;
+export function texteRappels(rappels: { titre: string; corps: string; corpsSms?: string }[]): string {
+  if (rappels.length === 1) return `${rappels[0].titre}. ${rappels[0].corpsSms ?? rappels[0].corps}`;
   return `${rappels.length} rappels : ${rappels.map((r) => r.titre).join(' ; ')}`;
 }
 
