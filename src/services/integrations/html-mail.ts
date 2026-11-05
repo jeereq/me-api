@@ -15,6 +15,7 @@ export type BlocMail =
   | { t: 'images'; items: ImageMail[] }
   | { t: 'rangee'; cellules: BlocMail[][] }
   | { t: 'citation'; blocs: BlocMail[] }
+  | { t: 'bouton'; v: string; h: string }
   | { t: 'trait' };
 export type ImageMail = { src: string; alt?: string; l?: number; h?: number; lien?: string };
 export type CorpsRiche = { blocs: BlocMail[]; signature: BlocMail[]; cite: BlocMail[] };
@@ -279,6 +280,13 @@ function versBlocs(noeuds: (Noeud | string)[], base: Style, sortie: Sortie): Blo
         vider();
         return void out.push(...lireTable(n, s, sortie));
       default:
+        if (n.nom === 'a' && aUnFond(n)) {
+          const bouton = boutonDe(versBlocs(n.enfants, styleDe(n, s), sortie));
+          if (bouton) {
+            vider();
+            return void out.push(bouton);
+          }
+        }
         if (BLOCS.has(n.nom)) {
           vider();
           const st = styleDe(n, s);
@@ -338,6 +346,22 @@ export function estTableauDeDonnees(t: Noeud): boolean {
   return pleines.length / toutes.length >= 0.6 && pleines.every((x) => x.length <= 120);
 }
 
+const FOND_NEUTRE = /^(?:#f{3}(?:f{3})?|white|transparent|none|inherit)\b/i;
+/** Un fond de couleur : là où les mails dessinent leurs boutons. */
+const aUnFond = (n: Noeud) => {
+  const f = n.attrs.bgcolor ?? style(n, 'background-color') ?? style(n, 'background');
+  return !!f && !FOND_NEUTRE.test(f.trim());
+};
+const MAX_BOUTON = 60;
+/** Une cellule colorée qui ne contient qu'un lien court est un bouton. */
+function boutonDe(b: BlocMail[]): BlocMail | null {
+  const p = b.length === 1 ? b[0] : null;
+  if (p?.t !== 'p' || !p.m.length) return null;
+  const h = p.m[0].h;
+  const v = texteDe(p.m).trim();
+  return h && !h.startsWith('mailto:') && v && v.length <= MAX_BOUTON && p.m.every((x) => x.h === h) ? { t: 'bouton', v, h } : null;
+}
+
 function lireTable(t: Noeud, s: Style, sortie: Sortie): BlocMail[] {
   if (cache(t)) return [];
   if (estTableauDeDonnees(t)) {
@@ -355,8 +379,11 @@ function lireTable(t: Noeud, s: Style, sortie: Sortie): BlocMail[] {
   }
   const out: BlocMail[] = [];
   for (const tr of lignesTable(t)) {
-    const cs = cellules(tr).map((c) => versBlocs(c.enfants, styleDe(c, s), sortie)).filter((b) => b.length);
-    if (cs.length === 1) out.push(...cs[0]);
+    const brutes = cellules(tr);
+    const cs = brutes.map((c) => versBlocs(c.enfants, styleDe(c, s), sortie)).filter((b) => b.length);
+    const bouton = brutes.length === 1 && aUnFond(brutes[0]) && cs.length === 1 ? boutonDe(cs[0]) : null;
+    if (bouton) out.push(bouton);
+    else if (cs.length === 1) out.push(...cs[0]);
     else if (cs.length > 1) out.push({ t: 'rangee', cellules: cs });
   }
   return out;
@@ -580,6 +607,8 @@ export function texteDeBlocs(blocs: BlocMail[], liens = false): string {
           return b.cellules.map((c) => texteDeBlocs(c, liens)).join('\n');
         case 'citation':
           return texteDeBlocs(b.blocs, liens);
+        case 'bouton':
+          return texteDe([{ v: b.v, h: b.h }], liens);
         default:
           return '';
       }
