@@ -13,14 +13,12 @@ const CAL = 'https://www.googleapis.com/calendar/v3';
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const TASKS = 'https://tasks.googleapis.com/tasks/v1';
 // Lecture ET écriture : lire et écrire des mails, tenir l'agenda et les tâches depuis Me.
-// `gmail.modify` sert seulement à marquer comme lu un mail ouvert dans Me (un compte connecté avant s'en passe).
+// `gmail.modify` couvre tout ce que Me fait dans Gmail : lire, marquer comme lu, archiver, étiqueter et envoyer. Google demande le strict nécessaire.
 const SCOPES = [
   'openid',
   'email',
   'https://www.googleapis.com/auth/calendar.events',
-  'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/tasks',
 ];
 const id = () => process.env.GOOGLE_CLIENT_ID || '';
