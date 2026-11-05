@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ACTIONS_REDACTION, lireRedaction, preparerMails, reglesAnalyse, reglesRedaction, reglesRelecture, reglesRelectureNouveau, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_REDACTION, SCHEMA_RELECTURE, texteUtile } from '../src/services/analyse-mails.js';
+import { ACTIONS_REDACTION, dernierDe, donneesBoucle, reglesAjustement, reglesBoucle, lireRedaction, preparerMails, reglesAnalyse, reglesRedaction, reglesRelecture, reglesRelectureNouveau, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_REDACTION, SCHEMA_RELECTURE, texteUtile } from '../src/services/analyse-mails.js';
 import { corpsRequete, formatRefuse, messagesDe, schemaDe } from '../src/services/AssistantService.js';
 
 describe('texte utile d’un mail', () => {
@@ -123,5 +123,27 @@ describe('écrire un nouveau mail', () => {
     const m = messagesDe({ type: 'redaction', redaction: 'contexte', donnees: '{}' } as Parameters<typeof messagesDe>[0]);
     assert.match(m[0].content, /nouveau mail/);
     assert.match(m[0].content, /contexte_utilisateur/);
+  });
+});
+
+describe('qui écrit, et à qui', () => {
+  const moi = 'moi@x.fr';
+  it('dit où je suis sur le mail', () => {
+    assert.deepEqual(dernierDe({ de: 'Paul', adresse: 'paul@x.fr', a: ['Moi <moi@x.fr>'], cc: [] }, moi), { de: 'Paul', place: 'a', deMoi: false });
+    assert.equal(dernierDe({ de: 'Paul', adresse: 'paul@x.fr', a: ['w@x.fr'], cc: ['MOI@x.fr'] }, moi).place, 'cc');
+    assert.equal(dernierDe({ de: 'Paul', adresse: 'paul@x.fr', a: ['w@x.fr'] }, moi).place, 'absent');
+    assert.equal(dernierDe({ de: 'Moi', adresse: 'moi@x.fr', a: ['w@x.fr'] }, moi).deMoi, true);
+    assert.equal(dernierDe({ adresse: 'p@x.fr', a: ['ventes@x.fr'] }, 'moi@x.fr,ventes@x.fr').place, 'a');
+  });
+  it('le donne à l’IA pour une boucle', () => {
+    const d = donneesBoucle({ de: 'Paul', adresse: 'paul@x.fr', a: ['w@x.fr'], cc: ['moi@x.fr'], texte: 'Valide stp' }, { aujourdhui: '2026-11-05', moi, boite: 'pro' });
+    assert.equal(d.place, 'cc');
+    assert.equal(d.de_moi, false);
+    assert.deepEqual(d.cc, ['moi@x.fr']);
+  });
+  it('la règle : répondre seulement si c’est à moi', () => {
+    assert.match(reglesAnalyse('neutre'), /seulement si c'est à l'utilisateur lui-même de répondre/);
+    assert.match(reglesBoucle('neutre'), /« toi » seulement si c'est à l'utilisateur lui-même/);
+    assert.match(reglesAjustement('repondre', 'neutre'), /a choisi de répondre/);
   });
 });

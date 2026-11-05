@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { consignesPropres } from '../src/services/analyse-mails.js';
 import { ajusterReponseSchema } from '../src/validators/schemas.js';
-import {
+import { placeSurMail,
   AGE_MAX_JOURS,
   analyserLot,
   AUTO_JOURS,
@@ -319,5 +319,19 @@ describe('ajuster une réponse : ce qu’il faut envoyer', () => {
     assert.equal(ok({ action: 'court', reponse: 'Bonjour' }), true);
     assert.equal(ok({ action: 'court' }), false);
     assert.equal(ok({ action: 'court', contexte: 'x' }), false);
+  });
+});
+
+describe('où est l’utilisateur sur le mail', () => {
+  it('part avec le mail vers l’IA', () => {
+    const m = mailPourIA('ext:c:1', { de: 'Paul', adresse: 'paul@x.fr', a: ['w@x.fr'], cc: ['moi@x.fr'], texte: 'Valide' }, 'pro', undefined, ['moi@x.fr']);
+    assert.equal(m.place, 'cc');
+    assert.equal(m.de_moi, false);
+    assert.deepEqual(m.a, ['w@x.fr']);
+  });
+  it('sans mes adresses, rien n’est inventé', () => {
+    const m = mailPourIA('ext:c:1', { de: 'Paul', texte: 'Valide' }, 'pro');
+    assert.equal('place' in m, false);
+    assert.deepEqual(placeSurMail({ adresse: 'moi@x.fr', a: ['Moi <moi@x.fr>'] }, ['moi@x.fr']), { place: 'a', de_moi: true });
   });
 });
