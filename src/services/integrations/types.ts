@@ -130,6 +130,8 @@ export interface Connecteur {
   chercherMails?(jetons: Jetons, r: RechercheMails): Promise<PageMails>;
   /** Le dernier message d'un fil, où qu'il soit rangé (réception, envoyés, un dossier) ; null s'il n'existe plus. */
   mailDuFil?(jetons: Jetons, f: LectureFil): Promise<MailImporte | null>;
+  /** Un mail par son identifiant, chez le service ; `boites` : les boîtes partagées où il peut se trouver. Null s'il n'y est plus. */
+  mailParId?(jetons: Jetons, m: { mailId: string; fuseau: string; moi?: string; boites?: string[] }): Promise<MailImporte | null>;
   /** Range un mail dans un autre dossier. */
   deplacer?(jetons: Jetons, d: Deplacement): Promise<void>;
   /** Marque comme lu un mail et son fil, sans le télécharger. */

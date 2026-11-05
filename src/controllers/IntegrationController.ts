@@ -90,13 +90,13 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
   },
 
   repondre: async (req: Request, res: Response) => {
-    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, req.body.mail, req.body.texte, { a: req.body.a, cc: req.body.cc }, [], req.body.signature));
+    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, req.body.mail, req.body.texte, { a: req.body.a, cc: req.body.cc }, [], req.body.signature, req.body.fil));
   },
   /** Répondre avec des fichiers : le formulaire porte `donnees` (le JSON habituel) et les fichiers dans `pieces`. */
   repondreAvecPieces: async (req: Request, res: Response) => {
     const { donnees, pieces } = await formulaireMail(req);
     const body = valider(repondreMailSchema.shape.body.safeParse(donnees));
-    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, body.mail, body.texte, { a: body.a, cc: body.cc }, pieces, body.signature));
+    res.json(await IntegrationService.repondre(req.user!.id, req.params.id, body.mail, body.texte, { a: body.a, cc: body.cc }, pieces, body.signature, body.fil));
   },
   envoyerAvecPieces: async (req: Request, res: Response) => {
     const { donnees, pieces } = await formulaireMail(req);
