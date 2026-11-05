@@ -7,6 +7,7 @@ import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { boitesValides, chargementValide, choixValides, mailsAAnnoncer, mailsApresTri, type MailImporte } from './integrations/choix.js';
 import { NotificationService } from './NotificationService.js';
+import { personnesTrouvees } from './integrations/personnes.js';
 import { adresses, avecSignature, ErreurSaisie, signatureChoisie, signaturesValides, type PieceAJoindre, type SignatureMail } from './integrations/ecriture.js';
 import { google } from './integrations/google.js';
 import { ACCES_RETIRE } from './integrations/erreurs.js';
@@ -358,6 +359,20 @@ export const IntegrationService = {
     const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
     await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
     return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
+  },
+
+  /** Les personnes croisées dans les mails de tous les comptes, pour compléter une adresse. Un compte en panne n'empêche pas les autres. */
+  async personnes(userId: string, q: string) {
+    const rows = await prisma.integration.findMany({ where: { userId }, select: { id: true, compte: true, fournisseur: true } });
+    const comptes = rows.filter((r) => typeof parFournisseur(r.fournisseur).personnes === 'function');
+    const lus = await Promise.allSettled(
+      comptes.map(async (r) => {
+        const { i, c, jetons } = await this._pourEcrire(userId, r.id, 'personnes');
+        return this._ecrire(() => c.personnes!(jetons, q), i, false);
+      }),
+    );
+    const moi = rows.flatMap((r) => (r.compte ? [r.compte] : []));
+    return { personnes: personnesTrouvees(lus.flatMap((x) => (x.status === 'fulfilled' ? x.value : [])), q, moi) };
   },
 
   /** Range un mail dans un autre dossier, puis relit le compte pour que la réception suive. */

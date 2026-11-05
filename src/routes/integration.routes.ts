@@ -1,11 +1,15 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 
 import { IntegrationController } from '../controllers/IntegrationController.js';
 import { requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { chercherMailsSchema, lireMailSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, trierMailsSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { personnesSchema, chercherMailsSchema, lireMailSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, trierMailsSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+
+// La saisie d'une adresse : une demande après chaque pause.
+const limitePersonnes = rateLimit({ windowMs: 60 * 1000, limit: 60, keyGenerator: (req) => req.user!.id, standardHeaders: 'draft-7', legacyHeaders: false });
 
 const router = Router();
 // Routes ouvertes : le navigateur y revient après l'autorisation, le `state` signé identifie le compte.
@@ -21,6 +25,7 @@ router.get('/', asyncHandler(IntegrationController.liste));
 router.delete('/:id', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.supprimer));
 router.use(asyncHandler(requirePro('integrations')));
 router.get('/:nom/connecter', asyncHandler(IntegrationController.connecter));
+router.get('/personnes', limitePersonnes, validateRequest(personnesSchema), asyncHandler(IntegrationController.personnes));
 router.get('/:id/agendas', validateRequest(integrationParamsSchema), asyncHandler(IntegrationController.agendas));
 router.patch('/:id', validateRequest(patchIntegrationSchema), asyncHandler(IntegrationController.modifier));
 // Lire un mail en entier, à la demande.

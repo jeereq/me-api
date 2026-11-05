@@ -127,6 +127,9 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
     const q = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
     res.json(await IntegrationService.mailsDuDossier(req.user!.id, req.params.id, req.params.dossier, { boite: q('boite'), suivant: q('suivant') }));
   },
+  personnes: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.personnes(req.user!.id, String(req.query.q)));
+  },
   chercherMails: async (req: Request, res: Response) => {
     const q = (k: string) => (typeof req.query[k] === 'string' && (req.query[k] as string).trim() ? (req.query[k] as string).trim() : undefined);
     res.json(await IntegrationService.chercherMails(req.user!.id, req.params.id, { de: q('de'), domaine: q('domaine'), dossier: q('dossier'), boite: q('boite'), depuis: q('depuis'), jusqua: q('jusqua'), nonLus: q('nonLus') === '1', pj: q('pj') === '1', objet: q('objet'), suivant: q('suivant'), max: q('max') ? Number(q('max')) : undefined }));

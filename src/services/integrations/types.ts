@@ -112,6 +112,8 @@ export interface Connecteur {
   signature?(jetons: Jetons): Promise<string>;
   /** Une pièce jointe d'un mail, pour l'ouvrir. */
   lirePiece?(jetons: Jetons, p: { mailId: string; pieceId: string; boite?: string }): Promise<{ nom: string; type: string; octets: Buffer }>;
+  /** Les personnes des derniers mails qui correspondent à une saisie : expéditeurs, destinataires et copies. */
+  personnes?(jetons: Jetons, q: string): Promise<Personne[][]>;
   /** Qui reçoit une réponse à tous, sans télécharger le mail. */
   destinataires?(jetons: Jetons, m: { mailId: string; boite?: string; moi: string[] }): Promise<Destinataires>;
   /** Lit un mail en entier (et les messages plus anciens du fil), à la demande, et le marque comme lu dans la boîte. Me ne garde pas ce contenu. */
