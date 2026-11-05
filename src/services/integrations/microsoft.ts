@@ -5,6 +5,7 @@ import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGES, MAX_IMAGE_OCTETS, message
 import { decouperSignature } from '../../commun/signature.js';
 import { htmlEnTexte, nettoyerTexte } from './lecture.js';
 import { requetePersonneOutlook } from './personnes.js';
+import { selonExpediteur } from './mail-teams.js';
 import { requeteOutlook } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type ChargementMails, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo, type MailATrier } from './types.js';
@@ -390,7 +391,7 @@ export const microsoft: Connecteur = {
     const champs = 'subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,isRead,webLink,categories,conversationId,isDraft';
     // En HTML, le mail ouvert comme les plus anciens du fil : c'est là que se voient ses tableaux, ses images et la limite de sa signature.
     const m = await json<MailComplet>('Outlook', `${url}?$select=${champs}`, auth);
-    const corps = m.body?.contentType?.toLowerCase() === 'html' ? htmlEnBlocs(m.body.content || '') : null;
+    const corps = m.body?.contentType?.toLowerCase() === 'html' ? selonExpediteur(htmlEnBlocs(m.body.content || ''), m.from?.emailAddress?.address) : null;
     const cids = corps ? cidsDe(corps) : [];
     // Graph annonce « sans pièce jointe » un mail qui n'a que des images dans son texte : on regarde quand même.
     const pieces = m.hasAttachments || cids.length ? ((await json<{ value?: PieceOutlook[] }>('Outlook', `${url}/attachments?$select=id,name,size,isInline,contentType`, auth).catch(() => ({ value: [] }))).value ?? []) : [];

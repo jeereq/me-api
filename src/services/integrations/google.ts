@@ -4,6 +4,7 @@ import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from '.
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
 import { decoderEntites, htmlDeGmail, htmlEnTexte, partieGmail, piecesDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
 import { requetePersonneGmail } from './personnes.js';
+import { selonExpediteur } from './mail-teams.js';
 import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
 import { FIL_MAX, vide, type Connecteur, type DossierMail, type Elements, type GenreDossier, type LibelleDispo } from './types.js';
@@ -295,7 +296,7 @@ export const google: Connecteur = {
     const m = tous.find((x) => x.id === mailId) ?? (await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=full`, auth));
     const { texte, piecesJointes } = texteDeGmail(m.payload);
     const { html, images } = htmlDeGmail(m.payload);
-    const lu = htmlEnBlocs(html);
+    const lu = selonExpediteur(htmlEnBlocs(html), entete(m, 'From'));
     const corps = ou?.riche ? lu : null;
     const voulues = new Set(corps ? cidsDe(corps) : []);
     const utilisees = images.filter((x) => voulues.has(normaliserCid(x.cid)));
