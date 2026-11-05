@@ -120,7 +120,7 @@ function liste(noms: string[], max = 3) {
   return debut.length > 1 ? `${debut.slice(0, -1).join(', ')} et ${debut[debut.length - 1]}` : (debut[0] ?? '');
 }
 /** Ce qu'on sait d'une relance : son sujet, et où elle en est. */
-const detailRelance = (r: Relance) => phrases(r.sujet, r.nbRelances && `Déjà relancé ${r.nbRelances} fois${r.derniereRelance ? `, en dernier ${dateLisible(r.derniereRelance)}` : ''}`);
+const detailRelance = (r: Relance) => phrases(r.sujet, !!r.nbRelances && `Déjà relancé ${r.nbRelances} fois${r.derniereRelance ? `, en dernier ${dateLisible(r.derniereRelance)}` : ''}`);
 /** Ce qu'on sait d'une tâche : son projet et sa priorité. */
 const detailTache = (t: Tache, projets: EspaceRappels['projets']) => {
   const projet = t.projet ? projets?.find((p) => p.id === t.projet)?.nom : undefined;
