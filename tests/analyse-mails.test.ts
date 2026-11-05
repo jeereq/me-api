@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ACTIONS_REDACTION, dernierDe, donneesBoucle, reglesAjustement, reglesBoucle, lireRedaction, preparerMails, reglesAnalyse, reglesRedaction, reglesRelecture, reglesRelectureNouveau, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_REDACTION, SCHEMA_RELECTURE, texteUtile } from '../src/services/analyse-mails.js';
+import { ACTIONS_REDACTION, dernierDe, donneesBoucle, reglesAjustement, reglesBoucle, lireRedaction, preparerMails, reglesAnalyse, reglesRedaction, reglesRelecture, reglesRelectureNouveau, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_REDACTION, SCHEMA_RELECTURE, texteUtile, sansHeureInventee } from '../src/services/analyse-mails.js';
 import { corpsRequete, formatRefuse, messagesDe, schemaDe } from '../src/services/AssistantService.js';
 
 describe('texte utile d’un mail', () => {
@@ -145,5 +145,20 @@ describe('qui écrit, et à qui', () => {
     assert.match(reglesAnalyse('neutre'), /seulement si c'est à l'utilisateur lui-même de répondre/);
     assert.match(reglesBoucle('neutre'), /« toi » seulement si c'est à l'utilisateur lui-même/);
     assert.match(reglesAjustement('repondre', 'neutre'), /a choisi de répondre/);
+  });
+});
+
+describe('heures inventées', () => {
+  it('retire une heure que personne n’a donnée', () => {
+    assert.equal(sansHeureInventee('Je confirme la réunion de vendredi à 10h. À bientôt !', 'Peux-tu confirmer la réunion de vendredi ?'), 'Je confirme la réunion de vendredi. À bientôt !');
+    assert.equal(sansHeureInventee('Je suis libre entre 10h et 12h30 demain.', 'Quand es-tu libre ?'), 'Je suis libre demain.');
+  });
+  it('garde une heure donnée, quelle que soit son écriture', () => {
+    assert.equal(sansHeureInventee('Parfait pour 10h demain.', 'On se voit à 10:00 ?'), 'Parfait pour 10h demain.');
+    assert.equal(sansHeureInventee('Je viens à 14 h 30.', 'Rendez-vous à 14h30'), 'Je viens à 14 h 30.');
+  });
+  it('ne touche pas au reste', () => {
+    assert.equal(sansHeureInventee('Merci pour les 3 documents.', ''), 'Merci pour les 3 documents.');
+    assert.equal(sansHeureInventee('Point 10: voir la note. Parfait pour 9h demain.', ''), 'Point 10: voir la note. Parfait demain.');
   });
 });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { agendasALire, appliquerLibelles, boitesValides, choixValides, extrait, passeNom, rangerMails, type AgendaDispo, type MailImporte } from '../src/services/integrations/choix.js';
+import { prefsDeSource, agendasALire, appliquerLibelles, boitesValides, choixValides, extrait, passeNom, rangerMails, type AgendaDispo, type MailImporte } from '../src/services/integrations/choix.js';
 
 const cals: AgendaDispo[] = [
   { id: 'moi@gmail.com', nom: 'Perso', principal: true, visible: true },
@@ -89,5 +89,15 @@ describe('étiquettes et boîtes partagées', () => {
     assert.equal(extrait('Bonjour,\n\n  voici   le devis'), 'Bonjour, voici le devis');
     assert.equal(extrait('a'.repeat(300))!.length, 160);
     assert.equal(extrait('   '), undefined);
+  });
+});
+
+describe('réglages d’une source', () => {
+  it('jamais réglée : importe les mails aussi', () => {
+    assert.ok(prefsDeSource(undefined).imports.includes('mails'));
+    assert.equal(prefsDeSource(undefined).actif, true);
+  });
+  it('réglée : garde le choix de l’utilisateur', () => {
+    assert.deepEqual(prefsDeSource({ actif: false, imports: ['taches'], filtre: 'a, b' }), { actif: false, imports: ['taches'], filtre: ['a', 'b'] });
   });
 });

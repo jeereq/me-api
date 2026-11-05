@@ -4,6 +4,12 @@ import { estAutomatique } from '../../commun/mails-auto.js';
  * Module pur (aucun appel réseau), partagé par les connecteurs Google et Microsoft.
  */
 
+/** Les réglages d'une source. Jamais réglée dans l'app : elle importe tout, mails compris. */
+export function prefsDeSource(s: { actif?: boolean; imports?: string[]; filtre?: string } | undefined): { actif: boolean; imports: string[]; filtre: string[] } {
+  if (!s) return { actif: true, imports: ['agenda', 'taches', 'relances', 'mails'], filtre: [] };
+  return { actif: s.actif !== false, imports: s.imports ?? [], filtre: (s.filtre || '').split(',').map((x) => x.trim()).filter(Boolean) };
+}
+
 export type AgendaDispo = {
   id: string;
   nom: string;

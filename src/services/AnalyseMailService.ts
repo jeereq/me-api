@@ -72,7 +72,7 @@ export const AnalyseMailService = {
 
     const r = await analyserLot(
       permises,
-      { aujourdhui: jour(0, user.fuseau), crm },
+      { aujourdhui: jour(0, user.fuseau), crm, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}) },
       {
         gardees: async (liste) => {
           const parCompte = new Map<string, string[]>();
