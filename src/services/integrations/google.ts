@@ -3,6 +3,7 @@ import { base64Url, destinatairesReponse, ErreurSaisie, lendemain, lireAdresses,
 import { bearer, form, jour, json, local, nomContact, passe, urlRetour } from './http.js';
 import { cidsDe, enMailRiche, htmlEnBlocs, MAX_IMAGE_OCTETS, messageDuFil, normaliserCid, remplirImages, texteDeBlocs } from './html-mail.js';
 import { decoderEntites, htmlDeGmail, htmlEnTexte, partieGmail, piecesDeGmail, texteDeGmail, type PartieGmail } from './lecture.js';
+import { requetePersonneGmail } from './personnes.js';
 import { selonExpediteur } from './mail-teams.js';
 import { requeteGmail } from './recherche.js';
 import { rangerDossiers } from './choix.js';
@@ -276,6 +277,15 @@ export const google: Connecteur = {
     const noms = ['From', 'Reply-To', 'To', 'Cc'].map((n) => `metadataHeaders=${n}`).join('&');
     const m = await json<Message>('Gmail', `${GMAIL}/messages/${encodeURIComponent(mailId)}?format=metadata&${noms}`, bearer(accessToken));
     return destinatairesReponse({ de: lireAdresses(entete(m, 'From')), repondreA: lireAdresses(entete(m, 'Reply-To')), a: lireAdresses(entete(m, 'To')), cc: lireAdresses(entete(m, 'Cc')) }, moi);
+  },
+
+  async personnes({ accessToken }, q) {
+    const auth = bearer(accessToken);
+    const p = new URLSearchParams({ maxResults: '15', q: requetePersonneGmail(q) });
+    const { messages = [] } = await json<{ messages?: { id: string }[] }>('Gmail', `${GMAIL}/messages?${p}`, auth);
+    const noms = ['From', 'To', 'Cc'].map((n) => `metadataHeaders=${n}`).join('&');
+    const lus = await Promise.all(messages.map((m) => json<Message>('Gmail', `${GMAIL}/messages/${m.id}?format=metadata&${noms}`, auth).catch(() => null)));
+    return lus.flatMap((m) => (m ? [['From', 'To', 'Cc'].flatMap((n) => lireAdresses(entete(m, n)))] : []));
   },
 
   async lireMail({ accessToken }, mailId, fuseau, ou) {
