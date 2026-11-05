@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, it } from 'node:test';
 
-import { Cloudinary, configCloudinary, signer } from '../src/services/justificatifs/cloudinary.js';
+import { Cloudinary, configCloudinary, signer, urlLivraison, urlTelechargement } from '../src/services/justificatifs/cloudinary.js';
 import { dossier, estReference, nomPropre, typeFichier, vignette } from '../src/services/justificatifs/fichiers.js';
 
 const fetchOrigine = globalThis.fetch;
@@ -45,7 +45,8 @@ describe('dépôt et suppression', () => {
     const f = vu!.form;
     assert.equal(f.get('folder'), 'me/justificatifs/u1');
     assert.equal(f.get('api_key'), 'cle');
-    assert.equal(f.get('signature'), signer({ folder: 'me/justificatifs/u1', timestamp: Number(f.get('timestamp')) }, 'secret'));
+    assert.equal(f.get('type'), 'authenticated');
+    assert.equal(f.get('signature'), signer({ folder: 'me/justificatifs/u1', type: 'authenticated', timestamp: Number(f.get('timestamp')) }, 'secret'));
     assert.ok(f.get('file') instanceof Blob);
     assert.deepEqual(d, { publicId: 'me/justificatifs/u1/abc', url: 'https://res.cloudinary.com/cloud/image/upload/v1/me/justificatifs/u1/abc.pdf', genre: 'image', format: 'pdf', octets: 2048, pages: 2 });
   });
@@ -79,6 +80,22 @@ describe('fichiers acceptés', () => {
     assert.equal(nomPropre('C:\\Users\\moi\\reçu\u0007.jpg', 'image'), 'reçu.jpg');
     assert.equal(nomPropre('', 'pdf'), 'facture.pdf');
     assert.equal(nomPropre('a'.repeat(300), 'image').length, 120);
+  });
+});
+
+describe('adresses de livraison', () => {
+  const c = { cloud: 'test123', cle: 'a', secret: 'b' };
+  it('signe un fichier privé comme les SDK Cloudinary', () => {
+    assert.equal(urlLivraison(c, { publicId: 'image', format: 'jpg', acces: 'authenticated', transformation: 'c_crop,h_20,w_10' }), 'https://res.cloudinary.com/test123/image/authenticated/s--Ai4Znfl3--/c_crop,h_20,w_10/v1/image.jpg');
+    assert.equal(urlLivraison(c, { publicId: 'image', format: 'jpg', acces: 'authenticated' }), 'https://res.cloudinary.com/test123/image/authenticated/s----SjmNDA--/v1/image.jpg');
+  });
+  it('ne signe pas un ancien fichier public, et encode le chemin', () => {
+    assert.equal(urlLivraison(c, { publicId: 'me/reçu 1', acces: 'upload' }), 'https://res.cloudinary.com/test123/image/upload/v1/me/re%C3%A7u%201');
+  });
+  it('limite le téléchargement à 5 minutes', () => {
+    const q = new URL(urlTelechargement(c, { publicId: 'me/f', acces: 'authenticated', format: 'pdf' }, 1_000_000_000)).searchParams;
+    assert.equal(q.get('expires_at'), '1000300');
+    assert.equal(q.get('signature'), signer({ expires_at: 1000300, format: 'pdf', public_id: 'me/f', timestamp: 1000000, type: 'authenticated' }, 'b'));
   });
 });
 

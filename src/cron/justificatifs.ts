@@ -10,6 +10,8 @@ export function initJustificatifsCron() {
       await avecVerrou('justificatifs', 1800, async () => {
         const r = await StockJustificatifs.nettoyer();
         if (r.effaces) console.log(`Justificatifs : ${r.effaces} fichier(s) inutilisé(s) effacé(s).`);
+        const p = await StockJustificatifs.rendrePrives();
+        if (p.prives || p.echecs) console.log(`Justificatifs : ${p.prives} rendu(s) privé(s), ${p.echecs} échec(s).`);
       });
     } catch (e) {
       console.error('Ménage des justificatifs', e);

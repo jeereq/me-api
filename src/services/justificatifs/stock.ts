@@ -1,13 +1,13 @@
 import { prisma } from '../../utils/prisma.js';
 
-import { Cloudinary, configCloudinary, type GenreRessource } from './cloudinary.js';
+import { Cloudinary, configCloudinary, type AccesRessource, type GenreRessource } from './cloudinary.js';
 import { estReference } from './fichiers.js';
 
 /** Un justificatif retiré de sa dépense (ou dont la dépense est supprimée) est effacé de Cloudinary après ce délai. */
 const JOURS_GRACE = 7;
 const PAR_PASSAGE = 300;
 
-type Ligne = { publicId: string; genre: string; userId: string; equipeId: string | null };
+type Ligne = { publicId: string; genre: string; acces: string; userId: string; equipeId: string | null };
 
 async function effacer(lignes: Ligne[]) {
   const c = configCloudinary();
@@ -15,7 +15,7 @@ async function effacer(lignes: Ligne[]) {
   let n = 0;
   for (const l of lignes) {
     try {
-      await Cloudinary.supprimer(c, l.publicId, l.genre as GenreRessource);
+      await Cloudinary.supprimer(c, l.publicId, l.genre as GenreRessource, l.acces as AccesRessource);
       await prisma.justificatif.delete({ where: { publicId: l.publicId } });
       n++;
     } catch (e) {
@@ -43,7 +43,7 @@ export const StockJustificatifs = {
       where: { createdAt: { lt: avant } },
       orderBy: [{ verifieLe: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }],
       take: PAR_PASSAGE,
-      select: { publicId: true, genre: true, userId: true, equipeId: true },
+      select: { publicId: true, genre: true, acces: true, userId: true, equipeId: true },
     });
     // Un seul chargement d'espace par propriétaire (compte ou équipe).
     const espaces = new Map<string, unknown>();
@@ -62,6 +62,30 @@ export const StockJustificatifs = {
     for (const l of lignes) (estReference(await espaceDe(l), l.publicId) ? gardes : orphelins).push(l);
     if (gardes.length) await prisma.justificatif.updateMany({ where: { publicId: { in: gardes.map((l) => l.publicId) } }, data: { verifieLe: new Date() } });
     return { verifies: lignes.length, effaces: await effacer(orphelins) };
+  },
+
+  /**
+   * Fait passer en privé les justificatifs déposés quand ils étaient publics, par petits lots. Seulement avec
+   * `JUSTIFICATIFS_PRIVES=true` : à activer une fois vérifié qu'un nouveau justificatif s'affiche bien.
+   */
+  async rendrePrives(lot = PAR_PASSAGE) {
+    const c = configCloudinary();
+    if (!c || process.env.JUSTIFICATIFS_PRIVES !== 'true') return { prives: 0, echecs: 0 };
+    const lignes = await prisma.justificatif.findMany({ where: { acces: 'upload' }, orderBy: { createdAt: 'asc' }, take: lot, select: { publicId: true, genre: true } });
+    let prives = 0;
+    let echecs = 0;
+    for (const l of lignes) {
+      try {
+        await Cloudinary.rendrePrive(c, l.publicId, l.genre as GenreRessource);
+        await prisma.justificatif.update({ where: { publicId: l.publicId }, data: { acces: 'authenticated' } });
+        prives++;
+      } catch (e) {
+        // Le fichier reste public, le prochain passage réessaie.
+        echecs++;
+        console.error('Justificatif resté public', l.publicId, (e as Error).message);
+      }
+    }
+    return { prives, echecs };
   },
 
   /** Suppression du compte : ses justificatifs personnels partent avec lui (ceux déposés dans une équipe restent à l'équipe). */

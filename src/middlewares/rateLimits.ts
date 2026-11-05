@@ -88,6 +88,19 @@ export const justificatifLimiter = rateLimit({
   message: { error: 'Beaucoup de justificatifs d’un coup, réessaie dans un moment.' },
 });
 
+/** Liens temporaires des justificatifs : une liste de dépenses les demande par lots. */
+export const liensJustificatifsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? ''),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Trop de demandes, réessaie dans un moment.' },
+});
+
+/** Ouverture d'un justificatif : chaque vignette d'une liste en est une. */
+export const ouvrirJustificatifLimiter = rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Trop de demandes, réessaie dans un moment.' } });
+
 /** Lecture des factures par l'IA : 40 lectures / heure par compte (une image en haute définition coûte plus qu'une question). */
 export const analyseJustificatifLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

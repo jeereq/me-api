@@ -181,6 +181,10 @@ export const traduireSchema = z.object({
   }),
 });
 
+/** Les justificatifs dont l'app veut les liens temporaires. */
+export const liensJustificatifsSchema = z.object({ body: z.object({ ids: z.array(z.string().trim().min(1).max(300)).min(1).max(100) }) });
+export type LiensJustificatifsBody = z.infer<typeof liensJustificatifsSchema>['body'];
+
 /** Lecture d'un justificatif par l'IA : son identifiant Cloudinary, et de quoi bien lire (date du jour, devise, catégories). */
 export const analyseJustificatifSchema = z.object({
   body: z.object({
