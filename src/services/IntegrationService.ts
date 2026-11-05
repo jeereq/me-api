@@ -1,6 +1,7 @@
 import type { Fournisseur, Integration, Prisma } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 
+import { enCoffre, horsCoffre } from '../utils/coffre.js';
 import { chiffrer, dechiffrer } from '../utils/crypto.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
@@ -39,7 +40,8 @@ const prefsCompte = (i: Integration): PrefsCompte => {
   const signatures = signaturesValides(p?.signatures);
   return { agendas: textes(p?.agendas), boitesPartagees: textes(p?.boitesPartagees), mails: chargementValide(p?.mails), analyseAuto: p?.analyseAuto === true, signatures, signatureDefaut: signatures.some((x) => x.id === p?.signatureDefaut) ? (p?.signatureDefaut as string) : null };
 };
-const donneesDe = (i: Integration) => (i.donnees ?? vide()) as unknown as Elements;
+const donneesDe = (i: Integration) => horsCoffre<Elements>(i.donnees) ?? vide();
+const protege = (v: unknown) => enCoffre(jsonPropre(v)) as unknown as Prisma.InputJsonObject;
 
 const signe = (i: Integration, texte: string, choix?: string | null) => avecSignature(texte, signatureChoisie(prefsCompte(i), choix));
 
@@ -219,7 +221,7 @@ export const IntegrationService = {
       // Les mails vus dans les dossiers restent : ils ne viennent pas de cet import.
       const vus = donneesDe(i).vus;
       const repere = o.empreinte ?? donneesDe(i).empreinte;
-      await prisma.integration.update({ where: { id }, data: { donnees: jsonPropre({ ...donnees, ...(vus?.length ? { vus } : {}), ...(repere ? { empreinte: repere } : {}) }) as unknown as Prisma.InputJsonObject, derniereSync: new Date(), erreur: null } });
+      await prisma.integration.update({ where: { id }, data: { donnees: protege({ ...donnees, ...(vus?.length ? { vus } : {}), ...(repere ? { empreinte: repere } : {}) }), derniereSync: new Date(), erreur: null } });
       // Un compte qui vient d'être connecté n'a rien de nouveau : tout y serait annoncé. Une panne de notification ne casse pas la relecture.
       if (o.annoncer && i.derniereSync) {
         const d = local(new Date(i.derniereSync.getTime() - MARGE_ANNONCE), i.user.fuseau);
@@ -337,7 +339,7 @@ export const IntegrationService = {
     const d = donneesDe(i);
     const neufs = new Set(page.mails.map((m) => m.id));
     const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: protege({ ...d, vus }) } }).catch(() => {});
     return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
   },
 
@@ -352,7 +354,7 @@ export const IntegrationService = {
     const d = donneesDe(i);
     const neufs = new Set(page.mails.map((m) => m.id));
     const vus = [...page.mails, ...(d.vus ?? []).filter((m) => !neufs.has(m.id))].slice(0, 200);
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: protege({ ...d, vus }) } }).catch(() => {});
     return { mails: page.mails.map((m) => ({ ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte })), suivant: page.suivant ?? null };
   },
 
@@ -400,7 +402,7 @@ export const IntegrationService = {
     if (faits.length) {
       const d = donneesDe(i);
       await prisma.integration
-        .update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, mails: mailsApresTri(d.mails ?? [], faits, action), ...(d.vus ? { vus: mailsApresTri(d.vus, faits, 'lu') } : {}) }) as unknown as Prisma.InputJsonObject } })
+        .update({ where: { id: i.id }, data: { donnees: protege({ ...d, mails: mailsApresTri(d.mails ?? [], faits, action), ...(d.vus ? { vus: mailsApresTri(d.vus, faits, 'lu') } : {}) }) } })
         .catch(() => {});
     }
     return { faits, echecs };
@@ -416,7 +418,7 @@ export const IntegrationService = {
     if (!m) throw new HttpError(404, "Ce mail n'est plus dans la boîte : il a peut-être été supprimé.");
     const d = donneesDe(i);
     const vus = [m, ...(d.vus ?? []).filter((x) => x.id !== m.id)].slice(0, 200);
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, vus }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: protege({ ...d, vus }) } }).catch(() => {});
     return { mail: { ...m, id: `ext:${i.id}:${m.id}`, ctx: i.ctx, compte: i.compte } };
   },
 
@@ -523,7 +525,7 @@ export const IntegrationService = {
 
   /** Corrige un mail gardé sans relire tout le compte ; `nouvelles` rejoint la liste des étiquettes du compte. */
   async _majMail(i: Integration, mailId: string, patch: Partial<MailImporte>, nouvelles: string[] = []) {
-    const d = (i.donnees ?? null) as unknown as Elements | null;
+    const d = horsCoffre<Elements>(i.donnees);
     if (!d?.mails && !d?.vus) return;
     // Le mail peut venir de la réception relue ou d'un dossier ouvert (`vus`) : les deux suivent.
     const maj = (l?: MailImporte[]) => l?.map((m) => (m.id === mailId ? { ...m, ...patch } : m));
@@ -531,7 +533,7 @@ export const IntegrationService = {
     const vus = maj(d.vus);
     const connues = d.libelles ?? [];
     const libelles = [...connues, ...nouvelles.filter((n) => !connues.some((l) => l.nom.toLowerCase() === n.toLowerCase())).map((nom) => ({ nom }))];
-    await prisma.integration.update({ where: { id: i.id }, data: { donnees: jsonPropre({ ...d, mails, ...(vus ? { vus } : {}), libelles }) as unknown as Prisma.InputJsonObject } }).catch(() => {});
+    await prisma.integration.update({ where: { id: i.id }, data: { donnees: protege({ ...d, mails, ...(vus ? { vus } : {}), libelles }) } }).catch(() => {});
   },
 
   /** Écrit un nouveau mail depuis le compte : destinataires séparés par des virgules. */
@@ -576,7 +578,7 @@ export const IntegrationService = {
     const rows = await prisma.integration.findMany({ where: { userId } });
     const out = { ...vide(), integrations: rows.map(publique) } as Elements & { integrations: ReturnType<typeof publique>[] };
     for (const r of rows) {
-      const d = (r.donnees ?? vide()) as unknown as Elements;
+      const d = horsCoffre<Elements>(r.donnees) ?? vide();
       const ext = (x: { id: string }) => `ext:${r.id}:${x.id}`;
       out.agenda.push(...d.agenda.map((x) => ({ ...x, id: ext(x), ctx: r.ctx })));
       out.taches.push(...d.taches.map((x) => ({ ...x, id: ext(x), ctx: r.ctx })));
