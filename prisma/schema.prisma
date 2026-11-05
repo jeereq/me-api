@@ -325,6 +325,10 @@ model Justificatif {
   publicId  String    @id
   /// Type de ressource Cloudinary : image (photos et PDF) ou raw.
   genre     String    @default("image")
+  /// Accès chez Cloudinary : « authenticated » (privé, servi par me-api) ; « upload » : déposé avant, public jusqu'à sa migration.
+  acces     String    @default("upload")
+  /// Extension du fichier d'origine (pdf, jpg…).
+  format    String?
   /// Qui l'a déposé.
   userId    String
   /// Espace d'équipe où vit la dépense ; absent = espace privé de `userId`.
