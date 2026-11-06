@@ -81,6 +81,8 @@ const reference = () => `TO${Date.now().toString(36).toUpperCase()}${randomBytes
 const estDoublon = (e: unknown) => (e as { code?: string })?.code === 'P2002';
 const contactDe = (m: { contact: unknown }) => horsCoffre<Contact>(m.contact) ?? { nom: 'Ancien membre', telephone: '' };
 
+export type FiltresAnnuaire = { q?: string; mode?: string; rythme?: string; devise?: string; montantMax?: number };
+
 export function creerTontines(d: DepsTontines) {
   const maintenant = () => d.maintenant?.() ?? Date.now();
   const jourDe = (t: { fuseau: string }) => local(new Date(maintenant()), t.fuseau).date;
@@ -434,9 +436,17 @@ export function creerTontines(d: DepsTontines) {
     /** Les groupes qui cherchent des membres. */
     limites: () => d.limites(),
 
-    async annuaire(userId: string | null, q?: string) {
-      const tous = await d.db.tontine.findMany({ where: { visibilite: 'public', etat: { in: ['ouvert', 'en_cours'] } }, orderBy: { createdAt: 'desc' }, take: 200, include: INCLUS });
-      const mot = q?.trim().toLowerCase();
+    async annuaire(userId: string | null, f: FiltresAnnuaire = {}) {
+      const where: Prisma.TontineWhereInput = {
+        visibilite: 'public',
+        etat: { in: ['ouvert', 'en_cours'] },
+        ...(f.mode ? { mode: f.mode } : {}),
+        ...(f.rythme ? { rythme: f.rythme } : {}),
+        ...(f.devise ? { devise: f.devise } : {}),
+        ...(f.montantMax ? { montant: { lte: f.montantMax } } : {}),
+      };
+      const tous = await d.db.tontine.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, include: INCLUS });
+      const mot = f.q?.trim().toLowerCase();
       const groupes = tous.filter((t) => accueille(t) && acceptes(t).length < t.places && (!mot || t.nom.toLowerCase().includes(mot)));
       // Seuls les groupes des comptes approuvés sont visibles.
       const approuves = await d.comptesApprouves(groupes.flatMap((t) => (t.organisateurId ? [t.organisateurId] : [])));

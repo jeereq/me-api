@@ -5,7 +5,7 @@ import { SmsService } from '../services/SmsService.js';
 import { ApprobationService as A, TontineService as S } from '../services/TontineService.js';
 import { lireFormulaire } from '../utils/formulaire.js';
 import { HttpError } from '../utils/http.js';
-import { dossierEligibiliteSchema } from '../validators/schemas.js';
+import { dossierEligibiliteSchema, filtresAnnuaireSchema } from '../validators/schemas.js';
 import { prisma } from '../utils/prisma.js';
 
 const p = (v: string | string[] | undefined) => String(v ?? '');
@@ -16,18 +16,23 @@ const compte = async (req: Request) => {
 
 const acteur = (req: Request) => ({ id: req.user!.id, nom: req.user!.nom || req.user!.email, admin: req.user!.role === 'ADMIN' });
 
+const filtresAnnuaire = (req: Request) => {
+  const r = filtresAnnuaireSchema.safeParse(req.query);
+  return r.success ? r.data : {};
+};
+
 export const TontineController = {
   mesGroupes: async (req: Request, res: Response) => {
     res.json(await S.mesGroupes(req.user!.id));
   },
   annuairePublic: async (req: Request, res: Response) => {
-    res.json(await S.annuaire(null, typeof req.query.q === 'string' ? req.query.q : undefined));
+    res.json(await S.annuaire(null, filtresAnnuaire(req)));
   },
   limites: async (_req: Request, res: Response) => {
     res.json(await S.limites());
   },
   annuaire: async (req: Request, res: Response) => {
-    res.json(await S.annuaire(req.user!.id, typeof req.query.q === 'string' ? req.query.q : undefined));
+    res.json(await S.annuaire(req.user!.id, filtresAnnuaire(req)));
   },
   detail: async (req: Request, res: Response) => {
     res.json(await S.detail(req.user!.id, p(req.params.id)));
