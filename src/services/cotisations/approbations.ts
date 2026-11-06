@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 
 import { numeroMasque, prenomDe } from '../../commun/cotisations.js';
-import { enCoffre, horsCoffre } from '../../utils/coffre.js';
+import { enCoffre, estEnCoffre, horsCoffre } from '../../utils/coffre.js';
 import { chiffrer, dechiffrer } from '../../utils/crypto.js';
 import { HttpError } from '../../utils/http.js';
 import type { AvisGroupe } from './envois.js';
@@ -88,7 +88,7 @@ export function creerApprobations(d: DepsApprobations) {
       const a = await d.db.approbationCompte.findUnique({ where: { userId }, select: { piece: true, dossier: true } });
       if (!a) throw new HttpError(404, 'Demande introuvable.');
       const [type, base64] = a.piece ? dechiffrer(a.piece).split(';') : [null, null];
-      return { type, base64, dossier: a.dossier ? horsCoffre<DossierEligibilite>(a.dossier) : null };
+      return { type, base64, dossier: estEnCoffre(a.dossier) ? horsCoffre<DossierEligibilite>(a.dossier) : null };
     },
 
     /** La décision efface la photo. Un compte déjà approuvé peut perdre son approbation. */
