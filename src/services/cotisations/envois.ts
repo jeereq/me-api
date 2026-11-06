@@ -21,7 +21,10 @@ export const Envois = {
    * Prévient un membre une seule fois : la clé empêche tout second envoi du même avis.
    * Chacun garde la main sur le mail et le SMS dans les réglages de son compte.
    */
-  async avertir(userId: string, telephone: string | null, avis: AvisGroupe, seulementApp = false) {
+  async avertir(userId: string, telephone: string | null, avis: AvisGroupe, mode: boolean | { mail: boolean; sms: boolean } = false) {
+    const seulementApp = mode === true;
+    // Un rappel de groupe est obligatoire : l'initiateur choisit les canaux, le membre ne peut pas le couper.
+    const obligatoire = typeof mode === 'object' ? mode : null;
     const cree = await prisma.notification.createMany({
       data: [{ userId, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'normal', quand: new Date().toISOString().slice(0, 16) }],
       skipDuplicates: true,
@@ -30,16 +33,16 @@ export const Envois = {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { nom: true, email: true, emailVerifie: true, espace: { select: { data: true } } } });
     if (!u) return { nouveau: true, mail: false, sms: false };
     const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
-    if (prefs.app !== false) await PushService.envoyer(userId, { titre: avis.titre, corps: avis.corps, mode: 'normal', url: '/finances?onglet=cotisations', tag: avis.cle }).catch((e) => console.error('Push tontine', e));
+    if (obligatoire || prefs.app !== false) await PushService.envoyer(userId, { titre: avis.titre, corps: avis.corps, mode: 'normal', url: '/finances?onglet=cotisations', tag: avis.cle }).catch((e) => console.error('Push tontine', e));
     if (seulementApp) return { nouveau: true, mail: false, sms: false };
     const canaux = await canauxSysteme();
     let mail = false;
-    if (canaux.mail && prefs.email !== false && u.emailVerifie) {
+    if (canaux.mail && (obligatoire ? obligatoire.mail : prefs.email !== false) && u.emailVerifie) {
       const m = emailRappels([{ titre: avis.titre, corps: avis.corps, mode: 'normal' }], u.nom, 'Tu reçois cet email parce que tu participes à une tontine sur Me. Tu peux couper les emails dans les réglages de ton compte.', lienApp());
       mail = await EmailService.envoyer(u.email, avis.titre, m.texte, m.html);
       if (mail) await prisma.notification.updateMany({ where: { userId, cle: avis.cle }, data: { parEmail: true } });
     }
-    const sms = canaux.sms && prefs.sms !== false && !!telephone ? await SmsService.envoyer(userId, telephone, `${avis.titre}. ${avis.corps} ${lienApp()}`) : false;
+    const sms = canaux.sms && (obligatoire ? obligatoire.sms : prefs.sms !== false) && !!telephone ? await SmsService.envoyer(userId, telephone, `${avis.titre}. ${avis.corps} ${lienApp()}`) : false;
     return { nouveau: true, mail, sms };
   },
 

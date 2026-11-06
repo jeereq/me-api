@@ -22,6 +22,9 @@ model User {
   /// Absent pour un compte créé avec Google (sans mot de passe).
   passwordHash String?
   nom          String   @default("")
+  /// Photo de profil, visible dans les groupes. Obligatoire pour les options de Finances.
+  photoUrl     String?
+  photoId      String?
   /// Adresse confirmée par le lien reçu par email (ou par Google).
   emailVerifie Boolean  @default(false)
   /// Identifiant Google (« sub ») pour « Continuer avec Google ».
@@ -499,6 +502,8 @@ model Tontine {
   beneficiaire   Json?
   /// Dernier jour d'un objectif : le versement se prépare ensuite.
   dateFin        String?
+  /// Rappels obligatoires réglés par l'initiateur : jours avant et après l'échéance, canaux.
+  rappels        Json?
   /// Commission de la plateforme en points de base, figée à la création (500 = 5 %).
   commissionBps  Int
   /// Fuseau de l'organisateur : les échéances sont des jours dans ce fuseau.

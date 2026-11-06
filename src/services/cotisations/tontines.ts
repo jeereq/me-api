@@ -2,7 +2,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, prenomDe, repartitionCagnotte, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
+import { COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, prenomDe, rappelDuJour, rappelsDe, repartitionCagnotte, type RappelsGroupe, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -40,6 +40,7 @@ export type CreationTontine = {
   raison?: string;
   beneficiaire?: { nom: string; telephone: string };
   dateFin?: string;
+  rappels?: RappelsGroupe;
 };
 export type DepsTontines = {
   db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement'>;
@@ -54,7 +55,8 @@ export type DepsTontines = {
   flexpaiePret(): boolean;
   adresseServeur(): string;
   exigerNumero(telephone: string): Promise<void>;
-  avertir(userId: string, telephone: string | null, avis: AvisGroupe, seulementApp?: boolean): Promise<{ nouveau: boolean; mail: boolean; sms: boolean }>;
+  /** `obligatoire` : un rappel de groupe, envoyé sur ces canaux sans tenir compte des préférences du membre. */
+  avertir(userId: string, telephone: string | null, avis: AvisGroupe, mode?: boolean | { mail: boolean; sms: boolean }): Promise<{ nouveau: boolean; mail: boolean; sms: boolean }>;
   /** Comptes approuvés pour l'annuaire. */
   comptesApprouves(ids: string[]): Promise<Set<string>>;
   adresseApp(): string | null;
@@ -65,7 +67,7 @@ export type DepsTontines = {
   tirer?: (max: number) => number;
 };
 
-const INCLUS = { organisateur: { select: { nom: true, role: true } }, membres: { orderBy: { createdAt: 'asc' } }, tours: { orderBy: { numero: 'asc' } } } satisfies Prisma.TontineInclude;
+const INCLUS = { organisateur: { select: { nom: true, role: true, photoUrl: true } }, membres: { orderBy: { createdAt: 'asc' }, include: { user: { select: { photoUrl: true } } } }, tours: { orderBy: { numero: 'asc' } } } satisfies Prisma.TontineInclude;
 type TontineComplete = Prisma.TontineGetPayload<{ include: typeof INCLUS }>;
 type Membre = TontineComplete['membres'][number];
 type Mouvement = Prisma.TontineMouvementGetPayload<object>;
@@ -73,7 +75,6 @@ type Mouvement = Prisma.TontineMouvementGetPayload<object>;
 const reference = () => `TO${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`;
 const estDoublon = (e: unknown) => (e as { code?: string })?.code === 'P2002';
 const contactDe = (m: { contact: unknown }) => horsCoffre<Contact>(m.contact) ?? { nom: 'Ancien membre', telephone: '' };
-const jourPlus = (jour: string, n: number) => new Date(new Date(`${jour}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
 
 export function creerTontines(d: DepsTontines) {
   const maintenant = () => d.maintenant?.() ?? Date.now();
@@ -103,13 +104,13 @@ export function creerTontines(d: DepsTontines) {
   const aCotise = (mvts: Mouvement[], membreId: string, tourId: string) => mvts.some((x) => x.membreId === membreId && x.tourId === tourId && x.statut === 'paye' && (x.genre === 'cotisation' || x.genre === 'caution_utilisee'));
 
   /** Un membre arrivé en cours de route ne doit pas les périodes d'avant. */
-  const toursDus = (t: TontineComplete, m: Membre, mvts: Mouvement[]) => {
+  const toursDus = (t: TontineComplete, m: Pick<Membre, 'id' | 'createdAt'>, mvts: Mouvement[]) => {
     const entree = local(m.createdAt, t.fuseau).date;
     return toursCollecte(t).filter((x) => x.etat === 'collecte' && x.echeance >= entree && !aCotise(mvts, m.id, x.id));
   };
 
   /** Ce que ce membre doit payer maintenant : d'abord le tour, puis la caution. */
-  function aPayer(t: TontineComplete, m: Membre, mvts: Mouvement[]) {
+  function aPayer(t: TontineComplete, m: Pick<Membre, 'id' | 'etat' | 'cautionStatut' | 'createdAt'>, mvts: Mouvement[]) {
     if (m.etat !== 'accepte' || t.etat === 'annule' || t.etat === 'termine') return null;
     if (estObjectif(t)) {
       const dus = toursDus(t, m, mvts);
@@ -139,6 +140,7 @@ export function creerTontines(d: DepsTontines) {
     inscrits: acceptes(t).length,
     etat: t.etat,
     organisateur: prenomDe(t.organisateur?.nom ?? ''),
+    organisateurPhoto: t.organisateur?.photoUrl ?? null,
     ...repartitionCagnotte(t.montant, t.places, t.commissionBps),
     monEtat: t.membres.find((m) => m.userId === userId)?.etat ?? null,
   });
@@ -156,6 +158,7 @@ export function creerTontines(d: DepsTontines) {
       paiementOuvert: ouvertPour(t),
       suisOrganisateur: orga,
       lienInvitation: orga ? lienInvitation(t) : null,
+      rappels: rappelsDe(t.rappels),
       collecte: mvts.filter((x) => x.genre === 'cotisation' && x.statut === 'paye').reduce((n, x) => n + x.montant, 0),
       final: tourFinal(t) ? { etat: tourFinal(t)!.etat, net: tourFinal(t)!.net, commission: tourFinal(t)!.commission } : null,
       tourCourant: t.tourCourant,
@@ -169,6 +172,7 @@ export function creerTontines(d: DepsTontines) {
         ? acceptes(t).map((m) => ({
             id: m.id,
             nom: contactDe(m).nom,
+            photo: m.user?.photoUrl ?? null,
             rang: m.rang,
             cautionPayee: m.cautionStatut !== 'due',
             cautionStatut: orga ? m.cautionStatut : null,
@@ -476,6 +480,7 @@ export function creerTontines(d: DepsTontines) {
           mode: c.mode, visibilite: c.visibilite, cautionRequise, codeInvitation: publique ? null : randomBytes(9).toString('base64url'),
           raison: objectif ? (c.raison ?? null) : null, dateFin: objectif ? c.dateFin : null, ...(beneficiaire ? { beneficiaire: enCoffre(beneficiaire) } : {}),
           etat: objectif ? 'en_cours' : 'ouvert', tourCourant: objectif ? 1 : 0,
+          rappels: rappelsDe(c.rappels),
         },
       });
       await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, etat: 'accepte', cautionStatut: cautionRequise ? 'due' : 'dispense', contact: enCoffre({ nom: u.nom, telephone }), conditionsVersion: VERSION_CONDITIONS_TONTINE } });
@@ -691,12 +696,27 @@ export function creerTontines(d: DepsTontines) {
       const du = aPayer(t, m, await mouvementsDe(t.id));
       if (!du) throw new HttpError(409, 'Ce membre n’a rien à payer.');
       if (!m.userId) throw new HttpError(409, 'Ce membre n’a plus de compte.');
-      const r = await d.avertir(m.userId, contactDe(m).telephone, {
-        cle: `tontine:rappel:${m.id}:${du.tourId ?? 'caution'}:${jourDe(t)}`,
-        titre: du.genre === 'caution' ? `Caution à payer : ${montantCotisation(du.montant, t.devise)}` : `Cotisation à payer : ${montantCotisation(du.montant, t.devise)}`,
-        corps: `« ${t.nom} ».`,
-      });
+      const reglage = rappelsDe(t.rappels);
+      const r = await d.avertir(
+        m.userId,
+        contactDe(m).telephone,
+        {
+          cle: `tontine:rappel:${m.id}:${du.tourId ?? 'caution'}:${jourDe(t)}`,
+          titre: du.genre === 'caution' ? `Caution à payer : ${montantCotisation(du.montant, t.devise)}` : `Cotisation à payer : ${montantCotisation(du.montant, t.devise)}`,
+          corps: `« ${t.nom} ».`,
+        },
+        { mail: reglage.mail, sms: reglage.sms },
+      );
       return { ...r, ...(await relire(t.id, userId)) };
+    },
+
+    /** L'initiateur règle les rappels de son groupe. Il en reste toujours au moins un : ils sont obligatoires. */
+    async reglerRappels(userId: string, id: string, rappels: RappelsGroupe) {
+      const t = await charger(id);
+      exigerOrganisateur(t, userId);
+      if (t.etat === 'termine' || t.etat === 'annule') throw new HttpError(409, 'Ce groupe est terminé.');
+      await d.db.tontine.update({ where: { id }, data: { rappels: rappelsDe(rappels) } });
+      return relire(id, userId);
     },
 
     /** Échéance dépassée : la caution couvre le tour pour que le bénéficiaire ne soit pas bloqué. Le membre devra la refaire. */
@@ -772,18 +792,28 @@ export function creerTontines(d: DepsTontines) {
       const tours = await d.db.tontineTour.findMany({ where: { etat: 'collecte' } });
       for (const tour of tours) {
         const t = await charger(tour.tontineId);
-        const jour = jourDe(t);
-        const moment = jour > tour.echeance ? 'retard' : jourPlus(jour, 1) >= tour.echeance ? 'bientot' : null;
+        // Pas de rappel avant 8 h, heure du groupe.
+        const { date: jour, heure } = local(new Date(instant), t.fuseau);
+        if (heure < '08:00') continue;
+        const reglage = rappelsDe(t.rappels);
+        const moment = rappelDuJour(reglage, jour, tour.echeance);
         if (!moment) continue;
+        const retard = moment.startsWith('apres');
+        const date = `${tour.echeance.slice(8)}/${tour.echeance.slice(5, 7)}`;
         const mvts = await mouvementsDe(t.id);
         for (const m of acceptes(t)) {
           if (!m.userId || aCotise(mvts, m.id, tour.id) || (estObjectif(t) && !toursDus(t, m, mvts).some((x) => x.id === tour.id))) continue;
           await d
-            .avertir(m.userId, contactDe(m).telephone, {
-              cle: `tontine:echeance:${tour.id}:${m.id}:${moment}`,
-              titre: moment === 'retard' ? `Cotisation en retard : ${montantCotisation(t.montant, t.devise)}` : `Cotisation à payer avant le ${tour.echeance.slice(8)}/${tour.echeance.slice(5, 7)}`,
-              corps: estObjectif(t) ? `« ${t.nom} ».` : `« ${t.nom} », tour ${tour.numero} sur ${t.places}.`,
-            })
+            .avertir(
+              m.userId,
+              contactDe(m).telephone,
+              {
+                cle: `tontine:echeance:${tour.id}:${m.id}:${moment}`,
+                titre: retard ? `Cotisation en retard : ${montantCotisation(t.montant, t.devise)}` : moment === 'avant:0' ? `Cotisation à payer aujourd’hui : ${montantCotisation(t.montant, t.devise)}` : `Cotisation à payer avant le ${date}`,
+                corps: estObjectif(t) ? `« ${t.nom} ».` : `« ${t.nom} », tour ${tour.numero} sur ${t.places}.`,
+              },
+              { mail: reglage.mail, sms: reglage.sms },
+            )
             .catch((e) => console.error('Avis de tontine', e));
         }
       }

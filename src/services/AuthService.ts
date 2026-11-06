@@ -17,10 +17,11 @@ import { refusMotDePasse } from '../commun/mot-de-passe.js';
 import { ConnexionGoogle, type ProfilGoogle } from './comptes/google.js';
 import { JetonService } from './comptes/JetonService.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
+import { PhotoProfil } from './comptes/photo.js';
 
-type Compte = { id: string; email: string | null; telephone?: string | null; emailVerifie?: boolean; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
+type Compte = { id: string; photoUrl?: string | null; email: string | null; telephone?: string | null; emailVerifie?: boolean; nom: string; role: 'ADMIN' | 'UTILISATEUR'; passwordHash?: string | null; googleId?: string | null; nomApp?: string } & ChampsAbonnement;
 
-const publicUser = (u: Compte) => ({ id: u.id, email: u.email, telephone: u.telephone ?? null, emailVerifie: u.emailVerifie, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
+const publicUser = (u: Compte) => ({ id: u.id, photo: u.photoUrl ?? null, email: u.email, telephone: u.telephone ?? null, emailVerifie: u.emailVerifie, nom: u.nom, nomApp: u.nomApp ?? '', role: u.role, motDePasse: u.passwordHash !== null, google: !!u.googleId, abonnement: etatAbonnement(u) });
 const session = (u: Compte) => ({ token: generateToken({ userId: u.id }), user: publicUser(u) });
 // Les jetons de session ont une précision à la seconde : on tronque pour que la session ouverte juste après reste valable.
 const maintenant = () => new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -313,6 +314,7 @@ export const AuthService = {
       await prisma.essaiUtilise.createMany({ data: empreintesCompte(user).map((empreinte) => ({ empreinte })), skipDuplicates: true });
     }
     await StockJustificatifs.purgerCompte(userId);
+    await PhotoProfil.supprimer(user.photoId);
     await prisma.user.delete({ where: { id: userId } });
     return { ok: true };
   },

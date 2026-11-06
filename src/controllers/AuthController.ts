@@ -2,6 +2,9 @@ import type { Request, Response } from 'express';
 
 import { AuthService } from '../services/AuthService.js';
 import { ConnexionGoogle, retourConnexion } from '../services/comptes/google.js';
+import { PhotoProfil, TAILLE_PHOTO_MAX } from '../services/comptes/photo.js';
+import { lireFormulaire } from '../utils/formulaire.js';
+import { HttpError } from '../utils/http.js';
 
 /** Renvoie vers l'app avec le résultat de la connexion Google. */
 const versApp = (retour: string, params: Record<string, string>) => `${retour}${retour.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`;
@@ -10,6 +13,13 @@ const versApp = (retour: string, params: Record<string, string>) => `${retour}${
 const qui = (req: Request): string => req.body.identifiant ?? req.body.email;
 
 export const AuthController = {
+  /** La photo de profil, visible par les membres des groupes. */
+  photo: async (req: Request, res: Response) => {
+    const form = await lireFormulaire(req, TAILLE_PHOTO_MAX + 64 * 1024, 'Photo trop lourde : 5 Mo au plus.');
+    const fichier = form.get('fichier');
+    if (!(fichier instanceof File)) throw new HttpError(400, 'Aucune photo reçue.');
+    res.status(201).json({ photo: await PhotoProfil.deposer(req.user!.id, new Uint8Array(await fichier.arrayBuffer())) });
+  },
   options: async (_req: Request, res: Response) => {
     res.json(await AuthService.options());
   },

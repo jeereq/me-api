@@ -1,0 +1,3 @@
+ALTER TABLE "User" ADD COLUMN "photoUrl" TEXT;
+ALTER TABLE "User" ADD COLUMN "photoId" TEXT;
+ALTER TABLE "Tontine" ADD COLUMN "rappels" JSONB;

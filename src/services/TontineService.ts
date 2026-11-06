@@ -26,7 +26,7 @@ export const TontineService = creerTontines({
   flexpaiePret: flexpaieConfigure,
   adresseServeur: () => (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, ''),
   exigerNumero: (telephone) => NumerosAutorises.exiger(telephone),
-  avertir: (userId, telephone, avis, seulementApp) => Envois.avertir(userId, telephone, avis, seulementApp),
+  avertir: (userId, telephone, avis, mode) => Envois.avertir(userId, telephone, avis, mode),
   comptesApprouves: (ids) => ApprobationService.comptesApprouves(ids),
   adresseApp,
   envoyerInvitation: (userId, c) => Envois.invitation(userId, c),

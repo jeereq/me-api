@@ -209,6 +209,8 @@ export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
 
 /** Le compte a-t-il droit à cette fonction ? */
 export const aDroit = (e: Pick<EtatAbonnement, 'fonctions'>, f: Fonction) => e.fonctions.includes(f);
+/** Les options de Finances demandent une photo de profil, pour Finances, Pro et l'essai. Les admins passent toujours. */
+export const photoManquante = (u: { role: string; photoUrl?: string | null }, f: Fonction) => formuleDe(f) === 'finances' && u.role !== 'ADMIN' && !u.photoUrl;
 
 export const finEssai = (depuis = new Date()) => new Date(depuis.getTime() + ESSAI_JOURS * 86400000);
 

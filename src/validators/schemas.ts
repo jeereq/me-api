@@ -310,6 +310,12 @@ const idTontine = z.object({ id: z.string().min(1).max(40) });
 const telephoneTontine = z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(25, 'Numéro invalide');
 const accepteConditions = z.literal(true, { errorMap: () => ({ message: 'Accepte les conditions pour continuer.' }) });
 const preuveVersement = z.object({ preuve: z.string().trim().min(3, 'Référence trop courte').max(120, 'Référence trop longue').optional() });
+const rappelsGroupe = z.object({
+  avant: z.array(z.union([z.literal(7), z.literal(3), z.literal(1), z.literal(0)])).min(1, 'Garde au moins un rappel avant l’échéance.').max(4),
+  apres: z.array(z.union([z.literal(1), z.literal(3), z.literal(7)])).max(3),
+  mail: z.boolean(),
+  sms: z.boolean(),
+});
 const dateJour = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date invalide');
 export const tontineCreerSchema = z.object({
   body: z
@@ -327,6 +333,7 @@ export const tontineCreerSchema = z.object({
       raison: z.string().trim().min(2, 'Indique la raison').max(200, 'Raison trop longue').optional(),
       beneficiaire: z.object({ nom: z.string().trim().min(1, 'Nom du bénéficiaire requis').max(80, 'Nom trop long'), telephone: telephoneTontine }).optional(),
       dateFin: dateJour.optional(),
+      rappels: rappelsGroupe.optional(),
       accepte: accepteConditions,
     })
     .refine((b) => b.mode !== 'objectif' || (b.raison && b.beneficiaire && b.dateFin), { message: 'Indique la raison, le bénéficiaire et la date de fin.' })
@@ -334,6 +341,7 @@ export const tontineCreerSchema = z.object({
     .refine((b) => b.visibilite !== 'prive' || !!b.telephone, { message: 'Numéro requis' }),
 });
 export const tontineIdSchema = z.object({ params: idTontine });
+export const tontineRappelsSchema = z.object({ params: idTontine, body: rappelsGroupe });
 export const tontineAdhererSchema = z.object({ params: idTontine, body: z.object({ accepte: accepteConditions }) });
 const codeInvitation = z.object({ code: z.string().regex(/^[A-Za-z0-9_-]{12}$/, 'Cette invitation n’est plus valable.') });
 export const tontineInvitationSchema = z.object({ params: codeInvitation });
