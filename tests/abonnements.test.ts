@@ -162,8 +162,8 @@ describe('FlexPaie', () => {
 
 describe('trois formules : Gratuit, Finances, Pro', () => {
   it('garde le prix le plus haut à 4,99 $ par mois', () => {
-    assert.equal(OFFRES.formules.finances.mensuel.prix, 199);
-    assert.equal(OFFRES.formules.finances.annuel.prix, 1999);
+    assert.equal(OFFRES.formules.finances.mensuel.prix, 299);
+    assert.equal(OFFRES.formules.finances.annuel.prix, 2999);
     assert.equal(OFFRES.formules.pro.mensuel.prix, 499);
     assert.ok(Math.max(OFFRES.formules.finances.mensuel.prix, OFFRES.formules.pro.mensuel.prix) <= 499);
     // Les anciennes versions de l'app lisent toujours `pro`.
@@ -200,9 +200,9 @@ describe('trois formules : Gratuit, Finances, Pro', () => {
   });
 
   it('convertit le temps restant au prorata des prix quand on change de formule', () => {
-    // 30 jours de Finances restants valent 30 × 1,99 / 4,99 ≈ 11,96 jours de Pro, puis le mois payé.
+    // 30 jours de Finances restants valent 30 × 2,99 / 4,99 ≈ 17,98 jours de Pro, puis le mois payé.
     const fin = prolonger({ fin: jours(30), formule: 'finances' }, 'mensuel', T0, null, 'pro');
-    const attendu = ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 199) / 499)), 1);
+    const attendu = ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 299) / 499)), 1);
     assert.equal(fin.toISOString(), attendu.toISOString());
     // Même formule : on prolonge simplement à partir de la fin.
     assert.equal(prolonger({ fin: jours(30), formule: 'finances' }, 'mensuel', T0, null, 'finances').toISOString(), ajouterMois(jours(30), 1).toISOString());
@@ -253,7 +253,7 @@ describe('paliers de réunions : Pro 0 à Pro 3', () => {
     assert.equal(prixPeriode('pro', 'annuel', 1), 6998);
     assert.equal(prixPeriode('pro', 'annuel', 3), 14998);
     // Finances n'a pas de palier.
-    assert.equal(prixPeriode('finances', 'mensuel', 3), 199);
+    assert.equal(prixPeriode('finances', 'mensuel', 3), 299);
     assert.deepEqual([1, 2, 3].map((n) => PALIERS[n as 1 | 2 | 3].heures), [3, 10, 25]);
   });
   it('lit tout ce qui n’est pas 1, 2 ou 3 comme Pro 0', () => {

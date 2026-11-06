@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
@@ -6,6 +7,7 @@ process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 const { echeancesTontine, repartitionCagnotte } = await import('../src/commun/cotisations.js');
 const { tontineAdhererSchema, tontineCreerSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
+const { FONCTIONS_FINANCES, formuleDe } = await import('../src/services/abonnements/offres.js');
 const await_module = await import('../src/services/cotisations/approbations.js');
 type Deps = import('../src/services/cotisations/tontines.js').DepsTontines;
 type Ligne = Record<string, any>;
@@ -122,6 +124,21 @@ describe('calculs des tontines', () => {
     assert.equal(tontineCreerSchema.safeParse({ body: { ...base, visibilite: 'prive' } }).success, false);
     assert.equal(tontineCreerSchema.safeParse({ body: { ...base, mode: 'objectif' } }).success, false);
     assert.equal(tontineCreerSchema.safeParse({ body: { ...base, mode: 'objectif', rythme: 'unique', raison: 'Mariage', beneficiaire: { nom: 'Jean', telephone: '0812345678' }, dateFin: '2026-12-01' } }).success, true);
+  });
+});
+
+describe('accès aux cotisations', () => {
+  it('créer, rejoindre et demander l’approbation exigent au moins Finances ; payer reste ouvert', () => {
+    const routes = readFileSync(new URL('../src/routes/tontine.routes.ts', import.meta.url), 'utf8');
+    for (const r of ["post('/',", "post('/:id/adherer',", "post('/invitation/:code',", "post('/eligibilite',", "post('/eligibilite/code',", "post('/eligibilite/confirmer',"]) {
+      const ligne = routes.split('\n').find((l) => l.includes(r));
+      assert.ok(ligne?.includes("requireFonction('cotisations')"), r);
+    }
+    assert.equal(routes.split('\n').find((l) => l.includes("post('/:id/payer',"))?.includes('requireFonction'), false);
+  });
+  it('Gratuit n’y a pas droit, Finances et Pro oui', () => {
+    assert.equal(formuleDe('cotisations'), 'finances');
+    assert.ok(FONCTIONS_FINANCES.cotisations);
   });
 });
 
