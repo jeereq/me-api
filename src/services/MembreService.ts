@@ -5,9 +5,10 @@ import type { Formule, Palier } from './abonnements/offres.js';
 import { filtrerMembres, finEssaiProlonge, finOfferte, ligneMembre, statsMembres, type FiltreMembres } from './membres/gestion.js';
 import { abonnementsActifs, SELECT_ABONNEMENT } from './abonnements/offres.js';
 import { StockJustificatifs } from './justificatifs/stock.js';
+import { modulesValides } from './membres/modules.js';
 import { NotificationService } from './NotificationService.js';
 
-const select = { id: true, email: true, nom: true, role: true, createdAt: true } as const;
+const select = { id: true, email: true, nom: true, role: true, modules: true, createdAt: true } as const;
 
 /** Garde au moins un admin : sans lui, plus personne ne pourrait toucher à la configuration. */
 async function assertPasDernierAdmin(id: string) {
@@ -26,9 +27,10 @@ export type ActionAdmin = { action: 'offrir'; formule: Formule; palier: number; 
 export const MembreService = {
   list: () => prisma.user.findMany({ select, orderBy: { createdAt: 'asc' } }),
 
-  async setRole(id: string, role: 'ADMIN' | 'UTILISATEUR') {
-    if (role === 'UTILISATEUR') await assertPasDernierAdmin(id);
-    return prisma.user.update({ where: { id }, data: { role }, select });
+  /** Seul un commercial garde des modules : un admin a tout, un utilisateur rien. */
+  async setRole(id: string, role: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR', modules?: string[]) {
+    if (role !== 'ADMIN') await assertPasDernierAdmin(id);
+    return prisma.user.update({ where: { id }, data: { role, modules: role === 'COMMERCIAL' ? modulesValides(modules) : [] }, select });
   },
 
   async remove(id: string, parId: string) {
@@ -55,6 +57,7 @@ export const MembreService = {
       where: { id },
       select: {
         ...CHAMPS_GESTION,
+        modules: true,
         espace: { select: { majLe: true } },
         paiements: { orderBy: { createdAt: 'desc' }, take: 50, select: { reference: true, formule: true, palier: true, periode: true, montant: true, devise: true, statut: true, payeLe: true, telephone: true, createdAt: true } },
         actionsAbonnement: { orderBy: { createdAt: 'desc' }, take: 50, select: { id: true, parNom: true, action: true, formule: true, palier: true, duree: true, finApres: true, note: true, createdAt: true } },
@@ -64,6 +67,7 @@ export const MembreService = {
     const { paiements, actionsAbonnement, espace } = u;
     return {
       membre: ligneMembre(u),
+      modules: u.modules,
       derniereActivite: espace?.majLe ?? null,
       paiements: paiements.map(({ telephone, ...p }) => ({ ...p, telephone: telephone ? `…${telephone.slice(-4)}` : '' })),
       actions: actionsAbonnement,

@@ -11,13 +11,13 @@ export type FiltreMembres = (typeof FILTRES)[number];
 /** Une période qui finit dans ces jours « expire bientôt » : c'est le moment de relancer. */
 export const JOURS_EXPIRE_BIENTOT = 7;
 
-export type CompteGestion = ChampsAbonnement & { id: string; email: string | null; telephone?: string | null; nom: string; role: 'ADMIN' | 'UTILISATEUR'; emailVerifie: boolean; createdAt: Date };
+export type CompteGestion = ChampsAbonnement & { id: string; email: string | null; telephone?: string | null; nom: string; role: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR'; emailVerifie: boolean; createdAt: Date };
 
 export type LigneMembre = {
   id: string;
   email: string;
   nom: string;
-  role: 'ADMIN' | 'UTILISATEUR';
+  role: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR';
   emailVerifie: boolean;
   creeLe: string;
   offre: 'gratuit' | 'essai' | 'finances' | 'pro' | 'libre';

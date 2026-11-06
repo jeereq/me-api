@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { TontineController as C } from '../controllers/TontineController.js';
 import { requireFonction } from '../middlewares/abonnement.js';
-import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js';
+import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.js';
 import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
@@ -14,13 +14,13 @@ router.post('/flexpaie/retour', retourPaiementLimiter, asyncHandler(C.retour));
 router.get('/invitation/:code', invitationTontineLimiter, validateRequest(tontineInvitationSchema), asyncHandler(C.invitation));
 router.use(authenticateJWT);
 
-router.get('/admin/resume', requireAdmin, asyncHandler(C.adminResume));
-router.post('/admin/tours/:tourId/verser', requireAdmin, validateRequest(tontinePreuveTourSchema), asyncHandler(C.adminVerser));
-router.post('/admin/membres/:membreId/rendre', requireAdmin, validateRequest(tontinePreuveMembreSchema), asyncHandler(C.adminRendre));
+router.get('/admin/resume', requireModule('versements'), asyncHandler(C.adminResume));
+router.post('/admin/tours/:tourId/verser', requireModule('versements'), validateRequest(tontinePreuveTourSchema), asyncHandler(C.adminVerser));
+router.post('/admin/membres/:membreId/rendre', requireModule('versements'), validateRequest(tontinePreuveMembreSchema), asyncHandler(C.adminRendre));
 
-router.get('/admin/approbations', requireAdmin, asyncHandler(C.adminApprobations));
-router.get('/admin/approbations/:userId/piece', requireAdmin, validateRequest(tontineUserIdSchema), asyncHandler(C.adminPiece));
-router.post('/admin/approbations/:userId', requireAdmin, validateRequest(tontineApprobationSchema), asyncHandler(C.adminDecider));
+router.get('/admin/approbations', requireModule('verifications'), asyncHandler(C.adminApprobations));
+router.get('/admin/approbations/:userId/piece', requireModule('verifications'), validateRequest(tontineUserIdSchema), asyncHandler(C.adminPiece));
+router.post('/admin/approbations/:userId', requireModule('verifications'), validateRequest(tontineApprobationSchema), asyncHandler(C.adminDecider));
 
 router.get('/eligibilite', asyncHandler(C.eligibilite));
 router.post('/eligibilite/code', requireFonction('cotisations'), codeTontineLimiter, validateRequest(tontineSmsSchema), asyncHandler(C.demanderCode));

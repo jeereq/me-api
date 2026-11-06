@@ -167,6 +167,7 @@ describe('accès aux cotisations', () => {
 });
 
 describe('une tontine de bout en bout', () => {
+  const ADMIN = { id: 'admin', nom: 'Admin', admin: true };
   let b: ReturnType<typeof baseMemoire>;
   let s: ReturnType<typeof creerTontines>;
   let demandes: Ligne[];
@@ -278,26 +279,26 @@ describe('une tontine de bout en bout', () => {
       await valider();
       // Tant que tout le monde n'a pas payé, rien ne peut être versé.
       const t = b.tours.lignes.find((x) => x.numero === tour)!;
-      await assert.rejects(s.verserTour('Admin', t.id, 'REF123'), /n’attend pas/);
+      await assert.rejects(s.verserTour(ADMIN, t.id, 'REF123'), /n’attend pas/);
       await s.payer('paul', id, 'cotisation');
       await valider();
       await s.payer('marie', id, 'cotisation');
       await valider();
       assert.equal(t.etat, 'a_verser');
       // Sans preuve, pas de versement manuel, et jamais deux fois.
-      await assert.rejects(s.verserTour('Admin', t.id), /référence/);
-      await s.verserTour('Admin', t.id, 'REF123');
+      await assert.rejects(s.verserTour(ADMIN, t.id), /référence/);
+      await s.verserTour(ADMIN, t.id, 'REF123');
       assert.equal(t.etat, 'verse');
       assert.equal(t.valideParNom, 'Admin');
-      await assert.rejects(s.verserTour('Admin', t.id, 'REF123'), /n’attend pas/);
+      await assert.rejects(s.verserTour(ADMIN, t.id, 'REF123'), /n’attend pas/);
     }
 
     assert.equal(b.tontines.lignes[0].etat, 'termine');
     const r = await s.resumeAdmin();
     assert.equal(r.cautions.length, 3);
     assert.deepEqual(r.totaux, [{ devise: 'USD', detenu: 3000 + 9000 - 8550, commission: 450 }]);
-    for (const c of r.cautions) await s.rendreCaution(c.membreId, 'REF999');
-    await assert.rejects(s.rendreCaution(r.cautions[0].membreId, 'REF999'), /pas à rendre/);
+    for (const c of r.cautions) await s.rendreCaution(ADMIN, c.membreId, 'REF999');
+    await assert.rejects(s.rendreCaution(ADMIN, r.cautions[0].membreId, 'REF999'), /pas à rendre/);
     const fin = await s.resumeAdmin();
     // Tout a été rendu : il ne reste que la commission.
     assert.deepEqual(fin.totaux, [{ devise: 'USD', detenu: 450, commission: 450 }]);
@@ -405,7 +406,7 @@ describe('une tontine de bout en bout', () => {
     assert.equal(b.tours.lignes[0].etat, 'a_verser');
     assert.ok(avis.some((a) => a.userId === 'marie' && /caution a couvert/.test(a.titre)));
     // Le tour suivant : Marie doit cotiser, puis refaire sa caution.
-    await s.verserTour('Admin', b.tours.lignes[0].id, 'REF123');
+    await s.verserTour(ADMIN, b.tours.lignes[0].id, 'REF123');
     assert.equal((await s.detail('marie', id)).groupe.aPayer?.genre, 'cotisation');
     await s.payer('marie', id, 'cotisation');
     await valider();
@@ -415,11 +416,11 @@ describe('une tontine de bout en bout', () => {
     await valider();
     await s.payer('paul', id, 'cotisation');
     await valider();
-    await s.verserTour('Admin', b.tours.lignes[1].id, 'REF124');
+    await s.verserTour(ADMIN, b.tours.lignes[1].id, 'REF124');
     instant += 3 * JOUR;
     await assert.rejects(s.utiliserCaution('orga', m.id), /plus de caution/);
     assert.equal(b.tours.lignes[2].etat, 'collecte');
-    await assert.rejects(s.verserTour('Admin', b.tours.lignes[2].id, 'REF125'), /n’attend pas/);
+    await assert.rejects(s.verserTour(ADMIN, b.tours.lignes[2].id, 'REF125'), /n’attend pas/);
   });
 
   it('quitter ou annuler avant le démarrage rend la caution ; après, non', async () => {
@@ -451,11 +452,11 @@ describe('une tontine de bout en bout', () => {
     await s.demarrer('orga', id);
     await cotiserTous(id);
     const t = b.tours.lignes[0];
-    await s.verserTour('Admin', t.id);
+    await s.verserTour(ADMIN, t.id);
     assert.equal(versements.length, 1);
     assert.equal(versements[0].montant, 2850);
     assert.equal(t.etat, 'a_verser');
-    await assert.rejects(s.verserTour('Admin', t.id), /déjà en cours/);
+    await assert.rejects(s.verserTour(ADMIN, t.id), /déjà en cours/);
     assert.equal(versements.length, 1);
     etats.set('V1', { etat: 'paye', montant: '28.50' });
     await s.retour({ orderNumber: 'V1' });
@@ -468,7 +469,7 @@ describe('une tontine de bout en bout', () => {
     const id = await complet();
     await s.demarrer('orga', id);
     await cotiserTous(id);
-    await s.verserTour('Admin', b.tours.lignes[0].id);
+    await s.verserTour(ADMIN, b.tours.lignes[0].id);
     await s.rattraper(instant + 3 * JOUR);
     assert.equal(b.mvts.lignes.at(-1)!.statut, 'en_attente');
   });
@@ -591,7 +592,7 @@ describe('une tontine de bout en bout', () => {
     assert.equal(r.versements[0].beneficiaire, 'Jean Mbuyi');
     assert.equal(r.versements[0].telephone, '243812345679');
     assert.equal(r.versements[0].raison, 'Mariage de Jean');
-    await s.verserTour('Admin', final.id, 'REF321');
+    await s.verserTour(ADMIN, final.id, 'REF321');
     assert.equal(b.tontines.lignes[0].etat, 'termine');
     assert.deepEqual((await s.resumeAdmin()).totaux, [{ devise: 'USD', detenu: 150, commission: 150 }]);
   });
@@ -655,6 +656,31 @@ describe('une tontine de bout en bout', () => {
     assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 3);
   });
 
+  it('un commercial ne valide jamais pour lui-même, et son nom reste noté', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    await cotiserTous(id);
+    const t = b.tours.lignes[0];
+    const benef = b.membres.lignes.find((m) => m.id === t.beneficiaireId)!;
+    await assert.rejects(s.verserTour({ id: benef.userId, nom: 'Com', admin: false }, t.id, 'REF123'), /autre responsable/);
+    assert.equal(t.etat, 'a_verser');
+    await s.verserTour({ id: 'com', nom: 'Fatou Commerciale', admin: false }, t.id, 'REF123');
+    assert.equal(t.valideParNom, 'Fatou Commerciale');
+    assert.equal(b.mvts.lignes.at(-1)!.validePar, 'Fatou Commerciale');
+  });
+
+  it('un initiateur commercial ne valide pas le versement de sa propre raison précise', async () => {
+    const { groupe } = await objectif();
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    instant = Date.UTC(2026, 10, 25, 12);
+    await s.rattraper(instant);
+    const final = b.tours.lignes.find((x) => x.numero === 0)!;
+    await assert.rejects(s.verserTour({ id: 'orga', nom: 'Jeereq', admin: false }, final.id, 'REF123'), /autre responsable/);
+    await s.verserTour(ADMIN, final.id, 'REF123');
+    assert.equal(final.etat, 'verse');
+  });
+
   it('un membre ne peut plus rejoindre pendant le remboursement de sa caution', async () => {
     const { groupe } = await creer();
     await s.adherer(paul, groupe.id);
@@ -664,7 +690,7 @@ describe('une tontine de bout en bout', () => {
     await valider();
     await s.quitter('paul', groupe.id);
     await assert.rejects(s.adherer(paul, groupe.id), /remboursement/);
-    await s.rendreCaution(b.membres.lignes.find((x) => x.userId === 'paul')!.id, 'REF777');
+    await s.rendreCaution(ADMIN, b.membres.lignes.find((x) => x.userId === 'paul')!.id, 'REF777');
     assert.equal((await s.adherer(paul, groupe.id)).groupe.monEtat, 'demande');
     assert.equal(b.membres.lignes.find((x) => x.userId === 'paul')!.cautionStatut, 'due');
   });

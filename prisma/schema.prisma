@@ -11,6 +11,7 @@ datasource db {
 
 enum Role {
   ADMIN
+  COMMERCIAL
   UTILISATEUR
 }
 
@@ -34,6 +35,8 @@ model User {
   /// « Déconnecter tous mes appareils » : les sessions ouvertes avant sont refusées.
   sessionsLe   DateTime?
   role         Role     @default(UTILISATEUR)
+  /// Pour un commercial : comptes, offres, verifications, versements.
+  modules      String[] @default([])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   /// Fuseau IANA du téléphone (ex. Europe/Paris), pour placer les rendez-vous importés à la bonne heure.
@@ -590,6 +593,8 @@ model TontineMouvement {
   telephone String   @default("")
   commande  String?
   message   String?
+  /// Qui a validé cette sortie d'argent.
+  validePar String?
   payeLe    DateTime?
   createdAt DateTime @default(now())
 
