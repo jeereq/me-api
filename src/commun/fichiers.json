@@ -2,6 +2,7 @@
   "fichiers": [
     "README.md",
     "calcul.ts",
+    "cotisations.ts",
     "jours.ts",
     "mails-auto.ts",
     "modes.ts",

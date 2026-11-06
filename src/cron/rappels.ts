@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 
 import { AbonnementService } from '../services/AbonnementService.js';
+import { CotisationService } from '../services/CotisationService.js';
 import { NotificationService } from '../services/NotificationService.js';
 import { avecVerrou } from '../utils/verrou.js';
 
@@ -16,6 +17,7 @@ export function initRappelsCron() {
         await NotificationService.generer();
         // Paiements dont le retour de FlexPaie s'est perdu.
         await AbonnementService.rattraper();
+        await CotisationService.rattraper();
       });
     } catch (e) {
       console.error('Rappels', e);

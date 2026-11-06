@@ -80,6 +80,7 @@ export const FONCTIONS_FINANCES = {
   prets: 'Les prêts et dettes entre personnes, avec leurs rappels',
   echeances: 'Les paiements à venir, prévenus la veille',
   bilan: 'Le bilan du mois, à l’écran et par email',
+  cotisations: 'Les cotisations de groupe, demandées par WhatsApp ou SMS',
   alertes: 'Les alertes de budget et d’objectifs en push et par email',
 } as const;
 

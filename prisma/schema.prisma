@@ -56,6 +56,7 @@ model User {
   jetons       JetonCompte[]
   equipes      EquipeMembre[]
   paiements    Paiement[]
+  cotisations  Cotisation[]
   analysesMails AnalyseMail[]
   usageReunions UsageReunion[]
   actionsAbonnement ActionAbonnement[]
@@ -397,4 +398,71 @@ model ActionAbonnement {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+/// Collecte de groupe : unique, ou régulière (semaine, mois). Les membres n'ont pas besoin de compte Me.
+model Cotisation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  titre     String
+  /// Montant par membre et par période, en centimes.
+  montant   Int
+  devise    String
+  /// unique, hebdomadaire ou mensuel
+  rythme    String
+  /// Premier jour dû, « AAAA-MM-JJ ».
+  debut     String
+  archive   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  membres   CotisationMembre[]
+  paiements PaiementCotisation[]
+
+  @@index([userId, archive])
+}
+
+model CotisationMembre {
+  id             String     @id @default(cuid())
+  cotisationId   String
+  cotisation     Cotisation @relation(fields: [cotisationId], references: [id], onDelete: Cascade)
+  /// Nom et numéro chiffrés : ce sont les données d'une personne sans compte Me.
+  contact        Json
+  /// Dans le lien envoyé au membre : ouvre sa page de paiement, sans compte.
+  jeton          String     @unique
+  demandeLe      DateTime?
+  demandePeriode String?
+  createdAt      DateTime   @default(now())
+  paiements      PaiementCotisation[]
+
+  @@index([cotisationId])
+}
+
+/// Conservé pour la comptabilité si la cotisation, le membre ou le compte disparaissent.
+/// Une seule demande en attente par membre et par période (index partiel dans la migration).
+model PaiementCotisation {
+  id           String   @id @default(cuid())
+  /// Commence par CO : jamais confondu avec un paiement d'abonnement.
+  reference    String   @unique
+  cotisationId String?
+  cotisation   Cotisation?       @relation(fields: [cotisationId], references: [id], onDelete: SetNull)
+  membreId     String?
+  membre       CotisationMembre? @relation(fields: [membreId], references: [id], onDelete: SetNull)
+  periode      String
+  montant      Int
+  devise       String
+  /// mobile (FlexPaie) ou main (noté par l'organisateur, sans argent passé par Me).
+  mode         String
+  /// en_attente, paye, echoue, expire ou abandonne
+  statut       String
+  /// Numéro masqué : le numéro complet reste chiffré sur le membre.
+  telephone    String   @default("")
+  commande     String?
+  message      String?
+  payeLe       DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([cotisationId, statut])
+  @@index([membreId, createdAt])
+  @@index([statut, createdAt])
 }

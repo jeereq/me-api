@@ -257,6 +257,7 @@ export const AuthService = {
         notifications: { select: { titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
         abonnementsPush: { select: { appareil: true, createdAt: true } },
         envoisSms: { select: { statut: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
+        cotisations: { include: { membres: { select: { contact: true, createdAt: true } }, paiements: { select: { reference: true, periode: true, montant: true, devise: true, mode: true, statut: true, telephone: true, payeLe: true, createdAt: true } } } },
         paiements: { select: { reference: true, periode: true, montant: true, devise: true, statut: true, payeLe: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
       },
     });
@@ -265,6 +266,7 @@ export const AuthService = {
       compte: { email: u.email, telephone: u.telephone, nom: u.nom, nomApp: u.nomApp, role: u.role, fuseau: u.fuseau, emailVerifie: u.emailVerifie, connexionGoogle: !!u.googleId, creeLe: u.createdAt },
       espace: u.espace?.data ?? null,
       comptesConnectes: u.integrations.map((i) => ({ ...i, donnees: horsCoffre(i.donnees) })),
+      cotisations: u.cotisations.map((c) => ({ titre: c.titre, montant: c.montant, devise: c.devise, rythme: c.rythme, debut: c.debut, archive: c.archive, createdAt: c.createdAt, membres: c.membres.map((m) => horsCoffre(m.contact)), paiements: c.paiements })),
       notifications: u.notifications,
       appareilsPush: u.abonnementsPush,
       envoisSms: u.envoisSms,
@@ -297,6 +299,8 @@ export const AuthService = {
     }
     // Les paiements restent pour la comptabilité, sans le numéro de téléphone (le lien au compte disparaît avec lui).
     await prisma.paiement.updateMany({ where: { userId }, data: { telephone: '' } });
+    // Les encaissements mobiles des cotisations restent aussi ; les paiements notés à la main n'ont plus d'utilité.
+    await prisma.paiementCotisation.deleteMany({ where: { mode: 'main', cotisation: { userId } } });
     // L'essai Pro est unique par personne : on garde seulement une empreinte de l'email et du compte Google.
     if (user.essaiJusqua) {
       await prisma.essaiUtilise.createMany({ data: empreintesCompte(user).map((empreinte) => ({ empreinte })), skipDuplicates: true });
