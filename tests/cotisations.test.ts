@@ -26,6 +26,8 @@ describe('périodes et messages', () => {
     assert.equal(libellePeriode('2026-11'), 'novembre 2026');
     assert.equal(libellePeriode('2026-11-02'), 'semaine du 2 novembre');
     assert.equal(montantCotisation(1050, 'USD'), '10,50 USD');
+    assert.equal(montantCotisation(5000000, 'CDF'), '50 000 CDF');
+    assert.equal(montantCotisation(100, 'USD'), '1 USD');
     const base = { nom: 'Marie Kabila', titre: 'Tontine', montant: 1000, devise: 'USD', periode: '2026-11' };
     assert.equal(messageCotisation(base), 'Bonjour Marie, cotisation « Tontine » de novembre 2026 : 10 USD.');
     assert.match(messageCotisation({ ...base, lien: 'https://me.neevo.app/c/x' }), /Paie ici : https:\/\/me\.neevo\.app\/c\/x$/);

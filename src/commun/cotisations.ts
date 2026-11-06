@@ -65,10 +65,11 @@ export function premierePeriodeDue(periodes: string[], payees: Iterable<string>)
   return periodes.find((p) => !faites.has(p)) ?? null;
 }
 
-/** 1000 → « 10 USD », 1050 → « 10,50 USD ». */
+/** 1000 → « 10 USD », 1050 → « 10,50 USD », 5000000 → « 50 000 CDF ». */
 export function montantCotisation(centimes: number, devise: string) {
-  const texte = centimes % 100 ? (centimes / 100).toFixed(2).replace('.', ',') : String(centimes / 100);
-  return `${texte} ${devise}`;
+  const [entier, decimales] = (centimes / 100).toFixed(2).split('.');
+  const milliers = entier.replace(/\B(?=(\d{3})+$)/g, ' ');
+  return `${milliers}${decimales === '00' ? '' : `,${decimales}`} ${devise}`;
 }
 
 /** « 10 USD par mois ». */
