@@ -99,6 +99,7 @@ export function numeroMasque(telephone: string) {
 /* Tontines : chaque tour, tous cotisent et un membre reçoit la cagnotte. */
 
 export type RythmeTontine = 'quotidien' | 'hebdomadaire' | 'mensuel';
+export type RythmeObjectif = RythmeTontine | 'unique';
 /** Commission de la plateforme : 5 %, retenus sur la cagnotte. */
 export const COMMISSION_BPS = 500;
 
@@ -122,7 +123,15 @@ export function echeancesTontine(rythme: RythmeTontine, debut: string, tours: nu
   });
 }
 
-/** « 10 USD par mois », « par jour », « par semaine ». */
-export function montantTontine(centimes: number, devise: string, rythme: RythmeTontine) {
-  return `${montantCotisation(centimes, devise)} ${rythme === 'mensuel' ? 'par mois' : rythme === 'hebdomadaire' ? 'par semaine' : 'par jour'}`;
+/** Les jours limites d'une cotisation à raison précise : selon le rythme jusqu'à la date de fin, qui reste toujours le dernier. */
+export function echeancesObjectif(rythme: RythmeObjectif, debut: string, fin: string) {
+  if (rythme === 'unique') return [fin];
+  const dates = echeancesTontine(rythme, debut, 800).filter((d) => d < fin);
+  return [...dates, fin];
+}
+
+/** « 10 USD par mois », « par jour », « par semaine », « une fois ». */
+export function montantTontine(centimes: number, devise: string, rythme: RythmeObjectif) {
+  const quand = { mensuel: 'par mois', hebdomadaire: 'par semaine', quotidien: 'par jour', unique: 'une fois' }[rythme];
+  return `${montantCotisation(centimes, devise)} ${quand}`;
 }

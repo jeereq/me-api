@@ -1,5 +1,7 @@
 import { prisma } from '../utils/prisma.js';
 import { Flexpaie, flexpaieConfigure } from './abonnements/flexpaie.js';
+import { adresseApp } from './comptes/emails.js';
+import { creerApprobations } from './cotisations/approbations.js';
 import { Envois } from './cotisations/envois.js';
 import { creerTontines } from './cotisations/tontines.js';
 import { NumerosAutorises } from './sms/numeros.js';
@@ -11,6 +13,11 @@ const paiementOuvert = (role: string | null) => {
   return v === 'true' || (v === 'admins' && role === 'ADMIN');
 };
 
+export const ApprobationService = creerApprobations({
+  db: prisma,
+  avertir: (userId, telephone, avis) => Envois.avertir(userId, telephone, avis),
+});
+
 export const TontineService = creerTontines({
   db: prisma,
   flexpaie: Flexpaie,
@@ -20,4 +27,7 @@ export const TontineService = creerTontines({
   adresseServeur: () => (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, ''),
   exigerNumero: (telephone) => NumerosAutorises.exiger(telephone),
   avertir: (userId, telephone, avis, seulementApp) => Envois.avertir(userId, telephone, avis, seulementApp),
+  comptesApprouves: (ids) => ApprobationService.comptesApprouves(ids),
+  adresseApp,
+  envoyerInvitation: (userId, c) => Envois.collecte(userId, c),
 });

@@ -6,8 +6,10 @@ process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 const { echeancesTontine, repartitionCagnotte } = await import('../src/commun/cotisations.js');
 const { tontineAdhererSchema, tontineCreerSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
+const await_module = await import('../src/services/cotisations/approbations.js');
 type Deps = import('../src/services/cotisations/tontines.js').DepsTontines;
 type Ligne = Record<string, any>;
+let horloge = () => Date.now();
 
 function table(uniques: (l: Ligne, t: Ligne[]) => boolean = () => false) {
   const lignes: Ligne[] = [];
@@ -29,7 +31,7 @@ function table(uniques: (l: Ligne, t: Ligne[]) => boolean = () => false) {
     correspond,
     count: async ({ where }: Ligne) => lignes.filter((l) => correspond(l, where)).length,
     create: async ({ data }: Ligne) => {
-      const l = { id: `i${++n}${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date(Date.now() + n), ...data };
+      const l = { id: `i${++n}${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date(horloge() + n), ...data };
       if (uniques(l, lignes)) throw Object.assign(new Error('doublon'), { code: 'P2002' });
       lignes.push(l);
       return l;
@@ -65,9 +67,9 @@ function baseMemoire() {
   const db = {
     tontine: {
       ...tontines,
-      create: async ({ data }: Ligne) => tontines.create({ data: { etat: 'ouvert', tourCourant: 0, ...data } }),
+      create: async ({ data }: Ligne) => tontines.create({ data: { etat: 'ouvert', tourCourant: 0, mode: 'rotation', visibilite: 'public', cautionRequise: true, beneficiaire: null, ...data } }),
       findUnique: async ({ where }: Ligne) => {
-        const t = tontines.lignes.find((x) => x.id === where.id);
+        const t = tontines.lignes.find((x) => (where.codeInvitation ? x.codeInvitation === where.codeInvitation : x.id === where.id));
         return t ? complet(t) : null;
       },
       findMany: async ({ where }: Ligne) => tontines.lignes.filter((t) => tontines.correspond(t, where)).map(complet),
@@ -108,13 +110,18 @@ describe('calculs des tontines', () => {
     assert.deepEqual(echeancesTontine('hebdomadaire', '2026-11-06', 2), ['2026-11-13', '2026-11-20']);
     assert.deepEqual(echeancesTontine('mensuel', '2027-01-31', 3), ['2027-02-28', '2027-03-31', '2027-04-30']);
   });
-  it('exige les conditions acceptées', () => {
-    assert.equal(tontineAdhererSchema.safeParse({ params: { id: 'x' }, body: { telephone: '0812345678' } }).success, false);
-    assert.equal(tontineAdhererSchema.safeParse({ params: { id: 'x' }, body: { telephone: '0812345678', accepte: true } }).success, true);
-    const base = { nom: 'Groupe', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, telephone: '0812345678', accepte: true };
+  it('exige les conditions acceptées et un dossier complet', () => {
+    assert.equal(tontineAdhererSchema.safeParse({ params: { id: 'x' }, body: {} }).success, false);
+    assert.equal(tontineAdhererSchema.safeParse({ params: { id: 'x' }, body: { accepte: true } }).success, true);
+    const base = { nom: 'Groupe', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, mode: 'rotation', visibilite: 'public', accepte: true };
     assert.equal(tontineCreerSchema.safeParse({ body: base }).success, true);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, accepte: false } }).success, false);
     assert.equal(tontineCreerSchema.safeParse({ body: { ...base, places: 1 } }).success, false);
     assert.equal(tontineCreerSchema.safeParse({ body: { ...base, rythme: 'annuel' } }).success, false);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, rythme: 'unique' } }).success, false);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, visibilite: 'prive' } }).success, false);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, mode: 'objectif' } }).success, false);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, mode: 'objectif', rythme: 'unique', raison: 'Mariage', beneficiaire: { nom: 'Jean', telephone: '0812345678' }, dateFin: '2026-12-01' } }).success, true);
   });
 });
 
@@ -129,10 +136,13 @@ describe('une tontine de bout en bout', () => {
   let avis: { userId: string; telephone: string | null; cle: string; titre: string; seul?: boolean }[];
   let vus: Set<string>;
   let instant: number;
+  let approuves: Set<string>;
+  let invitations: Ligne[];
   const JOUR = 86400000;
-  const orga = { id: 'orga', nom: 'Jeereq Takango', fuseau: 'Africa/Kinshasa' };
-  const paul = { id: 'paul', nom: 'Paul Kasongo', fuseau: 'Africa/Kinshasa' };
-  const marie = { id: 'marie', nom: 'Marie Kabila', fuseau: 'Africa/Kinshasa' };
+  const orga = { id: 'orga', nom: 'Jeereq Takango', fuseau: 'Africa/Kinshasa', telephone: '243812345670' };
+  const paul = { id: 'paul', nom: 'Paul Kasongo', fuseau: 'Africa/Kinshasa', telephone: '243812345671' };
+  const marie = { id: 'marie', nom: 'Marie Kabila', fuseau: 'Africa/Kinshasa', telephone: '243812345672' };
+  const invite = { id: 'invite', nom: 'Sarah Tshibanda', fuseau: 'Africa/Kinshasa', telephone: null };
 
   beforeEach(() => {
     b = baseMemoire();
@@ -144,6 +154,9 @@ describe('une tontine de bout en bout', () => {
     avis = [];
     vus = new Set();
     instant = Date.UTC(2026, 10, 6, 12);
+    horloge = () => instant;
+    approuves = new Set(['orga', 'paul', 'marie']);
+    invitations = [];
     s = creerTontines({
       db: b.db,
       flexpaie: {
@@ -171,13 +184,19 @@ describe('une tontine de bout en bout', () => {
         if (nouveau) avis.push({ userId, telephone, cle: a.cle, titre: a.titre, seul });
         return { nouveau, mail: nouveau, sms: nouveau };
       },
+      comptesApprouves: async (ids) => new Set(ids.filter((x) => approuves.has(x))),
+      adresseApp: () => 'https://app.test',
+      envoyerInvitation: async (_u, c) => {
+        invitations.push(c);
+        return { mail: false, sms: true };
+      },
       maintenant: () => instant,
       // Tirage fixe : l'ordre reste celui de la liste.
       tirer: (max) => max - 1,
     });
   });
 
-  const creer = () => s.creer(orga, { nom: 'Famille', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, telephone: '0812345670' });
+  const creer = () => s.creer(orga, { nom: 'Famille', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, mode: 'rotation', visibilite: 'public' });
   /** Le dernier paiement demandé est validé chez FlexPaie, puis annoncé par son retour. */
   async function valider(montant = '10.00') {
     const m = b.mvts.lignes.at(-1)!;
@@ -186,8 +205,8 @@ describe('une tontine de bout en bout', () => {
   }
   async function complet() {
     const { groupe } = await creer();
-    await s.adherer(paul, groupe.id, '0812345671');
-    await s.adherer(marie, groupe.id, '0812345672');
+    await s.adherer(paul, groupe.id);
+    await s.adherer(marie, groupe.id);
     for (const m of (await s.detail('orga', groupe.id)).groupe.demandes) await s.decider('orga', m.id, true);
     for (const u of ['orga', 'paul', 'marie']) {
       await s.payer(u, groupe.id, 'caution');
@@ -256,8 +275,8 @@ describe('une tontine de bout en bout', () => {
   it('refuse de démarrer un groupe incomplet ou sans cautions', async () => {
     const { groupe } = await creer();
     await assert.rejects(s.demarrer('orga', groupe.id), /pas complet/);
-    await s.adherer(paul, groupe.id, '0812345671');
-    await s.adherer(marie, groupe.id, '0812345672');
+    await s.adherer(paul, groupe.id);
+    await s.adherer(marie, groupe.id);
     for (const m of (await s.detail('orga', groupe.id)).groupe.demandes) await s.decider('orga', m.id, true);
     await assert.rejects(s.demarrer('orga', groupe.id), /cautions/);
     await assert.rejects(s.demarrer('paul', groupe.id), /organisateur/);
@@ -283,11 +302,13 @@ describe('une tontine de bout en bout', () => {
 
   it('une demande refusée ou un groupe plein ferme l’adhésion', async () => {
     const { groupe } = await creer();
-    await s.adherer(paul, groupe.id, '0812345671');
+    await s.adherer(paul, groupe.id);
     const d = (await s.detail('orga', groupe.id)).groupe.demandes[0];
     await s.decider('orga', d.id, false);
-    await assert.rejects(s.adherer(paul, groupe.id, '0812345671'), /refusé/);
-    await assert.rejects(s.adherer(marie, groupe.id, 'abc'), /invalide/);
+    await assert.rejects(s.adherer(paul, groupe.id), /refusé/);
+    approuves.delete('marie');
+    await assert.rejects(s.adherer(marie, groupe.id), /approuver/);
+    approuves.add('marie');
     assert.equal((await s.annuaire('marie')).groupes.length, 1);
   });
 
@@ -362,7 +383,7 @@ describe('une tontine de bout en bout', () => {
 
   it('quitter ou annuler avant le démarrage rend la caution ; après, non', async () => {
     const { groupe } = await creer();
-    await s.adherer(paul, groupe.id, '0812345671');
+    await s.adherer(paul, groupe.id);
     const d = (await s.detail('orga', groupe.id)).groupe.demandes[0];
     await s.decider('orga', d.id, true);
     await s.payer('paul', groupe.id, 'caution');
@@ -434,17 +455,229 @@ describe('une tontine de bout en bout', () => {
     assert.deepEqual(avis.filter((a) => a.cle.includes(':retard')).map((a) => a.userId).sort(), ['marie', 'orga']);
   });
 
+  it('annuaire : seuls les groupes publics des comptes approuvés sont visibles', async () => {
+    await creer();
+    await s.creer(orga, { nom: 'Privé', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'prive', telephone: '0812345670' });
+    assert.deepEqual((await s.annuaire('marie')).groupes.map((g) => g.nom), ['Famille']);
+    approuves.delete('orga');
+    assert.deepEqual((await s.annuaire('marie')).groupes, []);
+    await assert.rejects(s.creer(orga, { nom: 'Autre', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'public' }), /approuver/);
+  });
+
+  it('groupe privé : invitation sans approbation, caution au choix, initiateur qui paie pour un membre', async () => {
+    const { groupe } = await s.creer(orga, { nom: 'Amis', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 2, mode: 'rotation', visibilite: 'prive', cautionRequise: false, telephone: '0812345670' });
+    assert.equal(groupe.cautionRequise, false);
+    assert.equal(groupe.aPayer, null);
+    const code = b.tontines.lignes[0].codeInvitation;
+    assert.match(code, /^[A-Za-z0-9_-]{12}$/);
+    assert.equal(groupe.lienInvitation, `https://app.test/g/${code}`);
+    await assert.rejects(s.adherer(paul, groupe.id), /introuvable/);
+    assert.equal((await s.invitation(code)).groupe.nom, 'Amis');
+    await s.inviter('orga', groupe.id, '0812345673');
+    assert.match(invitations[0].texte, new RegExp(`/g/${code}`));
+    await assert.rejects(s.inviter('paul', groupe.id, '0812345673'), /organisateur/);
+    const r = await s.rejoindreParInvitation(invite, code, '0812345673');
+    assert.equal(r.groupe.monEtat, 'accepte');
+    await assert.rejects(s.rejoindreParInvitation(marie, code, '0812345672'), /complet/);
+    await assert.rejects(s.invitation('inconnu'), /plus valable/);
+    await s.demarrer('orga', groupe.id);
+    assert.equal(b.tontines.lignes[0].etat, 'en_cours');
+    await assert.rejects(s.invitation(code), /plus valable/);
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    const m = b.membres.lignes.find((x) => x.userId === 'invite')!;
+    // Le paiement part vers le numéro de l'initiateur, et compte pour le membre.
+    await s.payerPourMembre('orga', m.id);
+    assert.equal(demandes.at(-1)!.telephone, '243812345670');
+    await valider();
+    assert.equal(b.tours.lignes[0].etat, 'a_verser');
+    await assert.rejects(s.payerPourMembre('invite', m.id), /organisateur/);
+  });
+
+  it('rotation publique : la caution reste obligatoire', async () => {
+    const { groupe } = await s.creer(orga, { nom: 'Pub', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 2, mode: 'rotation', visibilite: 'public', cautionRequise: false });
+    assert.equal(groupe.cautionRequise, true);
+    assert.equal(groupe.aPayer?.genre, 'caution');
+  });
+
+  const objectif = (extra = {}) => s.creer(orga, { nom: 'Mariage', montant: 1000, devise: 'USD', rythme: 'hebdomadaire', places: 3, mode: 'objectif', visibilite: 'prive', telephone: '0812345670', raison: 'Mariage de Jean', beneficiaire: { nom: 'Jean Mbuyi', telephone: '0812345679' }, dateFin: '2026-11-20', ...extra });
+
+  it('raison précise : ouverte tout de suite, sans caution ni tirage, bénéficiaire chiffré', async () => {
+    const { groupe } = await objectif();
+    assert.equal(groupe.etat, 'en_cours');
+    assert.equal(groupe.cautionRequise, false);
+    assert.equal(groupe.beneficiaireNom, 'Jean Mbuyi');
+    assert.equal(groupe.totalPrevu, 1000 * 3 * 2);
+    assert.deepEqual(b.tours.lignes.map((x) => [x.numero, x.echeance, x.etat]), [[1, '2026-11-13', 'collecte'], [2, '2026-11-20', 'a_venir']]);
+    assert.equal(JSON.stringify(b.tontines.lignes[0].beneficiaire).includes('812345679'), false);
+    assert.equal(JSON.stringify((await s.detail('orga', groupe.id)).groupe).includes('812345679'), false);
+    await assert.rejects(s.demarrer('orga', groupe.id), /déjà ouverte/);
+    await assert.rejects(objectif({ dateFin: '2026-11-01' }), /date de fin/);
+    await assert.rejects(objectif({ beneficiaire: { nom: 'Jean', telephone: '12' } }), /bénéficiaire/);
+  });
+
+  it('raison précise : à la date de fin, le bénéficiaire reçoit ce qui a été payé, moins 5 %', async () => {
+    const { groupe } = await objectif();
+    const code = b.tontines.lignes[0].codeInvitation;
+    await s.rejoindreParInvitation(invite, code, '0812345673');
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    assert.equal((await s.detail('orga', groupe.id)).groupe.aPayer, null);
+    instant = Date.UTC(2026, 10, 14, 12);
+    await s.rattraper(instant);
+    assert.equal(b.tours.lignes[1].etat, 'collecte');
+    await s.payer('invite', groupe.id, 'cotisation');
+    await valider();
+    // Une demande reste en attente quand la date passe : la clôture l'attend.
+    instant = Date.UTC(2026, 10, 20, 22);
+    await s.payer('invite', groupe.id, 'cotisation');
+    instant = Date.UTC(2026, 10, 21, 2);
+    await s.rattraper(instant);
+    assert.equal(b.tours.lignes.some((x) => x.numero === 0), false);
+    await valider();
+    await s.rattraper(instant);
+    const final = b.tours.lignes.find((x) => x.numero === 0)!;
+    assert.equal(final.brut, 3000);
+    assert.equal(final.commission, 150);
+    assert.equal(final.net, 2850);
+    assert.equal((await s.detail('invite', groupe.id)).groupe.aPayer, null);
+    await assert.rejects(s.payer('orga', groupe.id, 'cotisation').then(() => {
+      if (demandes.length > 3) throw new Error('clôturée');
+    }).then(() => {
+      throw new Error('aucune demande');
+    }), /aucune demande/);
+    const r = await s.resumeAdmin();
+    assert.equal(r.versements[0].beneficiaire, 'Jean Mbuyi');
+    assert.equal(r.versements[0].telephone, '243812345679');
+    assert.equal(r.versements[0].raison, 'Mariage de Jean');
+    await s.verserTour('Admin', final.id, 'REF321');
+    assert.equal(b.tontines.lignes[0].etat, 'termine');
+    assert.deepEqual((await s.resumeAdmin()).totaux, [{ devise: 'USD', detenu: 150, commission: 150 }]);
+  });
+
+  it('raison précise : sans paiement, rien à verser ; annulation refusée après un paiement', async () => {
+    const a = await objectif();
+    const c = await objectif({ nom: 'Autre' });
+    await s.annuler('orga', c.groupe.id);
+    assert.equal(b.tontines.lignes[1].etat, 'annule');
+    await s.payer('orga', a.groupe.id, 'cotisation');
+    await valider();
+    await assert.rejects(s.annuler('orga', a.groupe.id), /date de fin/);
+    const d2 = await objectif({ nom: 'Vide' });
+    instant += 30 * JOUR;
+    await s.rattraper(instant);
+    assert.equal(b.tontines.lignes.find((t) => t.id === d2.groupe.id)!.etat, 'termine');
+  });
+
+  it('raison précise : un membre arrivé plus tard ne doit que les périodes à venir', async () => {
+    const { groupe } = await objectif();
+    instant += 8 * JOUR;
+    await s.rattraper(instant);
+    const code = b.tontines.lignes[0].codeInvitation;
+    await s.rejoindreParInvitation(invite, code, '0812345673');
+    await s.payer('invite', groupe.id, 'cotisation');
+    assert.equal(b.mvts.lignes.at(-1)!.tourId, b.tours.lignes[1].id);
+  });
+
+  it('retirer un membre : caution à rendre, et impossible après le démarrage', async () => {
+    const { groupe } = await s.creer(orga, { nom: 'Amis', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 2, mode: 'rotation', visibilite: 'prive', telephone: '0812345670' });
+    const code = b.tontines.lignes[0].codeInvitation;
+    await s.rejoindreParInvitation(invite, code, '0812345673');
+    await s.payer('invite', groupe.id, 'caution');
+    await valider();
+    const m = b.membres.lignes.find((x) => x.userId === 'invite')!;
+    await assert.rejects(s.retirer('invite', m.id), /organisateur/);
+    await s.retirer('orga', m.id);
+    assert.equal(m.etat, 'refuse');
+    assert.equal(m.cautionStatut, 'a_rendre');
+    await assert.rejects(s.rejoindreParInvitation(invite, code, '0812345673'), /retiré/);
+  });
+
   it('un membre ne peut plus rejoindre pendant le remboursement de sa caution', async () => {
     const { groupe } = await creer();
-    await s.adherer(paul, groupe.id, '0812345671');
+    await s.adherer(paul, groupe.id);
     const d = (await s.detail('orga', groupe.id)).groupe.demandes[0];
     await s.decider('orga', d.id, true);
     await s.payer('paul', groupe.id, 'caution');
     await valider();
     await s.quitter('paul', groupe.id);
-    await assert.rejects(s.adherer(paul, groupe.id, '0812345671'), /remboursement/);
+    await assert.rejects(s.adherer(paul, groupe.id), /remboursement/);
     await s.rendreCaution(b.membres.lignes.find((x) => x.userId === 'paul')!.id, 'REF777');
-    assert.equal((await s.adherer(paul, groupe.id, '0812345671')).groupe.monEtat, 'demande');
+    assert.equal((await s.adherer(paul, groupe.id)).groupe.monEtat, 'demande');
     assert.equal(b.membres.lignes.find((x) => x.userId === 'paul')!.cautionStatut, 'due');
+  });
+});
+
+describe('approbation des comptes', () => {
+  const { creerApprobations, typeImage } = await_module;
+  type Ligne2 = Record<string, any>;
+  let lignes: Ligne2[];
+  let users: Record<string, Ligne2>;
+  let avis: { userId: string; titre: string }[];
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const creer = () =>
+    creerApprobations({
+      db: {
+        approbationCompte: {
+          findUnique: async ({ where }: Ligne2) => lignes.find((l) => l.userId === where.userId) ?? null,
+          findMany: async ({ where }: Ligne2) => lignes.filter((l) => (where.userId?.in ? where.userId.in.includes(l.userId) : true) && (where.statut?.in ? where.statut.in.includes(l.statut) : where.statut ? l.statut === where.statut : true)).map((l) => ({ ...l, user: users[l.userId] })),
+          upsert: async ({ where, create, update }: Ligne2) => {
+            const l = lignes.find((x) => x.userId === where.userId);
+            if (l) Object.assign(l, update);
+            else lignes.push({ statut: 'soumise', createdAt: new Date(), ...create });
+          },
+          update: async ({ where, data }: Ligne2) => Object.assign(lignes.find((x) => x.userId === where.userId)!, data),
+        },
+        user: {
+          findUniqueOrThrow: async ({ where }: Ligne2) => users[where.id],
+          findUnique: async ({ where }: Ligne2) => users[where.id] ?? null,
+        },
+      } as never,
+      avertir: async (userId, _t, a) => {
+        avis.push({ userId, titre: a.titre });
+      },
+    });
+
+  beforeEach(() => {
+    lignes = [];
+    users = { a: { nom: 'Marie K', telephone: '243812345672', email: null }, b: { nom: 'Paul', telephone: null, email: null } };
+    avis = [];
+  });
+
+  it('reconnaît les images par leur contenu', () => {
+    assert.equal(typeImage(JPEG), 'image/jpeg');
+    assert.equal(typeImage(new Uint8Array([0x25, 0x50, 0x44, 0x46])), null);
+    assert.equal(typeImage(new Uint8Array([0x3c, 0x73, 0x76, 0x67])), null);
+  });
+
+  it('exige le SMS, chiffre la photo, et l’efface à la décision', async () => {
+    const s = creer();
+    await assert.rejects(s.soumettre('b', JPEG), /SMS/);
+    await assert.rejects(s.soumettre('a', new Uint8Array([1, 2, 3, 4])), /photo/);
+    await assert.rejects(s.soumettre('a', new Uint8Array(6 * 1024 * 1024)), /trop lourde/);
+    assert.equal((await s.soumettre('a', JPEG)).statut, 'soumise');
+    assert.equal(lignes[0].piece.includes(Buffer.from(JPEG).toString('base64')), false);
+    assert.deepEqual(await s.piece('a'), { type: 'image/jpeg', base64: Buffer.from(JPEG).toString('base64') });
+    assert.equal((await s.comptesApprouves(['a'])).size, 0);
+    await s.decider('Admin', 'a', true);
+    assert.equal(lignes[0].piece, null);
+    assert.equal(lignes[0].decideParNom, 'Admin');
+    await assert.rejects(s.piece('a'), /Aucune photo/);
+    assert.equal((await s.comptesApprouves(['a', 'b'])).has('a'), true);
+    assert.equal(avis[0].titre, 'Compte approuvé');
+    await assert.rejects(s.soumettre('a', JPEG), /déjà approuvé/);
+  });
+
+  it('refus avec motif, nouvelle demande possible, et approbation retirable', async () => {
+    const s = creer();
+    await s.soumettre('a', JPEG);
+    await assert.rejects(s.decider('Admin', 'a', false), /motif/);
+    await s.decider('Admin', 'a', false, 'Photo illisible');
+    assert.equal((await s.etat('a')).motif, 'Photo illisible');
+    assert.equal(lignes[0].piece, null);
+    assert.equal((await s.soumettre('a', JPEG)).statut, 'soumise');
+    await s.decider('Admin', 'a', true);
+    await s.decider('Admin', 'a', false, 'Fraude');
+    assert.equal((await s.comptesApprouves(['a'])).size, 0);
   });
 });

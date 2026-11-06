@@ -59,6 +59,7 @@ model User {
   cotisations  Cotisation[]
   tontinesOrganisees Tontine[]
   tontines     TontineMembre[]
+  approbation  ApprobationCompte?
   analysesMails AnalyseMail[]
   usageReunions UsageReunion[]
   actionsAbonnement ActionAbonnement[]
@@ -481,10 +482,23 @@ model Tontine {
   /// Cotisation par membre et par tour, en centimes. La caution vaut le même montant.
   montant        Int
   devise         String
-  /// quotidien, hebdomadaire ou mensuel
+  /// quotidien, hebdomadaire ou mensuel ; unique aussi pour une raison précise
   rythme         String
-  /// Nombre de membres, donc de tours.
+  /// Nombre de membres, donc de tours pour une rotation.
   places         Int
+  /// rotation (chacun reçoit à son tour) ou objectif (une raison précise, un bénéficiaire)
+  mode           String   @default("rotation")
+  /// public (annuaire, comptes approuvés) ou prive (invitation, sous la responsabilité de l'initiateur)
+  visibilite     String   @default("public")
+  /// Obligatoire pour une rotation publique, au choix pour une privée, jamais pour un objectif.
+  cautionRequise Boolean  @default(true)
+  /// Dans le lien d'invitation d'un groupe privé.
+  codeInvitation String?  @unique
+  raison         String?
+  /// Bénéficiaire d'un objectif : nom et numéro chiffrés.
+  beneficiaire   Json?
+  /// Dernier jour d'un objectif : le versement se prépare ensuite.
+  dateFin        String?
   /// Commission de la plateforme en points de base, figée à la création (500 = 5 %).
   commissionBps  Int
   /// Fuseau de l'organisateur : les échéances sont des jours dans ce fuseau.
@@ -514,7 +528,7 @@ model TontineMembre {
   etat              String   @default("demande")
   /// Position dans l'ordre de réception, tirée au sort au démarrage.
   rang              Int?
-  /// due, payee, utilisee (un impayé a été couvert), a_rendre ou rendue
+  /// due, payee, utilisee (un impayé a été couvert), a_rendre, rendue ou dispense (groupe sans caution)
   cautionStatut     String   @default("due")
   /// Version des conditions acceptées en demandant à rejoindre.
   conditionsVersion String
@@ -535,7 +549,7 @@ model TontineTour {
   beneficiaire   TontineMembre? @relation(fields: [beneficiaireId], references: [id], onDelete: SetNull)
   /// Jour limite « AAAA-MM-JJ ».
   echeance       String
-  /// a_venir, collecte, a_verser ou verse
+  /// a_venir, collecte, a_verser, verse ou clos (objectif). Numéro 0 : le versement final d'un objectif.
   etat           String   @default("a_venir")
   brut           Int
   commission     Int
@@ -577,4 +591,21 @@ model TontineMouvement {
   @@index([membreId, createdAt])
   @@index([tourId, genre])
   @@index([statut, createdAt])
+}
+
+/// Approbation d'un compte pour l'annuaire des cotisations.
+model ApprobationCompte {
+  userId       String   @id
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// soumise, approuvee ou refusee
+  statut       String   @default("soumise")
+  /// Photo de la pièce d'identité, chiffrée, effacée dès la décision.
+  piece        String?
+  motif        String?
+  decideParNom String?
+  decideLe     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([statut, updatedAt])
 }

@@ -2,7 +2,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { COMMISSION_BPS, echeancesTontine, montantCotisation, numeroMasque, prenomDe, repartitionCagnotte, type RythmeTontine } from '../../commun/cotisations.js';
+import { COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, prenomDe, repartitionCagnotte, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -19,8 +19,28 @@ const RATTRAPAGE_PAS_MS = 3600000;
 /** Un numéro ne reçoit pas plus de demandes par jour. */
 const DEMANDES_PAR_JOUR = 5;
 const MAX_GROUPES = 20;
+/** Au-delà, une cotisation à raison précise compte trop de périodes. */
+const MAX_TOURS_OBJECTIF = 366;
+const COMPTE_A_APPROUVER = 'COMPTE_A_APPROUVER';
 
 type Contact = { nom: string; telephone: string };
+export type CompteTontine = { id: string; nom: string; fuseau: string; telephone: string | null };
+type Compte = CompteTontine;
+export type CreationTontine = {
+  nom: string;
+  description?: string;
+  montant: number;
+  devise: string;
+  rythme: RythmeObjectif;
+  places: number;
+  mode: 'rotation' | 'objectif';
+  visibilite: 'public' | 'prive';
+  cautionRequise?: boolean;
+  telephone?: string;
+  raison?: string;
+  beneficiaire?: { nom: string; telephone: string };
+  dateFin?: string;
+};
 export type DepsTontines = {
   db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement'>;
   flexpaie: {
@@ -35,6 +55,11 @@ export type DepsTontines = {
   adresseServeur(): string;
   exigerNumero(telephone: string): Promise<void>;
   avertir(userId: string, telephone: string | null, avis: AvisGroupe, seulementApp?: boolean): Promise<{ nouveau: boolean; mail: boolean; sms: boolean }>;
+  /** Comptes approuvés pour l'annuaire. */
+  comptesApprouves(ids: string[]): Promise<Set<string>>;
+  adresseApp(): string | null;
+  /** Une invitation envoyée par Me, selon les canaux du système. */
+  envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string }): Promise<{ mail: boolean; sms: boolean }>;
   maintenant?: () => number;
   /** Pour les tests : le tirage au sort. */
   tirer?: (max: number) => number;
@@ -60,6 +85,13 @@ export function creerTontines(d: DepsTontines) {
     if (!t) throw new HttpError(404, 'Groupe introuvable.');
     return t;
   }
+  const estObjectif = (t: Pick<TontineComplete, 'mode'>) => t.mode === 'objectif';
+  const toursCollecte = (t: TontineComplete) => t.tours.filter((x) => x.numero > 0);
+  const tourFinal = (t: TontineComplete) => t.tours.find((x) => x.numero === 0) ?? null;
+  const beneficiaireDe = (t: Pick<TontineComplete, 'beneficiaire'>) => (t.beneficiaire ? horsCoffre<Contact>(t.beneficiaire) : null);
+  const lienInvitation = (t: Pick<TontineComplete, 'codeInvitation'>) => (t.codeInvitation && d.adresseApp() ? `${d.adresseApp()}/g/${t.codeInvitation}` : null);
+  /** Une rotation accueille jusqu'au démarrage, une raison précise jusqu'à sa date de fin. */
+  const accueille = (t: TontineComplete) => (estObjectif(t) ? t.etat === 'en_cours' && !tourFinal(t) : t.etat === 'ouvert');
   const estOrganisateur = (t: TontineComplete, userId: string) => t.organisateurId === userId;
   function exigerOrganisateur(t: TontineComplete, userId: string) {
     if (!estOrganisateur(t, userId)) throw new HttpError(403, 'Réservé à l’organisateur du groupe.');
@@ -70,12 +102,22 @@ export function creerTontines(d: DepsTontines) {
   const mouvementsDe = (tontineId: string) => d.db.tontineMouvement.findMany({ where: { tontineId } });
   const aCotise = (mvts: Mouvement[], membreId: string, tourId: string) => mvts.some((x) => x.membreId === membreId && x.tourId === tourId && x.statut === 'paye' && (x.genre === 'cotisation' || x.genre === 'caution_utilisee'));
 
+  /** Un membre arrivé en cours de route ne doit pas les périodes d'avant. */
+  const toursDus = (t: TontineComplete, m: Membre, mvts: Mouvement[]) => {
+    const entree = local(m.createdAt, t.fuseau).date;
+    return toursCollecte(t).filter((x) => x.etat === 'collecte' && x.echeance >= entree && !aCotise(mvts, m.id, x.id));
+  };
+
   /** Ce que ce membre doit payer maintenant : d'abord le tour, puis la caution. */
   function aPayer(t: TontineComplete, m: Membre, mvts: Mouvement[]) {
     if (m.etat !== 'accepte' || t.etat === 'annule' || t.etat === 'termine') return null;
+    if (estObjectif(t)) {
+      const dus = toursDus(t, m, mvts);
+      return dus.length ? { genre: 'cotisation' as const, montant: t.montant, tourId: dus[0].id } : null;
+    }
     const tour = t.etat === 'en_cours' ? tourActuel(t) : null;
     if (tour?.etat === 'collecte' && !aCotise(mvts, m.id, tour.id)) return { genre: 'cotisation' as const, montant: t.montant, tourId: tour.id };
-    if (m.cautionStatut === 'due' || m.cautionStatut === 'utilisee') return { genre: 'caution' as const, montant: t.montant, tourId: null };
+    if (t.cautionRequise && (m.cautionStatut === 'due' || m.cautionStatut === 'utilisee')) return { genre: 'caution' as const, montant: t.montant, tourId: null };
     return null;
   }
 
@@ -85,8 +127,15 @@ export function creerTontines(d: DepsTontines) {
     description: t.description,
     montant: t.montant,
     devise: t.devise,
-    rythme: t.rythme as RythmeTontine,
+    rythme: t.rythme as RythmeObjectif,
     places: t.places,
+    mode: t.mode as 'rotation' | 'objectif',
+    visibilite: t.visibilite as 'public' | 'prive',
+    cautionRequise: t.cautionRequise,
+    raison: t.raison,
+    beneficiaireNom: beneficiaireDe(t)?.nom ?? null,
+    dateFin: t.dateFin,
+    totalPrevu: t.montant * t.places * (estObjectif(t) ? Math.max(1, toursCollecte(t).length) : 1),
     inscrits: acceptes(t).length,
     etat: t.etat,
     organisateur: prenomDe(t.organisateur?.nom ?? ''),
@@ -106,6 +155,9 @@ export function creerTontines(d: DepsTontines) {
       ...carte(t, userId),
       paiementOuvert: ouvertPour(t),
       suisOrganisateur: orga,
+      lienInvitation: orga ? lienInvitation(t) : null,
+      collecte: mvts.filter((x) => x.genre === 'cotisation' && x.statut === 'paye').reduce((n, x) => n + x.montant, 0),
+      final: tourFinal(t) ? { etat: tourFinal(t)!.etat, net: tourFinal(t)!.net, commission: tourFinal(t)!.commission } : null,
       tourCourant: t.tourCourant,
       jour: jourDe(t),
       moi: moi ? { id: moi.id, etat: moi.etat, rang: moi.rang, cautionStatut: moi.cautionStatut, telephone: numeroMasque(contactDe(moi).telephone) } : null,
@@ -120,11 +172,12 @@ export function creerTontines(d: DepsTontines) {
             rang: m.rang,
             cautionPayee: m.cautionStatut !== 'due',
             cautionStatut: orga ? m.cautionStatut : null,
-            aCotise: tour ? aCotise(mvts, m.id, tour.id) : false,
+            aCotise: estObjectif(t) ? !toursDus(t, m, mvts).length : tour ? aCotise(mvts, m.id, tour.id) : false,
+            enCours: mvts.some((x) => x.membreId === m.id && x.statut === 'en_attente' && ENTREES.includes(x.genre)),
           }))
         : [],
       demandes: orga ? t.membres.filter((m) => m.etat === 'demande').map((m) => ({ id: m.id, nom: contactDe(m).nom })) : [],
-      tours: orga || estAccepte ? t.tours.map((x) => ({ numero: x.numero, beneficiaire: x.beneficiaireId ? (parMembre.get(x.beneficiaireId)?.nom ?? '') : '', pourMoi: x.beneficiaireId === moi?.id, echeance: x.echeance, etat: x.etat, net: x.net })) : [],
+      tours: (orga || estAccepte) && !estObjectif(t) ? t.tours.map((x) => ({ numero: x.numero, beneficiaire: x.beneficiaireId ? (parMembre.get(x.beneficiaireId)?.nom ?? '') : '', pourMoi: x.beneficiaireId === moi?.id, echeance: x.echeance, etat: x.etat, net: x.net })) : [],
     };
   }
 
@@ -165,7 +218,44 @@ export function creerTontines(d: DepsTontines) {
         await prevenirOrganisateur(apres, `tontine:pret:${apres.id}`, { titre: 'Ton groupe est prêt', corps: `« ${apres.nom} » : tout le monde a payé sa caution. Tu peux démarrer.` }, false);
       }
     }
-    if (m.genre === 'cotisation' && m.tourId) await fermerCollecte(m.tontineId, m.tourId);
+    if (m.genre === 'cotisation' && m.tourId && !estObjectif(t)) await fermerCollecte(m.tontineId, m.tourId);
+    // Un paiement validé en retard entre dans le versement final tant qu'il n'est pas parti.
+    if (m.genre === 'cotisation' && estObjectif(t)) {
+      const final = tourFinal(t);
+      if (final?.etat === 'a_verser') {
+        const total = (await mouvementsDe(t.id)).filter((x) => x.genre === 'cotisation' && x.statut === 'paye').reduce((n, x) => n + x.montant, 0);
+        await d.db.tontineTour.update({ where: { id: final.id }, data: repartitionCagnotte(total, 1, t.commissionBps) });
+      } else if (final) console.error(`Tontine ${t.id} : paiement ${m.reference} reçu après le versement final`);
+    }
+  }
+
+  /** Raison précise : ouvre les périodes échues puis, après la date de fin, prépare le versement au bénéficiaire. */
+  async function avancerObjectif(id: string) {
+    const t = await charger(id);
+    if (!estObjectif(t) || t.etat !== 'en_cours' || !t.dateFin) return;
+    const jour = jourDe(t);
+    const tours = toursCollecte(t);
+    for (const [i, x] of tours.entries()) {
+      if (x.etat === 'a_venir' && i > 0 && tours[i - 1].echeance < jour) await d.db.tontineTour.updateMany({ where: { id: x.id, etat: 'a_venir' }, data: { etat: 'collecte' } });
+    }
+    if (jour <= t.dateFin || tourFinal(t)) return;
+    const mvts = await mouvementsDe(id);
+    // On attend la réponse des demandes en cours : elles comptent dans la cagnotte.
+    if (mvts.some((x) => x.statut === 'en_attente' && ENTREES.includes(x.genre))) return;
+    await d.db.tontineTour.updateMany({ where: { tontineId: id, etat: { in: ['a_venir', 'collecte'] } }, data: { etat: 'clos' } });
+    const total = mvts.filter((x) => x.genre === 'cotisation' && x.statut === 'paye').reduce((n, x) => n + x.montant, 0);
+    if (!total) {
+      await d.db.tontine.update({ where: { id }, data: { etat: 'termine' } });
+      return;
+    }
+    const part = repartitionCagnotte(total, 1, t.commissionBps);
+    try {
+      await d.db.tontineTour.create({ data: { tontineId: id, numero: 0, echeance: t.dateFin, etat: 'a_verser', ...part } });
+    } catch (e) {
+      if (estDoublon(e)) return;
+      throw e;
+    }
+    await prevenirOrganisateur(t, `tontine:fin-objectif:${id}`, { titre: 'Cotisation clôturée', corps: `« ${t.nom} » : ${montantCotisation(part.net, t.devise)} en cours de validation pour ${beneficiaireDe(t)?.nom ?? 'le bénéficiaire'}.` }, false);
   }
 
   /** Le tour est versé : le suivant s'ouvre, ou le groupe se termine et les cautions sont à rendre. */
@@ -174,6 +264,11 @@ export function creerTontines(d: DepsTontines) {
     if (!fait.count) return;
     const tour = await d.db.tontineTour.findUniqueOrThrow({ where: { id: tourId } });
     const t = await charger(tour.tontineId);
+    if (estObjectif(t)) {
+      await d.db.tontine.update({ where: { id: t.id }, data: { etat: 'termine' } });
+      await prevenirTous(t, `tontine:fin:${t.id}`, { titre: 'Cotisation versée', corps: `« ${t.nom} » : ${montantCotisation(tour.net, t.devise)} versés à ${beneficiaireDe(t)?.nom ?? 'le bénéficiaire'}.` });
+      return;
+    }
     const b = t.membres.find((m) => m.id === tour.beneficiaireId);
     if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:verse:${tourId}`, titre: 'Ta cagnotte est versée', corps: `« ${t.nom} » : ${montantCotisation(tour.net, t.devise)}.` }).catch((e) => console.error('Avis de tontine', e));
     const suivant = t.tours.find((x) => x.numero === tour.numero + 1);
@@ -229,6 +324,34 @@ export function creerTontines(d: DepsTontines) {
   }
 
   const retourUrl = () => `${d.adresseServeur()}/api/tontines/flexpaie/retour`;
+
+  async function exigerApprobation(userId: string) {
+    if (!(await d.comptesApprouves([userId])).has(userId)) throw new HttpError(403, 'Fais approuver ton compte pour utiliser l’annuaire.', COMPTE_A_APPROUVER);
+  }
+
+  /** Envoie la demande de paiement. Un double clic n'en crée qu'une. */
+  async function lancerDemande(t: TontineComplete, membreId: string, telephone: string, du: { genre: 'caution' | 'cotisation'; montant: number; tourId: string | null }) {
+    let m: Mouvement;
+    try {
+      m = await d.db.tontineMouvement.create({ data: { reference: reference(), tontineId: t.id, membreId, tourId: du.tourId, genre: du.genre, montant: du.montant, devise: t.devise, mode: 'mobile', statut: 'en_attente', telephone: numeroMasque(telephone) } });
+    } catch (e) {
+      if (estDoublon(e)) return;
+      throw e;
+    }
+    try {
+      const r = await d.flexpaie.demander({ telephone, reference: m.reference, montant: m.montant, devise: m.devise, retour: retourUrl() });
+      await d.db.tontineMouvement.update({ where: { id: m.id }, data: { commande: r.commande } });
+    } catch (e) {
+      const config = e instanceof ErreurFlexpaie && e.configuration;
+      await d.db.tontineMouvement.update({ where: { id: m.id }, data: { statut: 'echoue', message: config ? 'Paiement mobile money indisponible.' : (e as Error).message } });
+      if (e instanceof ErreurFlexpaie) {
+        console.error('FlexPaie', e.message);
+        if (config) throw new HttpError(503, 'Le paiement mobile money est momentanément indisponible.');
+        throw new HttpError(502, 'La demande n’a pas pu partir. Réessaie.');
+      }
+      throw e;
+    }
+  }
 
   /** Une sortie d'argent après validation de l'admin : API FlexPaie si elle est ouverte, sinon preuve d'un versement fait hors de Me. */
   async function sortie(c: { genre: 'versement' | 'caution_rendue'; tontineId: string; membreId: string | null; tourId: string | null; montant: number; devise: string; telephone: string; preuve?: string }) {
@@ -287,8 +410,8 @@ export function creerTontines(d: DepsTontines) {
       versements: tours.map((x) => {
         const t = groupes.get(x.tontineId)!;
         const b = t.membres.find((m) => m.id === x.beneficiaireId);
-        const contact = b ? contactDe(b) : null;
-        return { tourId: x.id, groupe: t.nom, numero: x.numero, places: t.places, beneficiaire: contact?.nom ?? '', telephone: contact?.telephone ?? '', brut: x.brut, commission: x.commission, net: x.net, devise: t.devise };
+        const contact = estObjectif(t) ? beneficiaireDe(t) : b ? contactDe(b) : null;
+        return { tourId: x.id, raison: t.raison, groupe: t.nom, numero: x.numero, places: t.places, beneficiaire: contact?.nom ?? '', telephone: contact?.telephone ?? '', brut: x.brut, commission: x.commission, net: x.net, devise: t.devise };
       }),
       cautions: cautions.map((m) => {
         const t = groupes.get(m.tontineId)!;
@@ -296,14 +419,17 @@ export function creerTontines(d: DepsTontines) {
         return { membreId: m.id, groupe: t.nom, nom: contact.nom, telephone: contact.telephone, montant: t.montant, devise: t.devise };
       }),
     };
-    }
+  }
 
   return {
     /** Les groupes qui cherchent des membres. */
     async annuaire(userId: string, q?: string) {
-      const groupes = await d.db.tontine.findMany({ where: { etat: 'ouvert' }, orderBy: { createdAt: 'desc' }, take: 100, include: INCLUS });
+      const tous = await d.db.tontine.findMany({ where: { visibilite: 'public', etat: { in: ['ouvert', 'en_cours'] } }, orderBy: { createdAt: 'desc' }, take: 200, include: INCLUS });
       const mot = q?.trim().toLowerCase();
-      return { groupes: groupes.filter((t) => acceptes(t).length < t.places).filter((t) => !mot || t.nom.toLowerCase().includes(mot)).map((t) => carte(t, userId)) };
+      const groupes = tous.filter((t) => accueille(t) && acceptes(t).length < t.places && (!mot || t.nom.toLowerCase().includes(mot)));
+      // Seuls les groupes des comptes approuvés sont visibles.
+      const approuves = await d.comptesApprouves(groupes.flatMap((t) => (t.organisateurId ? [t.organisateurId] : [])));
+      return { groupes: groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId)).slice(0, 100).map((t) => carte(t, userId)) };
     },
 
     async mesGroupes(userId: string) {
@@ -314,35 +440,106 @@ export function creerTontines(d: DepsTontines) {
 
     /** Ouvrir un groupe revérifie mes paiements en attente : c'est ce que l'app interroge pendant la validation. */
     async detail(userId: string, id: string) {
+      await avancerObjectif(id);
       const t = await charger(id);
       const moi = t.membres.find((m) => m.userId === userId);
-      if (moi) for (const m of (await mouvementsDe(id)).filter((x) => x.membreId === moi.id && x.statut === 'en_attente' && ENTREES.includes(x.genre))) await verifier(m);
+      const orga = estOrganisateur(t, userId);
+      if (moi || orga) for (const m of (await mouvementsDe(id)).filter((x) => (orga || x.membreId === moi?.id) && x.statut === 'en_attente' && ENTREES.includes(x.genre))) await verifier(m);
       return relire(id, userId);
     },
 
-    async creer(u: { id: string; nom: string; fuseau: string }, c: { nom: string; description?: string; montant: number; devise: string; rythme: RythmeTontine; places: number; telephone: string }) {
+    async creer(u: Compte, c: CreationTontine) {
       if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
-      const telephone = normaliserTelephone(c.telephone);
+      const publique = c.visibilite === 'public';
+      if (publique) await exigerApprobation(u.id);
+      // Dans l'annuaire, le numéro est celui confirmé par SMS ; sur invitation, l'initiateur répond de ses membres.
+      const telephone = publique ? u.telephone : normaliserTelephone(c.telephone ?? '');
       if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
       await d.exigerNumero(telephone);
-      const t = await d.db.tontine.create({ data: { organisateurId: u.id, nom: c.nom, description: c.description || null, montant: c.montant, devise: c.devise, rythme: c.rythme, places: c.places, commissionBps: COMMISSION_BPS, fuseau: u.fuseau } });
-      await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, etat: 'accepte', contact: enCoffre({ nom: u.nom, telephone }), conditionsVersion: VERSION_CONDITIONS_TONTINE } });
+      const objectif = c.mode === 'objectif';
+      const jour = local(new Date(maintenant()), u.fuseau).date;
+      let beneficiaire: Contact | null = null;
+      let dates: string[] = [];
+      if (objectif) {
+        if (!c.dateFin || c.dateFin <= jour) throw new HttpError(400, 'Choisis une date de fin à venir.');
+        const numero = normaliserTelephone(c.beneficiaire?.telephone ?? '');
+        if (!numero || !c.beneficiaire?.nom) throw new HttpError(400, 'Indique le nom et le numéro du bénéficiaire.');
+        await d.exigerNumero(numero);
+        beneficiaire = { nom: c.beneficiaire.nom, telephone: numero };
+        dates = echeancesObjectif(c.rythme, jour, c.dateFin);
+        if (dates.length > MAX_TOURS_OBJECTIF) throw new HttpError(400, 'Cette cotisation compte trop de périodes : choisis un autre rythme ou une date plus proche.');
+      } else if (c.rythme === 'unique') throw new HttpError(400, 'Choisis un rythme.');
+      const cautionRequise = objectif ? false : publique ? true : c.cautionRequise !== false;
+      const t = await d.db.tontine.create({
+        data: {
+          organisateurId: u.id, nom: c.nom, description: c.description || null, montant: c.montant, devise: c.devise, rythme: c.rythme, places: c.places, commissionBps: COMMISSION_BPS, fuseau: u.fuseau,
+          mode: c.mode, visibilite: c.visibilite, cautionRequise, codeInvitation: publique ? null : randomBytes(9).toString('base64url'),
+          raison: objectif ? (c.raison ?? null) : null, dateFin: objectif ? c.dateFin : null, ...(beneficiaire ? { beneficiaire: enCoffre(beneficiaire) } : {}),
+          etat: objectif ? 'en_cours' : 'ouvert', tourCourant: objectif ? 1 : 0,
+        },
+      });
+      await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, etat: 'accepte', cautionStatut: cautionRequise ? 'due' : 'dispense', contact: enCoffre({ nom: u.nom, telephone }), conditionsVersion: VERSION_CONDITIONS_TONTINE } });
+      for (const [i, echeance] of dates.entries()) await d.db.tontineTour.create({ data: { tontineId: t.id, numero: i + 1, echeance, etat: i === 0 ? 'collecte' : 'a_venir', brut: 0, commission: 0, net: 0 } });
       return relire(t.id, u.id);
     },
 
-    async adherer(u: { id: string; nom: string }, id: string, brut: string) {
+    /** Ce qu'une personne invitée voit avant de rejoindre, même sans compte. */
+    async invitation(code: string, userId?: string) {
+      const t = await d.db.tontine.findUnique({ where: { codeInvitation: code }, include: INCLUS });
+      if (!t || !accueille(t)) throw new HttpError(404, 'Cette invitation n’est plus valable.');
+      return { groupe: carte(t, userId ?? '') };
+    },
+
+    /** Le lien vient de l'initiateur, responsable de son groupe : pas d'approbation de Me, et entrée directe. */
+    async rejoindreParInvitation(u: Compte, code: string, brut: string) {
+      const t = await d.db.tontine.findUnique({ where: { codeInvitation: code }, include: INCLUS });
+      if (!t || !accueille(t)) throw new HttpError(404, 'Cette invitation n’est plus valable.');
+      if (acceptes(t).length >= t.places) throw new HttpError(409, 'Ce groupe est complet.');
+      const deja = t.membres.find((m) => m.userId === u.id);
+      if (deja?.etat === 'accepte') return relire(t.id, u.id);
+      if (deja?.etat === 'refuse') throw new HttpError(409, 'L’initiateur t’a retiré de ce groupe.');
+      if (deja?.cautionStatut === 'a_rendre') throw new HttpError(409, 'Ta caution est en cours de remboursement.');
+      if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
+      const telephone = normaliserTelephone(brut);
+      if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+      await d.exigerNumero(telephone);
+      const donnees = { contact: enCoffre({ nom: u.nom, telephone }), etat: 'accepte', cautionStatut: t.cautionRequise ? 'due' : 'dispense', conditionsVersion: VERSION_CONDITIONS_TONTINE };
+      if (deja) await d.db.tontineMembre.update({ where: { id: deja.id }, data: donnees });
+      else await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, ...donnees } });
+      await prevenirOrganisateur(t, `tontine:invite:${t.id}:${u.id}`, { titre: 'Invitation acceptée', corps: `${prenomDe(u.nom)} a rejoint « ${t.nom} ».` });
+      return relire(t.id, u.id);
+    },
+
+    /** Me envoie le lien d'invitation, une fois par clic, selon les canaux du système. */
+    async inviter(userId: string, id: string, brut: string) {
       const t = await charger(id);
-      if (t.etat !== 'ouvert') throw new HttpError(409, 'Ce groupe n’accepte plus de membres.');
+      exigerOrganisateur(t, userId);
+      const lien = lienInvitation(t);
+      if (!lien || !accueille(t)) throw new HttpError(409, 'Ce groupe n’accepte plus d’invitation.');
+      const telephone = normaliserTelephone(brut);
+      if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+      await d.exigerNumero(telephone);
+      const qui = prenomDe(t.organisateur?.nom ?? '');
+      const envoi = await d.envoyerInvitation(userId, { telephone, titre: `Invitation « ${t.nom} »`, texte: `${qui ? `${qui} t'invite` : 'Tu es invité'} à la cotisation « ${t.nom} » : ${montantTontine(t.montant, t.devise, t.rythme as RythmeObjectif)}. Rejoindre : ${lien}` });
+      if (!envoi.mail && !envoi.sms) throw new HttpError(503, 'Aucun envoi possible : vérifie la configuration ou la limite du jour.');
+      return envoi;
+    },
+
+    async adherer(u: Compte, id: string) {
+      const t = await charger(id);
+      if (t.visibilite !== 'public') throw new HttpError(404, 'Groupe introuvable.');
+      if (!accueille(t)) throw new HttpError(409, 'Ce groupe n’accepte plus de membres.');
+      await exigerApprobation(u.id);
       if (acceptes(t).length >= t.places) throw new HttpError(409, 'Ce groupe est complet.');
       const deja = t.membres.find((m) => m.userId === u.id);
       if (deja && ['demande', 'accepte'].includes(deja.etat)) return relire(id, u.id);
       if (deja?.etat === 'refuse') throw new HttpError(409, 'L’organisateur a refusé ta demande.');
       if (deja?.cautionStatut === 'a_rendre') throw new HttpError(409, 'Ta caution est en cours de remboursement.');
       if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
-      const telephone = normaliserTelephone(brut);
-      if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+      const telephone = u.telephone;
+      if (!telephone) throw new HttpError(403, 'Confirme ton numéro par SMS d’abord.', COMPTE_A_APPROUVER);
       await d.exigerNumero(telephone);
-      const donnees = { contact: enCoffre({ nom: u.nom, telephone }), etat: 'demande', cautionStatut: 'due', conditionsVersion: VERSION_CONDITIONS_TONTINE };
+      const donnees = { contact: enCoffre({ nom: u.nom, telephone }), etat: 'demande', cautionStatut: t.cautionRequise ? 'due' : 'dispense', conditionsVersion: VERSION_CONDITIONS_TONTINE };
       if (deja) await d.db.tontineMembre.update({ where: { id: deja.id }, data: donnees });
       else await d.db.tontineMembre.create({ data: { tontineId: id, userId: u.id, ...donnees } });
       await prevenirOrganisateur(t, `tontine:demande:${id}:${u.id}`, { titre: 'Nouvelle demande', corps: `${prenomDe(u.nom)} veut rejoindre « ${t.nom} ».` });
@@ -354,7 +551,7 @@ export function creerTontines(d: DepsTontines) {
       if (!m) throw new HttpError(404, 'Demande introuvable.');
       const t = await charger(m.tontineId);
       exigerOrganisateur(t, userId);
-      if (t.etat !== 'ouvert' || m.etat !== 'demande') throw new HttpError(409, 'Cette demande n’est plus ouverte.');
+      if (!accueille(t) || m.etat !== 'demande') throw new HttpError(409, 'Cette demande n’est plus ouverte.');
       if (accepte && acceptes(t).length >= t.places) throw new HttpError(409, 'Le groupe est complet.');
       await d.db.tontineMembre.update({ where: { id: m.id }, data: { etat: accepte ? 'accepte' : 'refuse' } });
       if (m.userId) await d.avertir(m.userId, contactDe(m).telephone, accepte ? { cle: `tontine:accepte:${m.id}`, titre: 'Demande acceptée', corps: `« ${t.nom} » : paie ta caution de ${montantCotisation(t.montant, t.devise)}.` } : { cle: `tontine:refuse:${m.id}`, titre: 'Demande refusée', corps: `« ${t.nom} ».` }).catch((e) => console.error('Avis de tontine', e));
@@ -366,7 +563,7 @@ export function creerTontines(d: DepsTontines) {
       const t = await charger(id);
       const moi = t.membres.find((m) => m.userId === userId);
       if (!moi || !['demande', 'accepte'].includes(moi.etat)) throw new HttpError(404, 'Tu n’es pas dans ce groupe.');
-      if (t.etat !== 'ouvert') throw new HttpError(409, 'Le groupe a démarré : tu ne peux plus le quitter.');
+      if (!accueille(t)) throw new HttpError(409, 'Le groupe a démarré : tu ne peux plus le quitter.');
       if (estOrganisateur(t, userId)) throw new HttpError(409, 'Annule le groupe plutôt que de le quitter.');
       if ((await mouvementsDe(id)).some((x) => x.membreId === moi.id && x.statut === 'en_attente')) throw new HttpError(409, 'Un paiement est en cours.');
       await d.db.tontineMembre.update({ where: { id: moi.id }, data: { etat: 'parti', cautionStatut: moi.cautionStatut === 'payee' ? 'a_rendre' : moi.cautionStatut } });
@@ -376,7 +573,8 @@ export function creerTontines(d: DepsTontines) {
     async annuler(userId: string, id: string) {
       const t = await charger(id);
       exigerOrganisateur(t, userId);
-      if (t.etat !== 'ouvert') throw new HttpError(409, 'Le groupe a démarré : il ne peut plus être annulé.');
+      if (estObjectif(t) ? t.etat !== 'en_cours' || tourFinal(t) : t.etat !== 'ouvert') throw new HttpError(409, 'Le groupe a démarré : il ne peut plus être annulé.');
+      if (estObjectif(t) && (await mouvementsDe(id)).some((x) => x.genre === 'cotisation' && ['paye', 'en_attente'].includes(x.statut))) throw new HttpError(409, 'Des paiements existent : la cotisation va jusqu’à sa date de fin.');
       await d.db.tontine.update({ where: { id }, data: { etat: 'annule' } });
       await d.db.tontineMembre.updateMany({ where: { tontineId: id, cautionStatut: 'payee' }, data: { cautionStatut: 'a_rendre' } });
       await prevenirTous(t, `tontine:annule:${id}`, { titre: 'Groupe annulé', corps: `« ${t.nom} » : une caution payée te sera rendue.` }, t.membres.find((m) => m.userId === userId)?.id);
@@ -387,11 +585,12 @@ export function creerTontines(d: DepsTontines) {
     async demarrer(userId: string, id: string) {
       const t = await charger(id);
       exigerOrganisateur(t, userId);
+      if (estObjectif(t)) throw new HttpError(409, 'Cette cotisation est déjà ouverte.');
       if (t.etat !== 'ouvert') throw new HttpError(409, 'Ce groupe a déjà démarré.');
       if (!ouvertPour(t)) throw new HttpError(503, 'Le paiement n’est pas encore ouvert.');
       const liste = acceptes(t);
       if (liste.length !== t.places) throw new HttpError(409, 'Le groupe n’est pas complet.');
-      if (!liste.every((m) => m.cautionStatut === 'payee')) throw new HttpError(409, 'Toutes les cautions ne sont pas payées.');
+      if (t.cautionRequise && !liste.every((m) => m.cautionStatut === 'payee')) throw new HttpError(409, 'Toutes les cautions ne sont pas payées.');
       const fait = await d.db.tontine.updateMany({ where: { id, etat: 'ouvert' }, data: { etat: 'en_cours', tourCourant: 1 } });
       if (!fait.count) return relire(id, userId);
       const tirer = d.tirer ?? ((max: number) => randomInt(max));
@@ -413,6 +612,7 @@ export function creerTontines(d: DepsTontines) {
 
     /** Le membre paie lui-même : la demande part vers son numéro, enregistré à l'adhésion. */
     async payer(userId: string, id: string, genre: 'caution' | 'cotisation') {
+      await avancerObjectif(id);
       const t = await charger(id);
       if (!ouvertPour(t)) throw new HttpError(503, 'Le paiement n’est pas encore ouvert.');
       if (!d.adresseServeur().startsWith('https://')) throw new HttpError(503, 'Le paiement est momentanément indisponible.');
@@ -433,27 +633,42 @@ export function creerTontines(d: DepsTontines) {
       const du = aPayer(frais, moiFrais, mvts);
       if (!du || du.genre !== genre) return relire(id, userId);
 
-      let m: Mouvement;
-      try {
-        m = await d.db.tontineMouvement.create({ data: { reference: reference(), tontineId: id, membreId: moi.id, tourId: du.tourId, genre, montant: du.montant, devise: t.devise, mode: 'mobile', statut: 'en_attente', telephone: numeroMasque(telephone) } });
-      } catch (e) {
-        if (estDoublon(e)) return relire(id, userId);
-        throw e;
-      }
-      try {
-        const r = await d.flexpaie.demander({ telephone, reference: m.reference, montant: m.montant, devise: m.devise, retour: retourUrl() });
-        await d.db.tontineMouvement.update({ where: { id: m.id }, data: { commande: r.commande } });
-      } catch (e) {
-        const config = e instanceof ErreurFlexpaie && e.configuration;
-        await d.db.tontineMouvement.update({ where: { id: m.id }, data: { statut: 'echoue', message: config ? 'Paiement mobile money indisponible.' : (e as Error).message } });
-        if (e instanceof ErreurFlexpaie) {
-          console.error('FlexPaie', e.message);
-          if (config) throw new HttpError(503, 'Le paiement mobile money est momentanément indisponible.');
-          throw new HttpError(502, 'La demande n’a pas pu partir. Réessaie.');
-        }
-        throw e;
-      }
+      await lancerDemande(t, moi.id, telephone, du);
       return relire(id, userId);
+    },
+
+    /** Groupe privé : l'initiateur, responsable du groupe, paie à la place d'un membre pour débloquer le tour. */
+    async payerPourMembre(userId: string, membreId: string) {
+      const m = await d.db.tontineMembre.findUnique({ where: { id: membreId } });
+      if (!m) throw new HttpError(404, 'Membre introuvable.');
+      const t = await charger(m.tontineId);
+      exigerOrganisateur(t, userId);
+      if (t.visibilite !== 'prive') throw new HttpError(409, 'Réservé aux groupes privés.');
+      if (!ouvertPour(t)) throw new HttpError(503, 'Le paiement n’est pas encore ouvert.');
+      if (!d.adresseServeur().startsWith('https://')) throw new HttpError(503, 'Le paiement est momentanément indisponible.');
+      const moi = t.membres.find((x) => x.userId === userId);
+      const telephone = moi ? contactDe(moi).telephone : '';
+      if (!telephone) throw new HttpError(409, 'Numéro manquant.');
+      const mvts = await mouvementsDe(t.id);
+      if (mvts.some((x) => x.membreId === m.id && x.statut === 'en_attente' && ENTREES.includes(x.genre))) return relire(t.id, userId);
+      if (mvts.filter((x) => x.membreId === m.id && x.mode === 'mobile' && x.createdAt.getTime() > maintenant() - 86400000).length >= DEMANDES_PAR_JOUR) throw new HttpError(429, 'Trop de demandes aujourd’hui. Réessaie demain.');
+      const du = aPayer(t, m, mvts);
+      if (du?.genre !== 'cotisation') throw new HttpError(409, 'Ce membre n’a pas de cotisation à payer.');
+      await lancerDemande(t, m.id, telephone, du);
+      return relire(t.id, userId);
+    },
+
+    /** L'initiateur retire un membre tant que le groupe n'a pas démarré. */
+    async retirer(userId: string, membreId: string) {
+      const m = await d.db.tontineMembre.findUnique({ where: { id: membreId } });
+      if (!m) throw new HttpError(404, 'Membre introuvable.');
+      const t = await charger(m.tontineId);
+      exigerOrganisateur(t, userId);
+      if (m.userId === userId) throw new HttpError(409, 'Annule le groupe plutôt que de te retirer.');
+      if (!accueille(t)) throw new HttpError(409, 'Le groupe a démarré : ce membre reste.');
+      if ((await mouvementsDe(t.id)).some((x) => x.membreId === m.id && x.statut === 'en_attente')) throw new HttpError(409, 'Un paiement est en cours pour ce membre.');
+      await d.db.tontineMembre.update({ where: { id: m.id }, data: { etat: 'refuse', cautionStatut: m.cautionStatut === 'payee' ? 'a_rendre' : m.cautionStatut } });
+      return relire(t.id, userId);
     },
 
     async abandonner(userId: string, id: string) {
@@ -491,7 +706,7 @@ export function creerTontines(d: DepsTontines) {
       const t = await charger(m.tontineId);
       exigerOrganisateur(t, userId);
       const tour = tourActuel(t);
-      if (t.etat !== 'en_cours' || tour?.etat !== 'collecte') throw new HttpError(409, 'Aucune collecte en cours.');
+      if (estObjectif(t) || t.etat !== 'en_cours' || tour?.etat !== 'collecte') throw new HttpError(409, 'Aucune collecte en cours.');
       if (jourDe(t) <= tour.echeance) throw new HttpError(409, 'L’échéance n’est pas encore passée.');
       const mvts = await mouvementsDe(t.id);
       if (aCotise(mvts, m.id, tour.id)) throw new HttpError(409, 'Ce membre a déjà cotisé.');
@@ -513,10 +728,10 @@ export function creerTontines(d: DepsTontines) {
       if (tour.etat !== 'a_verser') throw new HttpError(409, 'Ce tour n’attend pas de versement.');
       const t = await charger(tour.tontineId);
       const b = t.membres.find((m) => m.id === tour.beneficiaireId);
-      const telephone = b ? contactDe(b).telephone : '';
+      const telephone = estObjectif(t) ? (beneficiaireDe(t)?.telephone ?? '') : b ? contactDe(b).telephone : '';
       if (!telephone) throw new HttpError(409, 'Le bénéficiaire n’a plus de numéro.');
       await d.db.tontineTour.update({ where: { id: tourId }, data: { valideParNom: adminNom, valideLe: new Date(maintenant()) } });
-      await sortie({ genre: 'versement', tontineId: t.id, membreId: b!.id, tourId, montant: tour.net, devise: t.devise, telephone, preuve });
+      await sortie({ genre: 'versement', tontineId: t.id, membreId: b?.id ?? null, tourId, montant: tour.net, devise: t.devise, telephone, preuve });
       return resumeAdmin();
     },
 
@@ -552,6 +767,8 @@ export function creerTontines(d: DepsTontines) {
         const tardifs = await d.db.tontineMouvement.findMany({ where: { statut: { in: ['expire', 'abandonne'] }, commande: { not: null }, createdAt: { gt: new Date(instant - RATTRAPAGE_MS) } } });
         for (const m of tardifs) await verifier(m);
       }
+      const objectifs = await d.db.tontine.findMany({ where: { mode: 'objectif', etat: 'en_cours' }, select: { id: true } });
+      for (const o of objectifs) await avancerObjectif(o.id);
       const tours = await d.db.tontineTour.findMany({ where: { etat: 'collecte' } });
       for (const tour of tours) {
         const t = await charger(tour.tontineId);
@@ -560,12 +777,12 @@ export function creerTontines(d: DepsTontines) {
         if (!moment) continue;
         const mvts = await mouvementsDe(t.id);
         for (const m of acceptes(t)) {
-          if (!m.userId || aCotise(mvts, m.id, tour.id)) continue;
+          if (!m.userId || aCotise(mvts, m.id, tour.id) || (estObjectif(t) && !toursDus(t, m, mvts).some((x) => x.id === tour.id))) continue;
           await d
             .avertir(m.userId, contactDe(m).telephone, {
               cle: `tontine:echeance:${tour.id}:${m.id}:${moment}`,
               titre: moment === 'retard' ? `Cotisation en retard : ${montantCotisation(t.montant, t.devise)}` : `Cotisation à payer avant le ${tour.echeance.slice(8)}/${tour.echeance.slice(5, 7)}`,
-              corps: `« ${t.nom} », tour ${tour.numero} sur ${t.places}.`,
+              corps: estObjectif(t) ? `« ${t.nom} ».` : `« ${t.nom} », tour ${tour.numero} sur ${t.places}.`,
             })
             .catch((e) => console.error('Avis de tontine', e));
         }
