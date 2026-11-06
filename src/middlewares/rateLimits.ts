@@ -133,3 +133,9 @@ const compteKey = (req: Request) => `compte:${req.user?.id ?? ipKeyGenerator(req
 export const payerTontineLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 6, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
 /** Envois par mail ou SMS : chaque SMS coûte. */
 export const envoiCotisationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 60, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
+/** Code d'approbation : chaque code est un SMS payé. */
+export const codeTontineLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 3, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
+export const confirmerTontineLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
+export const pieceIdentiteLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
+/** Page d'invitation, ouverte sans compte : on ne devine pas un code en le testant. */
+export const invitationTontineLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, message });
