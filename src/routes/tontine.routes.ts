@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { TontineController as C } from '../controllers/TontineController.js';
 import { requireFonction } from '../middlewares/abonnement.js';
 import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.js';
-import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
+import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
 import { tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
@@ -11,6 +11,9 @@ import { tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tont
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
 router.post('/flexpaie/retour', retourPaiementLimiter, asyncHandler(C.retour));
+// Lisibles sans compte : l'annuaire public et les limites à respecter.
+router.get('/public/annuaire', pageAnnuaireLimiter, asyncHandler(C.annuairePublic));
+router.get('/limites', pageAnnuaireLimiter, asyncHandler(C.limites));
 router.get('/invitation/:code', invitationTontineLimiter, validateRequest(tontineInvitationSchema), asyncHandler(C.invitation));
 router.use(authenticateJWT);
 

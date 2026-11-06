@@ -611,6 +611,8 @@ model ApprobationCompte {
   statut       String   @default("soumise")
   /// Photo de la pièce d'identité, chiffrée, effacée dès la décision.
   piece        String?
+  /// Informations données pour l'éligibilité, chiffrées. Gardées si le compte est approuvé, effacées sinon.
+  dossier      Json?
   motif        String?
   decideParNom String?
   decideLe     DateTime?

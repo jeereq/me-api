@@ -1,3 +1,4 @@
+import { limitesDe } from '../commun/cotisations.js';
 import { prisma } from '../utils/prisma.js';
 import { Flexpaie, flexpaieConfigure } from './abonnements/flexpaie.js';
 import { adresseApp } from './comptes/emails.js';
@@ -29,5 +30,9 @@ export const TontineService = creerTontines({
   avertir: (userId, telephone, avis, mode) => Envois.avertir(userId, telephone, avis, mode),
   comptesApprouves: (ids) => ApprobationService.comptesApprouves(ids),
   adresseApp,
+  limites: async () => {
+    const c = await prisma.config.findUnique({ where: { id: 1 } });
+    return limitesDe((c?.data as { limitesCotisations?: unknown } | null)?.limitesCotisations);
+  },
   envoyerInvitation: (userId, c) => Envois.invitation(userId, c),
 });

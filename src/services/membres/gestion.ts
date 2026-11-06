@@ -5,19 +5,22 @@ import { debutAbonnements, etatAbonnement, finEssaiEffective, formulePayee, pali
  * L'admin voit le compte et son abonnement, jamais le contenu de l'espace privé.
  */
 
-export const FILTRES = ['tous', 'abonnes', 'essai', 'sans', 'expirent', 'anciens'] as const;
+export const FILTRES = ['tous', 'abonnes', 'essai', 'sans', 'expirent', 'anciens', 'equipe'] as const;
 export type FiltreMembres = (typeof FILTRES)[number];
 
 /** Une période qui finit dans ces jours « expire bientôt » : c'est le moment de relancer. */
 export const JOURS_EXPIRE_BIENTOT = 7;
 
-export type CompteGestion = ChampsAbonnement & { id: string; email: string | null; telephone?: string | null; nom: string; role: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR'; emailVerifie: boolean; createdAt: Date };
+export type CompteGestion = ChampsAbonnement & { photoUrl?: string | null; approbation?: { statut: string } | null; id: string; email: string | null; telephone?: string | null; nom: string; role: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR'; emailVerifie: boolean; createdAt: Date };
 
 export type LigneMembre = {
   id: string;
   email: string;
   nom: string;
   role: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR';
+  photo: string | null;
+  /** soumise, approuvee, refusee ou null. */
+  eligibilite: string | null;
   emailVerifie: boolean;
   creeLe: string;
   offre: 'gratuit' | 'essai' | 'finances' | 'pro' | 'libre';
@@ -38,6 +41,8 @@ export function ligneMembre(u: CompteGestion, maintenant = new Date(), depuis = 
     // Un compte sans email se reconnaît à son numéro.
     email: u.email ?? (u.telephone ? `+${u.telephone}` : ''),
     nom: u.nom,
+    photo: u.photoUrl ?? null,
+    eligibilite: u.approbation?.statut ?? null,
     role: u.role,
     emailVerifie: u.emailVerifie,
     creeLe: u.createdAt.toISOString(),
@@ -54,6 +59,7 @@ const estAbonne = (l: LigneMembre) => l.offre === 'pro' || l.offre === 'finances
 const expireBientot = (l: LigneMembre) => estAbonne(l) && l.joursRestants !== null && l.joursRestants <= JOURS_EXPIRE_BIENTOT;
 const correspond: Record<FiltreMembres, (l: LigneMembre) => boolean> = {
   tous: () => true,
+  equipe: (l) => l.role !== 'UTILISATEUR',
   abonnes: estAbonne,
   essai: (l) => l.offre === 'essai',
   sans: (l) => l.offre === 'gratuit',

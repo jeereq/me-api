@@ -38,7 +38,7 @@ describe('ligne d’un compte', () => {
     assert.equal(ligne(admin).offre, 'libre');
   });
   it('ne contient ni mot de passe ni donnée de l’espace', () => {
-    assert.deepEqual(Object.keys(ligne(pro)).sort(), ['creeLe', 'email', 'emailVerifie', 'expireLe', 'id', 'joursRestants', 'jusqua', 'nom', 'offre', 'palier', 'periode', 'role']);
+    assert.deepEqual(Object.keys(ligne(pro)).sort(), ['creeLe', 'eligibilite', 'email', 'emailVerifie', 'expireLe', 'id', 'joursRestants', 'jusqua', 'nom', 'offre', 'palier', 'periode', 'photo', 'role']);
   });
 });
 
@@ -48,6 +48,7 @@ describe('filtres', () => {
     assert.deepEqual(ids(filtrerMembres(lignes, 'essai')), ['essai']);
     assert.deepEqual(ids(filtrerMembres(lignes, 'sans')).sort(), ['ancien', 'gratuit']);
     assert.deepEqual(ids(filtrerMembres(lignes, 'anciens')), ['ancien']);
+    assert.deepEqual(ids(filtrerMembres(lignes, 'equipe')), ['admin']);
     assert.equal(filtrerMembres(lignes, 'tous').length, 6);
   });
   it('« expirent » garde les abonnés à 7 jours ou moins, le plus proche d’abord', () => {

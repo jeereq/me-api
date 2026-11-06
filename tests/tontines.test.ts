@@ -4,7 +4,7 @@ import { beforeEach, describe, it } from 'node:test';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 
-const { echeancesTontine, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
+const { echeancesTontine, limitesDe, LIMITES_DEFAUT, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
 const { tontineAdhererSchema, tontineCreerSchema, tontineRappelsSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
 const { FONCTIONS_FINANCES, formuleDe, photoManquante } = await import('../src/services/abonnements/offres.js');
@@ -58,7 +58,7 @@ function baseMemoire() {
     if (l.genre === 'caution_rendue' && t.some((x) => x.genre === 'caution_rendue' && x.membreId === l.membreId && ['en_attente', 'paye'].includes(x.statut))) return true;
     return false;
   });
-  const roles: Record<string, { nom: string; role: string }> = { orga: { nom: 'Jeereq Takango', role: 'UTILISATEUR' } };
+  const roles: Record<string, { nom: string; role: string; photoUrl?: string }> = { orga: { nom: 'Jeereq Takango', role: 'UTILISATEUR' } };
   const complet = (t: Ligne) => ({
     ...t,
     organisateur: roles[t.organisateurId] ?? null,
@@ -127,6 +127,15 @@ describe('calculs des tontines', () => {
   });
 });
 
+describe('limites de l’admin', () => {
+  it('reprennent les valeurs par défaut si le réglage manque ou est faux', () => {
+    assert.deepEqual(limitesDe(null), LIMITES_DEFAUT);
+    assert.deepEqual(limitesDe({ montantMax: { USD: -5, CDF: 'x' }, membresMax: 1 }), { ...LIMITES_DEFAUT, membresMax: 2 });
+    assert.equal(limitesDe({ membresMax: 999 }).membresMax, 200);
+    assert.equal(limitesDe({ montantMax: { USD: 5000 } }).montantMax.USD, 5000);
+  });
+});
+
 describe('rappels de groupe', () => {
   it('sont dus aux jours choisis', () => {
     const r = { avant: [3, 0], apres: [1], mail: true, sms: false };
@@ -179,6 +188,7 @@ describe('une tontine de bout en bout', () => {
   let vus: Set<string>;
   let instant: number;
   let approuves: Set<string>;
+  let limites: { montantMax: { USD: number; CDF: number }; membresMax: number };
   let invitations: Ligne[];
   const JOUR = 86400000;
   const orga = { id: 'orga', nom: 'Jeereq Takango', fuseau: 'Africa/Kinshasa', telephone: '243812345670' };
@@ -198,6 +208,7 @@ describe('une tontine de bout en bout', () => {
     instant = Date.UTC(2026, 10, 6, 12);
     horloge = () => instant;
     approuves = new Set(['orga', 'paul', 'marie']);
+    limites = limitesDe(null);
     invitations = [];
     s = creerTontines({
       db: b.db,
@@ -228,6 +239,7 @@ describe('une tontine de bout en bout', () => {
       },
       comptesApprouves: async (ids) => new Set(ids.filter((x) => approuves.has(x))),
       adresseApp: () => 'https://app.test',
+      limites: async () => limites,
       envoyerInvitation: async (_u, c) => {
         invitations.push(c);
         return { mail: false, sms: true };
@@ -656,6 +668,35 @@ describe('une tontine de bout en bout', () => {
     assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 3);
   });
 
+  it('annuaire public : lisible sans compte, sans photo ni groupe privé', async () => {
+    b.roles.orga.photoUrl = 'https://x/p.jpg';
+    await creer();
+    await s.creer(orga, { nom: 'Privé', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'prive', telephone: '0812345670' });
+    const r = await s.annuaire(null);
+    assert.deepEqual(r.groupes.map((g) => g.nom), ['Famille']);
+    assert.equal(r.groupes[0].organisateur, 'Jeereq');
+    assert.equal(r.groupes[0].organisateurPhoto, null);
+    assert.equal(r.groupes[0].monEtat, null);
+    assert.equal(JSON.stringify(r).includes('812345'), false);
+    assert.equal((await s.annuaire('marie')).groupes[0].organisateurPhoto, 'https://x/p.jpg');
+  });
+
+  it('respecte les limites de l’admin, à la création seulement', async () => {
+    const base = { nom: 'G', devise: 'USD', rythme: 'mensuel' as const, mode: 'rotation' as const, visibilite: 'public' as const };
+    limites = { montantMax: { USD: 5000, CDF: 900000 }, membresMax: 4 };
+    await assert.rejects(s.creer(orga, { ...base, montant: 5001, places: 3 }), /ne peut pas dépasser 50 USD/);
+    await assert.rejects(s.creer(orga, { ...base, montant: 1000, places: 5 }), /dépasser 4 membres/);
+    await assert.rejects(s.creer(orga, { ...base, devise: 'CDF', montant: 900001, places: 3 }), /ne peut pas dépasser 9 000,01|ne peut pas dépasser 9 000 CDF/);
+    assert.equal((await s.creer(orga, { ...base, montant: 5000, places: 4 })).groupe.places, 4);
+    limites = { montantMax: { USD: 100, CDF: 100 }, membresMax: 2 };
+    assert.equal(b.tontines.lignes[0].places, 4);
+  });
+
+  it('refuse une cagnotte que la base ne saurait pas compter', async () => {
+    limites = { montantMax: { USD: 100000000, CDF: 100000000 }, membresMax: 200 };
+    await assert.rejects(s.creer(orga, { nom: 'G', devise: 'CDF', rythme: 'mensuel', mode: 'rotation', visibilite: 'public', montant: 100000000, places: 50 }), /trop élevée/);
+  });
+
   it('un commercial ne valide jamais pour lui-même, et son nom reste noté', async () => {
     const id = await complet();
     await s.demarrer('orga', id);
@@ -697,12 +738,13 @@ describe('une tontine de bout en bout', () => {
 });
 
 describe('approbation des comptes', () => {
-  const { creerApprobations, typeImage } = await_module;
+  const { creerApprobations, estMajeur, typeImage } = await_module;
   type Ligne2 = Record<string, any>;
   let lignes: Ligne2[];
   let users: Record<string, Ligne2>;
   let avis: { userId: string; titre: string }[];
   const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const DOSSIER = { nomComplet: 'Marie Kabila', dateNaissance: '1990-05-12', ville: 'Kinshasa', commune: 'Gombe', activite: 'Commerçante', typePiece: 'carte_electeur' as const, capaciteMensuelle: 50, contactNom: 'Paul', contactTelephone: '0812345671' };
   const creer = () =>
     creerApprobations({
       db: {
@@ -738,32 +780,50 @@ describe('approbation des comptes', () => {
     assert.equal(typeImage(new Uint8Array([0x3c, 0x73, 0x76, 0x67])), null);
   });
 
+  it('vérifie l’âge et chiffre le dossier', async () => {
+    const s = creer();
+    assert.equal(estMajeur('2008-11-06', '2026-11-06'), true);
+    assert.equal(estMajeur('2008-11-07', '2026-11-06'), false);
+    await assert.rejects(s.soumettre('a', JPEG, { ...DOSSIER, dateNaissance: '2015-01-01' }), /18 ans/);
+    await s.soumettre('a', JPEG, DOSSIER);
+    assert.equal(JSON.stringify(lignes[0].dossier).includes('Kabila'), false);
+    assert.equal((await s.dossier('a')).dossier?.ville, 'Kinshasa');
+    await s.decider('Admin', 'a', true);
+    const apres = await s.dossier('a');
+    assert.equal(apres.base64, null);
+    assert.equal(apres.dossier?.nomComplet, 'Marie Kabila');
+    await s.decider('Admin', 'a', false, 'Fraude');
+    assert.equal((await s.dossier('a')).dossier, null);
+  });
+
   it('exige le SMS, chiffre la photo, et l’efface à la décision', async () => {
     const s = creer();
-    await assert.rejects(s.soumettre('b', JPEG), /SMS/);
-    await assert.rejects(s.soumettre('a', new Uint8Array([1, 2, 3, 4])), /photo/);
-    await assert.rejects(s.soumettre('a', new Uint8Array(6 * 1024 * 1024)), /trop lourde/);
-    assert.equal((await s.soumettre('a', JPEG)).statut, 'soumise');
+    await assert.rejects(s.soumettre('b', JPEG, DOSSIER), /SMS/);
+    await assert.rejects(s.soumettre('a', new Uint8Array([1, 2, 3, 4]), DOSSIER), /photo/);
+    await assert.rejects(s.soumettre('a', new Uint8Array(6 * 1024 * 1024), DOSSIER), /trop lourde/);
+    assert.equal((await s.soumettre('a', JPEG, DOSSIER)).statut, 'soumise');
     assert.equal(lignes[0].piece.includes(Buffer.from(JPEG).toString('base64')), false);
-    assert.deepEqual(await s.piece('a'), { type: 'image/jpeg', base64: Buffer.from(JPEG).toString('base64') });
+    const lu = await s.dossier('a');
+    assert.equal(lu.type, 'image/jpeg');
+    assert.equal(lu.base64, Buffer.from(JPEG).toString('base64'));
     assert.equal((await s.comptesApprouves(['a'])).size, 0);
     await s.decider('Admin', 'a', true);
     assert.equal(lignes[0].piece, null);
     assert.equal(lignes[0].decideParNom, 'Admin');
-    await assert.rejects(s.piece('a'), /Aucune photo/);
+    assert.equal((await s.dossier('a')).base64, null);
     assert.equal((await s.comptesApprouves(['a', 'b'])).has('a'), true);
     assert.equal(avis[0].titre, 'Compte approuvé');
-    await assert.rejects(s.soumettre('a', JPEG), /déjà approuvé/);
+    await assert.rejects(s.soumettre('a', JPEG, DOSSIER), /déjà approuvé/);
   });
 
   it('refus avec motif, nouvelle demande possible, et approbation retirable', async () => {
     const s = creer();
-    await s.soumettre('a', JPEG);
+    await s.soumettre('a', JPEG, DOSSIER);
     await assert.rejects(s.decider('Admin', 'a', false), /motif/);
     await s.decider('Admin', 'a', false, 'Photo illisible');
     assert.equal((await s.etat('a')).motif, 'Photo illisible');
     assert.equal(lignes[0].piece, null);
-    assert.equal((await s.soumettre('a', JPEG)).statut, 'soumise');
+    assert.equal((await s.soumettre('a', JPEG, DOSSIER)).statut, 'soumise');
     await s.decider('Admin', 'a', true);
     await s.decider('Admin', 'a', false, 'Fraude');
     assert.equal((await s.comptesApprouves(['a'])).size, 0);
