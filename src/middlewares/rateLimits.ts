@@ -132,3 +132,5 @@ export const pieceIdentiteLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit:
 export const invitationTontineLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, message });
 /** Photo de profil : chaque envoi passe par Cloudinary. */
 export const photoProfilLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
+/** Annuaire public : consultable sans compte, et sans être aspiré. */
+export const pageAnnuaireLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message });

@@ -5,6 +5,7 @@ import { SmsService } from '../services/SmsService.js';
 import { ApprobationService as A, TontineService as S } from '../services/TontineService.js';
 import { lireFormulaire } from '../utils/formulaire.js';
 import { HttpError } from '../utils/http.js';
+import { dossierEligibiliteSchema } from '../validators/schemas.js';
 import { prisma } from '../utils/prisma.js';
 
 const p = (v: string | string[] | undefined) => String(v ?? '');
@@ -18,6 +19,12 @@ const acteur = (req: Request) => ({ id: req.user!.id, nom: req.user!.nom || req.
 export const TontineController = {
   mesGroupes: async (req: Request, res: Response) => {
     res.json(await S.mesGroupes(req.user!.id));
+  },
+  annuairePublic: async (req: Request, res: Response) => {
+    res.json(await S.annuaire(null, typeof req.query.q === 'string' ? req.query.q : undefined));
+  },
+  limites: async (_req: Request, res: Response) => {
+    res.json(await S.limites());
   },
   annuaire: async (req: Request, res: Response) => {
     res.json(await S.annuaire(req.user!.id, typeof req.query.q === 'string' ? req.query.q : undefined));
@@ -61,13 +68,21 @@ export const TontineController = {
     const form = await lireFormulaire(req, TAILLE_PIECE_MAX + 64 * 1024, 'Photo trop lourde : 5 Mo au plus.');
     const fichier = form.get('fichier');
     if (!(fichier instanceof File)) throw new HttpError(400, 'Aucune photo reçue.');
-    res.status(201).json(await A.soumettre(req.user!.id, new Uint8Array(await fichier.arrayBuffer())));
+    let brut: unknown;
+    try {
+      brut = JSON.parse(String(form.get('dossier') ?? ''));
+    } catch {
+      throw new HttpError(400, 'Dossier illisible.');
+    }
+    const dossier = dossierEligibiliteSchema.safeParse(brut);
+    if (!dossier.success) throw new HttpError(400, dossier.error.issues[0]?.message ?? 'Dossier incomplet.');
+    res.status(201).json(await A.soumettre(req.user!.id, new Uint8Array(await fichier.arrayBuffer()), dossier.data));
   },
   adminApprobations: async (_req: Request, res: Response) => {
     res.json(await A.aTraiter());
   },
   adminPiece: async (req: Request, res: Response) => {
-    res.set({ 'Cache-Control': 'no-store' }).json(await A.piece(p(req.params.userId)));
+    res.set({ 'Cache-Control': 'no-store' }).json(await A.dossier(p(req.params.userId)));
   },
   adminDecider: async (req: Request, res: Response) => {
     if (req.params.userId === req.user!.id && req.user!.role !== 'ADMIN') throw new HttpError(403, 'Un autre responsable doit valider ton compte.');

@@ -2,7 +2,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, prenomDe, rappelDuJour, rappelsDe, repartitionCagnotte, type RappelsGroupe, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
+import { CAGNOTTE_MAX, COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, prenomDe, rappelDuJour, rappelsDe, repartitionCagnotte, type LimitesCotisation, type RappelsGroupe, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -63,6 +63,8 @@ export type DepsTontines = {
   /** Comptes approuvés pour l'annuaire. */
   comptesApprouves(ids: string[]): Promise<Set<string>>;
   adresseApp(): string | null;
+  /** Les limites réglées par l'admin. */
+  limites(): Promise<LimitesCotisation>;
   /** Une invitation envoyée par Me, selon les canaux du système. */
   envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string }): Promise<{ mail: boolean; sms: boolean }>;
   maintenant?: () => number;
@@ -430,13 +432,17 @@ export function creerTontines(d: DepsTontines) {
 
   return {
     /** Les groupes qui cherchent des membres. */
-    async annuaire(userId: string, q?: string) {
+    limites: () => d.limites(),
+
+    async annuaire(userId: string | null, q?: string) {
       const tous = await d.db.tontine.findMany({ where: { visibilite: 'public', etat: { in: ['ouvert', 'en_cours'] } }, orderBy: { createdAt: 'desc' }, take: 200, include: INCLUS });
       const mot = q?.trim().toLowerCase();
       const groupes = tous.filter((t) => accueille(t) && acceptes(t).length < t.places && (!mot || t.nom.toLowerCase().includes(mot)));
       // Seuls les groupes des comptes approuvés sont visibles.
       const approuves = await d.comptesApprouves(groupes.flatMap((t) => (t.organisateurId ? [t.organisateurId] : [])));
-      return { groupes: groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId)).slice(0, 100).map((t) => carte(t, userId)) };
+      const visibles = groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId)).slice(0, 100);
+      // Sans compte, l'annuaire montre le groupe et le prénom de l'organisateur, jamais sa photo.
+      return { groupes: visibles.map((t) => (userId ? carte(t, userId) : { ...carte(t, ''), organisateurPhoto: null })) };
     },
 
     async mesGroupes(userId: string) {
@@ -457,6 +463,10 @@ export function creerTontines(d: DepsTontines) {
 
     async creer(u: Compte, c: CreationTontine) {
       if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
+      const limites = await d.limites();
+      const montantMax = limites.montantMax[c.devise as 'USD' | 'CDF'];
+      if (c.montant > montantMax) throw new HttpError(400, `La cotisation ne peut pas dépasser ${montantCotisation(montantMax, c.devise)}.`);
+      if (c.places > limites.membresMax) throw new HttpError(400, `Un groupe ne peut pas dépasser ${limites.membresMax} membres.`);
       const publique = c.visibilite === 'public';
       if (publique) await exigerApprobation(u.id);
       // Dans l'annuaire, le numéro est celui confirmé par SMS ; sur invitation, l'initiateur répond de ses membres.
@@ -476,6 +486,7 @@ export function creerTontines(d: DepsTontines) {
         dates = echeancesObjectif(c.rythme, jour, c.dateFin);
         if (dates.length > MAX_TOURS_OBJECTIF) throw new HttpError(400, 'Cette cotisation compte trop de périodes : choisis un autre rythme ou une date plus proche.');
       } else if (c.rythme === 'unique') throw new HttpError(400, 'Choisis un rythme.');
+      if (c.montant * c.places * Math.max(1, dates.length) > CAGNOTTE_MAX) throw new HttpError(400, 'La cagnotte serait trop élevée : réduis le montant, le nombre de membres ou de périodes.');
       const cautionRequise = objectif ? false : publique ? true : c.cautionRequise !== false;
       const t = await d.db.tontine.create({
         data: {

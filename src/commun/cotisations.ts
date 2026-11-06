@@ -108,6 +108,22 @@ export function echeancesObjectif(rythme: RythmeObjectif, debut: string, fin: st
   return [...dates, fin];
 }
 
+/** Limites réglées par l'admin : montant maximum d'une cotisation, par devise, et nombre de membres d'un groupe. */
+export type LimitesCotisation = { montantMax: { USD: number; CDF: number }; membresMax: number };
+export const LIMITES_DEFAUT: LimitesCotisation = { montantMax: { USD: 100000, CDF: 30000000 }, membresMax: 50 };
+/** La plus grosse cagnotte qu'une base en entiers 32 bits sait compter : 20 millions, en centimes. */
+export const CAGNOTTE_MAX = 2000000000;
+export const MEMBRES_PLAFOND = 200;
+
+export function limitesDe(brut: unknown): LimitesCotisation {
+  const b = (brut ?? {}) as { montantMax?: { USD?: unknown; CDF?: unknown }; membresMax?: unknown };
+  const entier = (v: unknown, defaut: number, max: number) => (typeof v === 'number' && Number.isInteger(v) && v >= 1 ? Math.min(v, max) : defaut);
+  return {
+    montantMax: { USD: entier(b.montantMax?.USD, LIMITES_DEFAUT.montantMax.USD, 100000000), CDF: entier(b.montantMax?.CDF, LIMITES_DEFAUT.montantMax.CDF, 100000000) },
+    membresMax: Math.max(2, entier(b.membresMax, LIMITES_DEFAUT.membresMax, MEMBRES_PLAFOND)),
+  };
+}
+
 /** Rappels obligatoires d'un groupe : l'initiateur règle les jours et les canaux. L'app prévient toujours. */
 export type RappelsGroupe = { avant: number[]; apres: number[]; mail: boolean; sms: boolean };
 export const JOURS_AVANT = [7, 3, 1, 0];

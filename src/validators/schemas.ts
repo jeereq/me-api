@@ -306,6 +306,17 @@ export const cotisationIdSchema = z.object({ params: idCotisation });
 export const cotisationMembreIdSchema = z.object({ params: idMembre });
 
 /* Tontines */
+export const dossierEligibiliteSchema = z.object({
+  nomComplet: z.string({ required_error: 'Indique ton nom complet.' }).trim().min(3, 'Indique ton nom complet.').max(120, 'Nom trop long.'),
+  dateNaissance: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date de naissance invalide.'),
+  ville: z.string({ required_error: 'Indique ta ville.' }).trim().min(2, 'Indique ta ville.').max(80, 'Ville trop longue.'),
+  commune: z.string({ required_error: 'Indique ta commune.' }).trim().min(2, 'Indique ta commune.').max(80, 'Commune trop longue.'),
+  activite: z.string({ required_error: 'Indique ton activité.' }).trim().min(2, 'Indique ton activité.').max(120, 'Activité trop longue.'),
+  typePiece: z.enum(['carte_electeur', 'passeport', 'permis', 'autre'], { errorMap: () => ({ message: 'Choisis le type de pièce.' }) }),
+  capaciteMensuelle: z.number({ required_error: 'Indique ce que tu peux cotiser par mois.' }).positive('Indique ce que tu peux cotiser par mois.').max(100000000, 'Montant trop élevé.'),
+  contactNom: z.string({ required_error: 'Indique une personne à contacter.' }).trim().min(2, 'Indique une personne à contacter.').max(120, 'Nom trop long.'),
+  contactTelephone: z.string({ required_error: 'Indique le numéro de ton contact.' }).trim().min(8, 'Indique le numéro de ton contact.').max(25, 'Numéro invalide.'),
+});
 const idTontine = z.object({ id: z.string().min(1).max(40) });
 const telephoneTontine = z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(25, 'Numéro invalide');
 const accepteConditions = z.literal(true, { errorMap: () => ({ message: 'Accepte les conditions pour continuer.' }) });
@@ -325,7 +336,7 @@ export const tontineCreerSchema = z.object({
       montant: montantCotisation,
       devise: z.enum(['USD', 'CDF'], { errorMap: () => ({ message: 'Choisis USD ou CDF.' }) }),
       rythme: z.enum(['unique', 'quotidien', 'hebdomadaire', 'mensuel'], { errorMap: () => ({ message: 'Choisis le rythme.' }) }),
-      places: z.number().int().min(2, 'Au moins 2 membres').max(50, '50 membres au maximum'),
+      places: z.number().int().min(2, 'Au moins 2 membres').max(200, '200 membres au maximum'),
       mode: z.enum(['rotation', 'objectif'], { errorMap: () => ({ message: 'Choisis le type de cotisation.' }) }),
       visibilite: z.enum(['public', 'prive'], { errorMap: () => ({ message: 'Choisis qui peut rejoindre.' }) }),
       cautionRequise: z.boolean().optional(),
@@ -363,7 +374,7 @@ export const numeroAutoriseParamsSchema = z.object({ params: z.object({ id: z.st
 export const smsCodeSchema = z.object({ body: z.object({ code: z.string({ required_error: 'Code requis' }).trim().regex(/^\d{3,10}$/, 'Code invalide') }) });
 export const gestionMembresSchema = z.object({
   query: z.object({
-    filtre: z.enum(['tous', 'abonnes', 'essai', 'sans', 'expirent', 'anciens']).default('tous'),
+    filtre: z.enum(['tous', 'abonnes', 'essai', 'sans', 'expirent', 'anciens', 'equipe']).default('tous'),
     q: z.string().trim().max(120).default(''),
     page: z.coerce.number().int().min(1).default(1),
   }),
