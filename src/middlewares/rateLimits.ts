@@ -127,3 +127,9 @@ export const payerCotisationLimiter = [
   rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, keyGenerator: jetonKey, standardHeaders: 'draft-7', legacyHeaders: false, message }),
   rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, message }),
 ];
+
+const compteKey = (req: Request) => `compte:${req.user?.id ?? ipKeyGenerator(req.ip ?? '')}`;
+/** Chaque demande fait sonner un téléphone : 6 par compte en 10 minutes. */
+export const payerTontineLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 6, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
+/** Envois par mail ou SMS : chaque SMS coûte. */
+export const envoiCotisationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 60, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });

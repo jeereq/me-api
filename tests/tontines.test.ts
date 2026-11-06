@@ -1,0 +1,450 @@
+import assert from 'node:assert/strict';
+import { beforeEach, describe, it } from 'node:test';
+
+process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
+
+const { echeancesTontine, repartitionCagnotte } = await import('../src/commun/cotisations.js');
+const { tontineAdhererSchema, tontineCreerSchema } = await import('../src/validators/schemas.js');
+const { creerTontines } = await import('../src/services/cotisations/tontines.js');
+type Deps = import('../src/services/cotisations/tontines.js').DepsTontines;
+type Ligne = Record<string, any>;
+
+function table(uniques: (l: Ligne, t: Ligne[]) => boolean = () => false) {
+  const lignes: Ligne[] = [];
+  let n = 0;
+  const correspond = (l: Ligne, w: Ligne = {}): boolean =>
+    Object.entries(w).every(([k, v]) => {
+      if (k === 'OR') return (v as Ligne[]).some((x) => correspond(l, x));
+      if (v && typeof v === 'object' && !(v instanceof Date)) {
+        const o = v as Ligne;
+        if (o.in) return o.in.includes(l[k]);
+        if (o.not === null) return l[k] != null;
+        if (o.gt) return l[k] > o.gt;
+        if (o.lte) return l[k] <= o.lte;
+      }
+      return l[k] === v;
+    });
+  return {
+    lignes,
+    correspond,
+    count: async ({ where }: Ligne) => lignes.filter((l) => correspond(l, where)).length,
+    create: async ({ data }: Ligne) => {
+      const l = { id: `i${++n}${Math.random().toString(36).slice(2, 6)}`, createdAt: new Date(Date.now() + n), ...data };
+      if (uniques(l, lignes)) throw Object.assign(new Error('doublon'), { code: 'P2002' });
+      lignes.push(l);
+      return l;
+    },
+    update: async ({ where, data }: Ligne) => Object.assign(lignes.find((l) => l.id === where.id)!, data),
+    updateMany: async ({ where, data }: Ligne) => {
+      const t = lignes.filter((l) => correspond(l, where));
+      t.forEach((l) => Object.assign(l, data));
+      return { count: t.length };
+    },
+  };
+}
+
+function baseMemoire() {
+  const tontines = table();
+  const membres = table((l, t) => t.some((x) => x.tontineId === l.tontineId && x.userId === l.userId));
+  const tours = table();
+  const mvts = table((l, t) => {
+    const entree = ['caution', 'cotisation'].includes(l.genre);
+    if (entree && l.statut === 'en_attente' && t.some((x) => x.membreId === l.membreId && x.statut === 'en_attente' && ['caution', 'cotisation'].includes(x.genre))) return true;
+    if (l.genre === 'versement' && t.some((x) => x.genre === 'versement' && x.tourId === l.tourId && ['en_attente', 'paye'].includes(x.statut))) return true;
+    if (l.genre === 'caution_rendue' && t.some((x) => x.genre === 'caution_rendue' && x.membreId === l.membreId && ['en_attente', 'paye'].includes(x.statut))) return true;
+    return false;
+  });
+  const roles: Record<string, { nom: string; role: string }> = { orga: { nom: 'Jeereq Takango', role: 'UTILISATEUR' } };
+  const complet = (t: Ligne) => ({
+    ...t,
+    organisateur: roles[t.organisateurId] ?? null,
+    membres: membres.lignes.filter((m) => m.tontineId === t.id).map((m) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...m })),
+    tours: tours.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => a.numero - b.numero),
+  });
+  const brut = (l: Ligne) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...l });
+  const db = {
+    tontine: {
+      ...tontines,
+      create: async ({ data }: Ligne) => tontines.create({ data: { etat: 'ouvert', tourCourant: 0, ...data } }),
+      findUnique: async ({ where }: Ligne) => {
+        const t = tontines.lignes.find((x) => x.id === where.id);
+        return t ? complet(t) : null;
+      },
+      findMany: async ({ where }: Ligne) => tontines.lignes.filter((t) => tontines.correspond(t, where)).map(complet),
+    },
+    tontineMembre: {
+      ...membres,
+      create: async ({ data }: Ligne) => membres.create({ data: { etat: 'demande', cautionStatut: 'due', rang: null, ...data } }),
+      findUnique: async ({ where }: Ligne) => {
+        const m = membres.lignes.find((x) => x.id === where.id);
+        return m ? brut(m) : null;
+      },
+      findMany: async ({ where }: Ligne) => membres.lignes.filter((m) => membres.correspond(m, where)).map(brut),
+    },
+    tontineTour: {
+      ...tours,
+      findUnique: async ({ where }: Ligne) => tours.lignes.find((x) => x.id === where.id) ?? null,
+      findUniqueOrThrow: async ({ where }: Ligne) => tours.lignes.find((x) => x.id === where.id)!,
+      findMany: async ({ where, include }: Ligne) =>
+        tours.lignes.filter((x) => tours.correspond(x, where)).map((x) => (include ? { ...x, tontine: tontines.lignes.find((t) => t.id === x.tontineId) } : x)),
+    },
+    tontineMouvement: {
+      ...mvts,
+      create: async ({ data }: Ligne) => mvts.create({ data: { commande: null, message: null, ...data } }),
+      findMany: async ({ where }: Ligne) => mvts.lignes.filter((m) => mvts.correspond(m, where)),
+      findFirst: async ({ where }: Ligne) => mvts.lignes.find((m) => mvts.correspond(m, where)) ?? null,
+    },
+  };
+  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles };
+}
+
+describe('calculs des tontines', () => {
+  it('retient 5 % sur la cagnotte', () => {
+    assert.deepEqual(repartitionCagnotte(1000, 10), { brut: 10000, commission: 500, net: 9500 });
+    assert.deepEqual(repartitionCagnotte(333, 3), { brut: 999, commission: 50, net: 949 });
+  });
+  it('calcule les échéances selon le rythme', () => {
+    assert.deepEqual(echeancesTontine('quotidien', '2026-11-30', 2), ['2026-12-01', '2026-12-02']);
+    assert.deepEqual(echeancesTontine('hebdomadaire', '2026-11-06', 2), ['2026-11-13', '2026-11-20']);
+    assert.deepEqual(echeancesTontine('mensuel', '2027-01-31', 3), ['2027-02-28', '2027-03-31', '2027-04-30']);
+  });
+  it('exige les conditions acceptées', () => {
+    assert.equal(tontineAdhererSchema.safeParse({ params: { id: 'x' }, body: { telephone: '0812345678' } }).success, false);
+    assert.equal(tontineAdhererSchema.safeParse({ params: { id: 'x' }, body: { telephone: '0812345678', accepte: true } }).success, true);
+    const base = { nom: 'Groupe', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, telephone: '0812345678', accepte: true };
+    assert.equal(tontineCreerSchema.safeParse({ body: base }).success, true);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, places: 1 } }).success, false);
+    assert.equal(tontineCreerSchema.safeParse({ body: { ...base, rythme: 'annuel' } }).success, false);
+  });
+});
+
+describe('une tontine de bout en bout', () => {
+  let b: ReturnType<typeof baseMemoire>;
+  let s: ReturnType<typeof creerTontines>;
+  let demandes: Ligne[];
+  let versements: Ligne[];
+  let etats: Map<string, { etat: 'paye' | 'echoue' | 'en_attente'; montant?: string; devise?: string }>;
+  let ouvert: (role: string | null) => boolean;
+  let api: boolean;
+  let avis: { userId: string; telephone: string | null; cle: string; titre: string; seul?: boolean }[];
+  let vus: Set<string>;
+  let instant: number;
+  const JOUR = 86400000;
+  const orga = { id: 'orga', nom: 'Jeereq Takango', fuseau: 'Africa/Kinshasa' };
+  const paul = { id: 'paul', nom: 'Paul Kasongo', fuseau: 'Africa/Kinshasa' };
+  const marie = { id: 'marie', nom: 'Marie Kabila', fuseau: 'Africa/Kinshasa' };
+
+  beforeEach(() => {
+    b = baseMemoire();
+    demandes = [];
+    versements = [];
+    etats = new Map();
+    ouvert = () => true;
+    api = false;
+    avis = [];
+    vus = new Set();
+    instant = Date.UTC(2026, 10, 6, 12);
+    s = creerTontines({
+      db: b.db,
+      flexpaie: {
+        demander: async (p) => {
+          demandes.push(p);
+          return { commande: `C${demandes.length}` };
+        },
+        verser: async (p) => {
+          versements.push(p);
+          return { commande: `V${versements.length}` };
+        },
+        verifier: async (commande) => {
+          const e = etats.get(commande) ?? { etat: 'en_attente' as const };
+          return { etat: e.etat, transaction: e.montant ? { amount: e.montant, currency: e.devise ?? 'USD' } : null, message: '' };
+        },
+      },
+      paiementOuvert: (r) => ouvert(r),
+      versementApi: () => api,
+      flexpaiePret: () => true,
+      adresseServeur: () => 'https://api.test',
+      exigerNumero: async () => {},
+      avertir: async (userId, telephone, a, seul) => {
+        const nouveau = !vus.has(`${userId}|${a.cle}`);
+        vus.add(`${userId}|${a.cle}`);
+        if (nouveau) avis.push({ userId, telephone, cle: a.cle, titre: a.titre, seul });
+        return { nouveau, mail: nouveau, sms: nouveau };
+      },
+      maintenant: () => instant,
+      // Tirage fixe : l'ordre reste celui de la liste.
+      tirer: (max) => max - 1,
+    });
+  });
+
+  const creer = () => s.creer(orga, { nom: 'Famille', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, telephone: '0812345670' });
+  /** Le dernier paiement demandé est validé chez FlexPaie, puis annoncé par son retour. */
+  async function valider(montant = '10.00') {
+    const m = b.mvts.lignes.at(-1)!;
+    etats.set(m.commande, { etat: 'paye', montant });
+    await s.retour({ orderNumber: m.commande });
+  }
+  async function complet() {
+    const { groupe } = await creer();
+    await s.adherer(paul, groupe.id, '0812345671');
+    await s.adherer(marie, groupe.id, '0812345672');
+    for (const m of (await s.detail('orga', groupe.id)).groupe.demandes) await s.decider('orga', m.id, true);
+    for (const u of ['orga', 'paul', 'marie']) {
+      await s.payer(u, groupe.id, 'caution');
+      await valider();
+    }
+    return groupe.id;
+  }
+  async function cotiserTous(id: string) {
+    for (const u of ['orga', 'paul', 'marie']) {
+      await s.payer(u, id, 'cotisation');
+      await valider();
+    }
+  }
+
+  it('va de la création à la fin, et garde exactement 5 %', async () => {
+    const id = await complet();
+    const apres = await s.demarrer('orga', id);
+    assert.equal(apres.groupe.etat, 'en_cours');
+    assert.equal(apres.groupe.tours.length, 3);
+    assert.equal(apres.groupe.tours[0].net, 2850);
+    assert.equal(new Set(apres.groupe.tours.map((x) => x.beneficiaire)).size, 3);
+
+    for (let tour = 1; tour <= 3; tour++) {
+      const g = (await s.detail('paul', id)).groupe;
+      assert.equal(g.tourCourant, tour);
+      assert.equal(g.aPayer?.genre, 'cotisation');
+      await s.payer('orga', id, 'cotisation');
+      await valider();
+      // Tant que tout le monde n'a pas payé, rien ne peut être versé.
+      const t = b.tours.lignes.find((x) => x.numero === tour)!;
+      await assert.rejects(s.verserTour('Admin', t.id, 'REF123'), /n’attend pas/);
+      await s.payer('paul', id, 'cotisation');
+      await valider();
+      await s.payer('marie', id, 'cotisation');
+      await valider();
+      assert.equal(t.etat, 'a_verser');
+      // Sans preuve, pas de versement manuel, et jamais deux fois.
+      await assert.rejects(s.verserTour('Admin', t.id), /référence/);
+      await s.verserTour('Admin', t.id, 'REF123');
+      assert.equal(t.etat, 'verse');
+      assert.equal(t.valideParNom, 'Admin');
+      await assert.rejects(s.verserTour('Admin', t.id, 'REF123'), /n’attend pas/);
+    }
+
+    assert.equal(b.tontines.lignes[0].etat, 'termine');
+    const r = await s.resumeAdmin();
+    assert.equal(r.cautions.length, 3);
+    assert.deepEqual(r.totaux, [{ devise: 'USD', detenu: 3000 + 9000 - 8550, commission: 450 }]);
+    for (const c of r.cautions) await s.rendreCaution(c.membreId, 'REF999');
+    await assert.rejects(s.rendreCaution(r.cautions[0].membreId, 'REF999'), /pas à rendre/);
+    const fin = await s.resumeAdmin();
+    // Tout a été rendu : il ne reste que la commission.
+    assert.deepEqual(fin.totaux, [{ devise: 'USD', detenu: 450, commission: 450 }]);
+    assert.equal(fin.cautions.length, 0);
+  });
+
+  it('paiements fermés : pas de demande ni de démarrage', async () => {
+    const id = await complet();
+    ouvert = () => false;
+    const n = demandes.length;
+    await assert.rejects(s.demarrer('orga', id), /pas encore ouvert/);
+    await assert.rejects(s.payer('paul', id, 'cotisation'), /pas encore ouvert/);
+    assert.equal(demandes.length, n);
+  });
+
+  it('refuse de démarrer un groupe incomplet ou sans cautions', async () => {
+    const { groupe } = await creer();
+    await assert.rejects(s.demarrer('orga', groupe.id), /pas complet/);
+    await s.adherer(paul, groupe.id, '0812345671');
+    await s.adherer(marie, groupe.id, '0812345672');
+    for (const m of (await s.detail('orga', groupe.id)).groupe.demandes) await s.decider('orga', m.id, true);
+    await assert.rejects(s.demarrer('orga', groupe.id), /cautions/);
+    await assert.rejects(s.demarrer('paul', groupe.id), /organisateur/);
+  });
+
+  it('protège les données et les gestes réservés', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const inconnu = (await s.detail('intrus', id)).groupe;
+    assert.deepEqual(inconnu.membres, []);
+    assert.deepEqual(inconnu.tours, []);
+    assert.equal(inconnu.moi, null);
+    const vue = JSON.stringify((await s.detail('paul', id)).groupe);
+    assert.equal(vue.includes('812345670'), false);
+    assert.equal(vue.includes('812345672'), false);
+    assert.equal((await s.detail('paul', id)).groupe.demandes.length, 0);
+    await assert.rejects(s.payer('intrus', id, 'cotisation'), /pas membre/);
+    const m = b.membres.lignes.find((x) => x.userId === 'marie')!;
+    await assert.rejects(s.rappeler('paul', m.id), /organisateur/);
+    await assert.rejects(s.utiliserCaution('paul', m.id), /organisateur/);
+    assert.equal(JSON.stringify(b.membres.lignes[0].contact).includes('812345670'), false);
+  });
+
+  it('une demande refusée ou un groupe plein ferme l’adhésion', async () => {
+    const { groupe } = await creer();
+    await s.adherer(paul, groupe.id, '0812345671');
+    const d = (await s.detail('orga', groupe.id)).groupe.demandes[0];
+    await s.decider('orga', d.id, false);
+    await assert.rejects(s.adherer(paul, groupe.id, '0812345671'), /refusé/);
+    await assert.rejects(s.adherer(marie, groupe.id, 'abc'), /invalide/);
+    assert.equal((await s.annuaire('marie')).groupes.length, 1);
+  });
+
+  it('rien n’est crédité sans vérification, ni si le montant diffère', async () => {
+    const { groupe } = await creer();
+    await s.payer('orga', groupe.id, 'caution');
+    const m = b.mvts.lignes[0];
+    await s.retour({ orderNumber: m.commande, status: '0', amount: '10.00' });
+    assert.equal(m.statut, 'en_attente');
+    assert.equal(b.membres.lignes[0].cautionStatut, 'due');
+    await valider('1.00');
+    assert.equal(m.statut, 'echoue');
+    assert.equal(b.membres.lignes[0].cautionStatut, 'due');
+    assert.equal((await s.detail('orga', groupe.id)).groupe.refus, true);
+  });
+
+  it('un double clic ne crée qu’une demande, et 5 par jour au maximum', async () => {
+    const { groupe } = await creer();
+    await s.payer('orga', groupe.id, 'caution');
+    await s.payer('orga', groupe.id, 'caution');
+    assert.equal(demandes.length, 1);
+    await s.abandonner('orga', groupe.id);
+    for (let i = 0; i < 4; i++) {
+      await s.payer('orga', groupe.id, 'caution');
+      await s.abandonner('orga', groupe.id);
+    }
+    assert.equal(demandes.length, 5);
+    await assert.rejects(s.payer('orga', groupe.id, 'caution'), /Trop de demandes/);
+  });
+
+  it('un paiement abandonné puis validé n’est pas redemandé', async () => {
+    const { groupe } = await creer();
+    await s.payer('orga', groupe.id, 'caution');
+    await s.abandonner('orga', groupe.id);
+    etats.set('C1', { etat: 'paye', montant: '10.00' });
+    await s.payer('orga', groupe.id, 'caution');
+    assert.equal(demandes.length, 1);
+    assert.equal(b.membres.lignes[0].cautionStatut, 'payee');
+  });
+
+  it('la caution couvre un impayé après l’échéance, une seule fois', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const m = b.membres.lignes.find((x) => x.userId === 'marie')!;
+    await s.payer('orga', id, 'cotisation');
+    await valider();
+    await s.payer('paul', id, 'cotisation');
+    await valider();
+    await assert.rejects(s.utiliserCaution('orga', m.id), /pas encore passée/);
+    instant += 2 * JOUR;
+    await s.utiliserCaution('orga', m.id);
+    assert.equal(m.cautionStatut, 'utilisee');
+    assert.equal(b.tours.lignes[0].etat, 'a_verser');
+    assert.ok(avis.some((a) => a.userId === 'marie' && /caution a couvert/.test(a.titre)));
+    // Le tour suivant : Marie doit cotiser, puis refaire sa caution.
+    await s.verserTour('Admin', b.tours.lignes[0].id, 'REF123');
+    assert.equal((await s.detail('marie', id)).groupe.aPayer?.genre, 'cotisation');
+    await s.payer('marie', id, 'cotisation');
+    await valider();
+    assert.equal((await s.detail('marie', id)).groupe.aPayer?.genre, 'caution');
+    // Marie ne refait pas sa caution et rate le tour suivant : plus rien ne la couvre.
+    await s.payer('orga', id, 'cotisation');
+    await valider();
+    await s.payer('paul', id, 'cotisation');
+    await valider();
+    await s.verserTour('Admin', b.tours.lignes[1].id, 'REF124');
+    instant += 3 * JOUR;
+    await assert.rejects(s.utiliserCaution('orga', m.id), /plus de caution/);
+    assert.equal(b.tours.lignes[2].etat, 'collecte');
+    await assert.rejects(s.verserTour('Admin', b.tours.lignes[2].id, 'REF125'), /n’attend pas/);
+  });
+
+  it('quitter ou annuler avant le démarrage rend la caution ; après, non', async () => {
+    const { groupe } = await creer();
+    await s.adherer(paul, groupe.id, '0812345671');
+    const d = (await s.detail('orga', groupe.id)).groupe.demandes[0];
+    await s.decider('orga', d.id, true);
+    await s.payer('paul', groupe.id, 'caution');
+    await valider();
+    await s.quitter('paul', groupe.id);
+    const p = b.membres.lignes.find((x) => x.userId === 'paul')!;
+    assert.equal(p.etat, 'parti');
+    assert.equal(p.cautionStatut, 'a_rendre');
+    await assert.rejects(s.quitter('orga', groupe.id), /Annule/);
+    await s.payer('orga', groupe.id, 'caution');
+    await valider();
+    await s.annuler('orga', groupe.id);
+    assert.equal(b.membres.lignes[0].cautionStatut, 'a_rendre');
+
+    const id2 = await complet();
+    await s.demarrer('orga', id2);
+    await assert.rejects(s.quitter('paul', id2), /a démarré/);
+    await assert.rejects(s.annuler('orga', id2), /a démarré/);
+  });
+
+  it('versement par API : compte seulement après vérification, jamais deux fois', async () => {
+    api = true;
+    const id = await complet();
+    await s.demarrer('orga', id);
+    await cotiserTous(id);
+    const t = b.tours.lignes[0];
+    await s.verserTour('Admin', t.id);
+    assert.equal(versements.length, 1);
+    assert.equal(versements[0].montant, 2850);
+    assert.equal(t.etat, 'a_verser');
+    await assert.rejects(s.verserTour('Admin', t.id), /déjà en cours/);
+    assert.equal(versements.length, 1);
+    etats.set('V1', { etat: 'paye', montant: '28.50' });
+    await s.retour({ orderNumber: 'V1' });
+    assert.equal(t.etat, 'verse');
+    assert.equal(b.tours.lignes[1].etat, 'collecte');
+  });
+
+  it('une sortie sans réponse reste en attente, sans jamais expirer', async () => {
+    api = true;
+    const id = await complet();
+    await s.demarrer('orga', id);
+    await cotiserTous(id);
+    await s.verserTour('Admin', b.tours.lignes[0].id);
+    await s.rattraper(instant + 3 * JOUR);
+    assert.equal(b.mvts.lignes.at(-1)!.statut, 'en_attente');
+  });
+
+  it('envoie chaque avis une seule fois, sur le numéro du membre', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const m = b.membres.lignes.find((x) => x.userId === 'paul')!;
+    assert.equal((await s.rappeler('orga', m.id)).nouveau, true);
+    assert.equal((await s.rappeler('orga', m.id)).nouveau, false);
+    instant += JOUR;
+    assert.equal((await s.rappeler('orga', m.id)).nouveau, true);
+    assert.equal(avis.find((a) => a.userId === 'paul' && a.cle.startsWith('tontine:rappel'))?.telephone, '243812345671');
+
+    avis = [];
+    await s.rattraper(instant);
+    await s.rattraper(instant);
+    const relances = avis.filter((a) => a.cle.startsWith('tontine:echeance'));
+    assert.equal(relances.length, 3);
+    await s.payer('paul', id, 'cotisation');
+    await valider();
+    avis = [];
+    instant += JOUR;
+    await s.rattraper(instant);
+    assert.deepEqual(avis.filter((a) => a.cle.includes(':retard')).map((a) => a.userId).sort(), ['marie', 'orga']);
+  });
+
+  it('un membre ne peut plus rejoindre pendant le remboursement de sa caution', async () => {
+    const { groupe } = await creer();
+    await s.adherer(paul, groupe.id, '0812345671');
+    const d = (await s.detail('orga', groupe.id)).groupe.demandes[0];
+    await s.decider('orga', d.id, true);
+    await s.payer('paul', groupe.id, 'caution');
+    await valider();
+    await s.quitter('paul', groupe.id);
+    await assert.rejects(s.adherer(paul, groupe.id, '0812345671'), /remboursement/);
+    await s.rendreCaution(b.membres.lignes.find((x) => x.userId === 'paul')!.id, 'REF777');
+    assert.equal((await s.adherer(paul, groupe.id, '0812345671')).groupe.monEtat, 'demande');
+    assert.equal(b.membres.lignes.find((x) => x.userId === 'paul')!.cautionStatut, 'due');
+  });
+});

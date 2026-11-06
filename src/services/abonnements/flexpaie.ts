@@ -129,6 +129,24 @@ export const Flexpaie = {
     return { commande: r.orderNumber, message: r.message ?? '' };
   },
 
+  /**
+   * Envoie de l'argent vers un numéro. Service de versement cité par des bibliothèques tierces : champs à confirmer avec FlexPaie,
+   * d'où TONTINES_VERSEMENT_API, fermé par défaut.
+   */
+  async verser(p: { telephone: string; reference: string; montant: number; devise: string; retour: string }) {
+    const r = await appel<{ code?: string | number; message?: string; orderNumber?: string }>('/merchantPayOutService', {
+      merchant: process.env.FLEXPAIE_MARCHAND,
+      type: '1',
+      phone: p.telephone,
+      reference: p.reference,
+      amount: montantTexte(p.montant),
+      currency: p.devise,
+      callbackUrl: p.retour,
+    });
+    if (String(r.code) !== '0' || !r.orderNumber) throw erreurFlexpaie(r.message, 'Versement refusé par FlexPaie');
+    return { commande: r.orderNumber, message: r.message ?? '' };
+  },
+
   /** Revérifie une commande auprès de FlexPaie. */
   async verifier(commande: string) {
     const r = await appel<{ code?: string | number; message?: string; transaction?: { status?: string | number; amount?: string; currency?: string; reference?: string } | null }>(`/check/${encodeURIComponent(commande)}`);

@@ -19,6 +19,7 @@ import integrationRoutes from './routes/integration.routes.js';
 import justificatifRoutes from './routes/justificatif.routes.js';
 import contactRoutes from './routes/contact.routes.js';
 import cotisationRoutes from './routes/cotisation.routes.js';
+import tontineRoutes from './routes/tontine.routes.js';
 import smsRoutes from './routes/sms.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import syncRoutes from './routes/sync.routes.js';
@@ -64,6 +65,7 @@ app.use('/api/justificatifs', justificatifRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/cotisations', cotisationRoutes);
+app.use('/api/tontines', tontineRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route introuvable' });

@@ -17,6 +17,12 @@ export const maxParJour = (env: Record<string, string | undefined> = process.env
   return Number.isInteger(n) && n > 0 ? n : 5;
 };
 
+/** SMS de demandes de cotisation par organisateur sur 24 h. */
+export const maxCotisationsParJour = (env: Record<string, string | undefined> = process.env) => {
+  const n = Number(env.COTISATIONS_SMS_PAR_JOUR);
+  return Number.isInteger(n) && n > 0 ? n : 50;
+};
+
 /** SMS d'inscription sur 24 h, tous comptes confondus. */
 export const maxInscriptionsParJour = (env: Record<string, string | undefined> = process.env) => {
   const n = Number(env.SMS_INSCRIPTIONS_PAR_JOUR);
@@ -101,8 +107,27 @@ export const SmsService = {
     if (!cfg) return false;
     const depuis = new Date(Date.now() - JOUR_MS);
     // Un envoi refusé par le service (sans identifiant de message) n'a rien coûté : il ne compte pas dans la limite.
-    if (!placeSms(await prisma.envoiSms.count({ where: { userId, createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } }), maxParJour(), secondaire)) return false;
+    if (!placeSms(await prisma.envoiSms.count({ where: { userId, genre: 'compte', createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } }), maxParJour(), secondaire)) return false;
     const envoi = await prisma.envoiSms.create({ data: { userId } });
+    try {
+      const r = await Asmsc.envoyer(cfg, { telephone, texte, uid: envoi.id, retour: adresseRetour() });
+      await prisma.envoiSms.update({ where: { id: envoi.id }, data: { messageId: r.messageId } });
+      return true;
+    } catch (e) {
+      console.error('SMS', (e as Error).message);
+      await prisma.envoiSms.update({ where: { id: envoi.id }, data: { statut: 'echec' } });
+      return false;
+    }
+  },
+
+  /** Une demande de cotisation envoyée à un groupe : sa propre limite, pour ne pas priver l'organisateur de ses rappels. */
+  async envoyerCotisation(userId: string, telephone: string, texte: string): Promise<boolean> {
+    const cfg = configSms();
+    if (!cfg) return false;
+    const depuis = new Date(Date.now() - JOUR_MS);
+    const envoyes = await prisma.envoiSms.count({ where: { userId, genre: 'cotisation', createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } });
+    if (envoyes >= maxCotisationsParJour()) return false;
+    const envoi = await prisma.envoiSms.create({ data: { userId, genre: 'cotisation' } });
     try {
       const r = await Asmsc.envoyer(cfg, { telephone, texte, uid: envoi.id, retour: adresseRetour() });
       await prisma.envoiSms.update({ where: { id: envoi.id }, data: { messageId: r.messageId } });

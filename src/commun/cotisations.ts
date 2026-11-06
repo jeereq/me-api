@@ -95,3 +95,34 @@ export const lienSms = (telephone: string, texte: string) => `sms:+${telephone}?
 export function numeroMasque(telephone: string) {
   return telephone.length < 8 ? '•••' : `${telephone.slice(0, 3)}•••••${telephone.slice(-4)}`;
 }
+
+/* Tontines : chaque tour, tous cotisent et un membre reçoit la cagnotte. */
+
+export type RythmeTontine = 'quotidien' | 'hebdomadaire' | 'mensuel';
+/** Commission de la plateforme : 5 %, retenus sur la cagnotte. */
+export const COMMISSION_BPS = 500;
+
+/** Pour 10 membres à 10 $ : 100 $ collectés, 5 $ de commission, 95 $ versés. Le tout en centimes. */
+export function repartitionCagnotte(montant: number, membres: number, bps: number = COMMISSION_BPS) {
+  const brut = montant * membres;
+  const commission = Math.round((brut * bps) / 10000);
+  return { brut, commission, net: brut - commission };
+}
+
+/** Les jours limites des tours : un jour, une semaine ou un mois après le précédent. Le 31 devient le dernier jour d'un mois plus court. */
+export function echeancesTontine(rythme: RythmeTontine, debut: string, tours: number) {
+  const d = enDate(debut);
+  const jour = d.getUTCDate();
+  return Array.from({ length: tours }, (_, i) => {
+    const n = i + 1;
+    if (rythme === 'quotidien') return enJour(new Date(d.getTime() + n * JOUR_MS));
+    if (rythme === 'hebdomadaire') return enJour(new Date(d.getTime() + 7 * n * JOUR_MS));
+    const fin = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n + 1, 0));
+    return enJour(new Date(Date.UTC(fin.getUTCFullYear(), fin.getUTCMonth(), Math.min(jour, fin.getUTCDate()))));
+  });
+}
+
+/** « 10 USD par mois », « par jour », « par semaine ». */
+export function montantTontine(centimes: number, devise: string, rythme: RythmeTontine) {
+  return `${montantCotisation(centimes, devise)} ${rythme === 'mensuel' ? 'par mois' : rythme === 'hebdomadaire' ? 'par semaine' : 'par jour'}`;
+}
