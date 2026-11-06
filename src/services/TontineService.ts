@@ -29,5 +29,5 @@ export const TontineService = creerTontines({
   avertir: (userId, telephone, avis, seulementApp) => Envois.avertir(userId, telephone, avis, seulementApp),
   comptesApprouves: (ids) => ApprobationService.comptesApprouves(ids),
   adresseApp,
-  envoyerInvitation: (userId, c) => Envois.collecte(userId, c),
+  envoyerInvitation: (userId, c) => Envois.invitation(userId, c),
 });

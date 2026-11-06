@@ -1,6 +1,6 @@
 /**
- * Cotisations de groupe : périodes, ce qu'un membre doit encore, et le message de demande.
- * Commun au serveur (page publique, paiement) et à l'app (suivi, WhatsApp, SMS).
+ * Groupes de cotisation et anciennes collectes : périodes, échéances, commission et montants.
+ * Commun au serveur et à l'app.
  */
 
 export type RythmeCotisation = 'unique' | 'hebdomadaire' | 'mensuel';
@@ -47,22 +47,11 @@ export function periodesDepuis(rythme: RythmeCotisation, debut: string, jour: st
   return liste;
 }
 
-/** Une période possible pour ce rythme ? */
-export function periodeValide(rythme: RythmeCotisation, debut: string, jour: string, periode: string) {
-  return periodesDepuis(rythme, debut, jour).includes(periode);
-}
-
 /** « novembre 2026 », « semaine du 2 novembre », ou rien pour une collecte unique. */
 export function libellePeriode(periode: string) {
   if (periode === PERIODE_UNIQUE) return '';
   const [a, m, j] = periode.split('-').map(Number);
   return j ? `semaine du ${j === 1 ? '1er' : j} ${MOIS[m - 1]}` : `${MOIS[m - 1]} ${a}`;
-}
-
-/** La plus ancienne période encore à payer, ou null si le membre est à jour. */
-export function premierePeriodeDue(periodes: string[], payees: Iterable<string>) {
-  const faites = new Set(payees);
-  return periodes.find((p) => !faites.has(p)) ?? null;
 }
 
 /** 1000 → « 10 USD », 1050 → « 10,50 USD », 5000000 → « 50 000 CDF ». */
@@ -80,18 +69,7 @@ export function montantEtRythme(centimes: number, devise: string, rythme: Rythme
 /** Le premier mot du nom : « Marie » pour « Marie Kabila ». */
 export const prenomDe = (nom: string) => nom.trim().split(/\s+/)[0] ?? '';
 
-/** Ce que l'organisateur envoie au membre. Sans lien, le paiement en ligne n'est pas ouvert. */
-export function messageCotisation(c: { nom: string; titre: string; montant: number; devise: string; periode: string; lien?: string | null }) {
-  const quand = libellePeriode(c.periode);
-  const debut = `Bonjour ${prenomDe(c.nom)}, cotisation « ${c.titre} »${quand ? ` de ${quand}` : ''} : ${montantCotisation(c.montant, c.devise)}.`;
-  return c.lien ? `${debut}\nPaie ici : ${c.lien}` : debut;
-}
-
-/** Le numéro sans « + » (243812345678), prêt pour WhatsApp. */
-export const lienWhatsapp = (telephone: string, texte: string) => `https://wa.me/${telephone}?text=${encodeURIComponent(texte)}`;
-export const lienSms = (telephone: string, texte: string) => `sms:+${telephone}?body=${encodeURIComponent(texte)}`;
-
-/** Pour la page publique et les traces de paiement : 243•••••5678. */
+/** Pour les écrans et les traces de paiement : 243•••••5678. */
 export function numeroMasque(telephone: string) {
   return telephone.length < 8 ? '•••' : `${telephone.slice(0, 3)}•••••${telephone.slice(-4)}`;
 }

@@ -119,15 +119,6 @@ export const retourPaiementLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60,
 /** Retour de livraison d'aSMSC (adresse publique, protégée par sa clé). */
 export const retourSmsLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false, message });
 
-const jetonKey = (req: Request) => `jeton:${String(req.params.jeton ?? '').slice(0, 40)}`;
-/** Page de paiement d'une cotisation, ouverte sans compte : elle se rafraîchit pendant la validation. */
-export const pageCotisationLimiter = rateLimit({ windowMs: 60 * 1000, limit: 40, standardHeaders: 'draft-7', legacyHeaders: false, message });
-/** Chaque demande fait sonner un téléphone : 3 par lien en 10 min, 20 par IP en une heure. */
-export const payerCotisationLimiter = [
-  rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, keyGenerator: jetonKey, standardHeaders: 'draft-7', legacyHeaders: false, message }),
-  rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, message }),
-];
-
 const compteKey = (req: Request) => `compte:${req.user?.id ?? ipKeyGenerator(req.ip ?? '')}`;
 /** Chaque demande fait sonner un téléphone : 6 par compte en 10 minutes. */
 export const payerTontineLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 6, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });

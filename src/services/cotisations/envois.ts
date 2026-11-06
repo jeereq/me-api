@@ -43,8 +43,8 @@ export const Envois = {
     return { nouveau: true, mail, sms };
   },
 
-  /** Une demande de collecte envoyée par Me à une personne sans compte, selon les canaux du système. */
-  async collecte(organisateurId: string, c: { email?: string | null; telephone: string; titre: string; texte: string }) {
+  /** Une invitation à un groupe envoyée par Me à une personne pas encore inscrite, selon les canaux du système. */
+  async invitation(organisateurId: string, c: { email?: string | null; telephone: string; titre: string; texte: string }) {
     const canaux = await canauxSysteme();
     let mail = false;
     if (canaux.mail && c.email) {

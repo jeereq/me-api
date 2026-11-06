@@ -17,7 +17,7 @@ export const maxParJour = (env: Record<string, string | undefined> = process.env
   return Number.isInteger(n) && n > 0 ? n : 5;
 };
 
-/** SMS de demandes de cotisation par organisateur sur 24 h. */
+/** SMS d'invitation à un groupe par organisateur sur 24 h. */
 export const maxCotisationsParJour = (env: Record<string, string | undefined> = process.env) => {
   const n = Number(env.COTISATIONS_SMS_PAR_JOUR);
   return Number.isInteger(n) && n > 0 ? n : 50;
@@ -120,7 +120,7 @@ export const SmsService = {
     }
   },
 
-  /** Une demande de cotisation envoyée à un groupe : sa propre limite, pour ne pas priver l'organisateur de ses rappels. */
+  /** Une invitation envoyée pour un groupe : sa propre limite, pour ne pas priver l'organisateur de ses rappels. */
   async envoyerCotisation(userId: string, telephone: string, texte: string): Promise<boolean> {
     const cfg = configSms();
     if (!cfg) return false;
