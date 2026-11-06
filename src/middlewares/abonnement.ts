@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 
-import { aDroit, etatAbonnement, formuleDe, messageReserve, SELECT_ABONNEMENT, type Fonction } from '../services/abonnements/offres.js';
+import { aDroit, etatAbonnement, formuleDe, messageReserve, photoManquante, SELECT_ABONNEMENT, type Fonction } from '../services/abonnements/offres.js';
 import { prisma } from '../utils/prisma.js';
 
 /**
@@ -11,8 +11,13 @@ export const requireFonction =
   (fonction: Fonction) =>
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const u = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id }, select: SELECT_ABONNEMENT });
+      const u = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id }, select: { ...SELECT_ABONNEMENT, photoUrl: true } });
       if (aDroit(etatAbonnement(u), fonction)) {
+        // Les options de Finances demandent une photo de profil, pour Finances, Pro et l'essai.
+        if (photoManquante(u, fonction)) {
+          res.status(403).json({ error: 'Ajoute ta photo de profil pour utiliser cette option.', code: 'PHOTO_REQUISE', fonction });
+          return;
+        }
         next();
         return;
       }

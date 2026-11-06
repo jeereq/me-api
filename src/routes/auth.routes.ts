@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { AuthController } from '../controllers/AuthController.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
-import { authLimiter, mailLimiter, inscriptionSmsLimiter } from '../middlewares/rateLimits.js';
+import { authLimiter, mailLimiter, inscriptionSmsLimiter, photoProfilLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
 import { codeSchema, confirmerSmsSchema, identifiantSchema, jetonSchema, loginSchema, registerSchema, reinitialiserSchema, supprimerCompteSchema, updateMeSchema } from '../validators/schemas.js';
@@ -22,6 +22,7 @@ router.get('/google/callback', asyncHandler(AuthController.googleCallback));
 router.post('/google/echange', authLimiter, validateRequest(codeSchema), asyncHandler(AuthController.googleEchange));
 router.get('/me', authenticateJWT, asyncHandler(AuthController.me));
 router.patch('/me', authenticateJWT, validateRequest(updateMeSchema), asyncHandler(AuthController.updateMe));
+router.post('/me/photo', authenticateJWT, photoProfilLimiter, asyncHandler(AuthController.photo));
 router.get('/me/export', authenticateJWT, asyncHandler(AuthController.exporter));
 router.post('/me/deconnecter-tout', authenticateJWT, asyncHandler(AuthController.deconnecterTout));
 router.delete('/me', authenticateJWT, validateRequest(supprimerCompteSchema), asyncHandler(AuthController.supprimer));

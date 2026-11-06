@@ -82,8 +82,8 @@ async function appeler(c: ConfigCloudinary, chemin: string, champs: Record<strin
 }
 
 export const Cloudinary = {
-  async deposer(c: ConfigCloudinary, fichier: { contenu: Blob; nom: string }, dossier: string, genre: GenreRessource): Promise<Depot> {
-    const d = await appeler(c, `${genre}/upload`, { folder: dossier, type: 'authenticated' }, fichier);
+  async deposer(c: ConfigCloudinary, fichier: { contenu: Blob; nom: string }, dossier: string, genre: GenreRessource, acces: AccesRessource = 'authenticated'): Promise<Depot> {
+    const d = await appeler(c, `${genre}/upload`, { folder: dossier, type: acces }, fichier);
     return {
       publicId: String(d.public_id),
       url: String(d.secure_url),

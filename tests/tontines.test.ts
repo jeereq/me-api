@@ -4,10 +4,10 @@ import { beforeEach, describe, it } from 'node:test';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 
-const { echeancesTontine, repartitionCagnotte } = await import('../src/commun/cotisations.js');
-const { tontineAdhererSchema, tontineCreerSchema } = await import('../src/validators/schemas.js');
+const { echeancesTontine, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
+const { tontineAdhererSchema, tontineCreerSchema, tontineRappelsSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
-const { FONCTIONS_FINANCES, formuleDe } = await import('../src/services/abonnements/offres.js');
+const { FONCTIONS_FINANCES, formuleDe, photoManquante } = await import('../src/services/abonnements/offres.js');
 const await_module = await import('../src/services/cotisations/approbations.js');
 type Deps = import('../src/services/cotisations/tontines.js').DepsTontines;
 type Ligne = Record<string, any>;
@@ -62,7 +62,7 @@ function baseMemoire() {
   const complet = (t: Ligne) => ({
     ...t,
     organisateur: roles[t.organisateurId] ?? null,
-    membres: membres.lignes.filter((m) => m.tontineId === t.id).map((m) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...m })),
+    membres: membres.lignes.filter((m) => m.tontineId === t.id).map((m) => ({ etat: 'demande', cautionStatut: 'due', rang: null, user: null, ...m })),
     tours: tours.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => a.numero - b.numero),
   });
   const brut = (l: Ligne) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...l });
@@ -127,6 +127,24 @@ describe('calculs des tontines', () => {
   });
 });
 
+describe('rappels de groupe', () => {
+  it('sont dus aux jours choisis', () => {
+    const r = { avant: [3, 0], apres: [1], mail: true, sms: false };
+    assert.equal(rappelDuJour(r, '2026-11-07', '2026-11-10'), 'avant:3');
+    assert.equal(rappelDuJour(r, '2026-11-08', '2026-11-10'), null);
+    assert.equal(rappelDuJour(r, '2026-11-10', '2026-11-10'), 'avant:0');
+    assert.equal(rappelDuJour(r, '2026-11-11', '2026-11-10'), 'apres:1');
+    assert.equal(rappelDuJour(r, '2026-11-12', '2026-11-10'), null);
+  });
+  it('gardent toujours au moins un rappel', () => {
+    assert.deepEqual(rappelsDe(null), RAPPELS_DEFAUT);
+    assert.deepEqual(rappelsDe({ avant: [], apres: [], mail: false, sms: false }), { ...RAPPELS_DEFAUT, mail: false, sms: false });
+    assert.deepEqual(rappelsDe({ avant: [99, 3], apres: [99], mail: true, sms: true }), { avant: [3], apres: [], mail: true, sms: true });
+    assert.equal(tontineRappelsSchema.safeParse({ params: { id: 'x' }, body: { avant: [], apres: [], mail: true, sms: true } }).success, false);
+    assert.equal(tontineRappelsSchema.safeParse({ params: { id: 'x' }, body: { avant: [1], apres: [], mail: false, sms: false } }).success, true);
+  });
+});
+
 describe('accès aux cotisations', () => {
   it('créer, rejoindre et demander l’approbation exigent au moins Finances ; payer reste ouvert', () => {
     const routes = readFileSync(new URL('../src/routes/tontine.routes.ts', import.meta.url), 'utf8');
@@ -135,6 +153,12 @@ describe('accès aux cotisations', () => {
       assert.ok(ligne?.includes("requireFonction('cotisations')"), r);
     }
     assert.equal(routes.split('\n').find((l) => l.includes("post('/:id/payer',"))?.includes('requireFonction'), false);
+  });
+  it('les options de Finances demandent une photo de profil, sauf pour les admins', () => {
+    assert.equal(photoManquante({ role: 'UTILISATEUR', photoUrl: null }, 'cotisations'), true);
+    assert.equal(photoManquante({ role: 'UTILISATEUR', photoUrl: 'https://x/p.jpg' }, 'cotisations'), false);
+    assert.equal(photoManquante({ role: 'ADMIN', photoUrl: null }, 'cotisations'), false);
+    assert.equal(photoManquante({ role: 'UTILISATEUR', photoUrl: null }, 'assistant'), false);
   });
   it('Gratuit n’y a pas droit, Finances et Pro oui', () => {
     assert.equal(formuleDe('cotisations'), 'finances');
@@ -150,7 +174,7 @@ describe('une tontine de bout en bout', () => {
   let etats: Map<string, { etat: 'paye' | 'echoue' | 'en_attente'; montant?: string; devise?: string }>;
   let ouvert: (role: string | null) => boolean;
   let api: boolean;
-  let avis: { userId: string; telephone: string | null; cle: string; titre: string; seul?: boolean }[];
+  let avis: { userId: string; telephone: string | null; cle: string; titre: string; seul?: boolean; mode?: unknown }[];
   let vus: Set<string>;
   let instant: number;
   let approuves: Set<string>;
@@ -195,10 +219,10 @@ describe('une tontine de bout en bout', () => {
       flexpaiePret: () => true,
       adresseServeur: () => 'https://api.test',
       exigerNumero: async () => {},
-      avertir: async (userId, telephone, a, seul) => {
+      avertir: async (userId, telephone, a, mode) => {
         const nouveau = !vus.has(`${userId}|${a.cle}`);
         vus.add(`${userId}|${a.cle}`);
-        if (nouveau) avis.push({ userId, telephone, cle: a.cle, titre: a.titre, seul });
+        if (nouveau) avis.push({ userId, telephone, cle: a.cle, titre: a.titre, seul: mode === true, mode });
         return { nouveau, mail: nouveau, sms: nouveau };
       },
       comptesApprouves: async (ids) => new Set(ids.filter((x) => approuves.has(x))),
@@ -469,7 +493,7 @@ describe('une tontine de bout en bout', () => {
     avis = [];
     instant += JOUR;
     await s.rattraper(instant);
-    assert.deepEqual(avis.filter((a) => a.cle.includes(':retard')).map((a) => a.userId).sort(), ['marie', 'orga']);
+    assert.deepEqual(avis.filter((a) => a.cle.includes(':apres:1')).map((a) => a.userId).sort(), ['marie', 'orga']);
   });
 
   it('annuaire : seuls les groupes publics des comptes approuvés sont visibles', async () => {
@@ -608,6 +632,27 @@ describe('une tontine de bout en bout', () => {
     assert.equal(m.etat, 'refuse');
     assert.equal(m.cautionStatut, 'a_rendre');
     await assert.rejects(s.rejoindreParInvitation(invite, code, '0812345673'), /retiré/);
+  });
+
+  it('rappels obligatoires : réglés par l’initiateur, envoyés à l’heure, sur ses canaux', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    await assert.rejects(s.reglerRappels('paul', id, { avant: [3], apres: [], mail: false, sms: true }), /organisateur/);
+    const r = await s.reglerRappels('orga', id, { avant: [0], apres: [], mail: false, sms: true });
+    assert.deepEqual(r.groupe.rappels, { avant: [0], apres: [], mail: false, sms: true });
+    avis = [];
+    // Échéance du tour 1 : le 7 novembre. Pas de rappel la veille, ni avant 8 h (heure de Kinshasa).
+    await s.rattraper(Date.UTC(2026, 10, 6, 15));
+    assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 0);
+    await s.rattraper(Date.UTC(2026, 10, 7, 5));
+    assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 0);
+    instant = Date.UTC(2026, 10, 7, 8);
+    await s.rattraper(instant);
+    const envoyes = avis.filter((a) => a.cle.startsWith('tontine:echeance'));
+    assert.equal(envoyes.length, 3);
+    assert.deepEqual(envoyes[0].mode, { mail: false, sms: true });
+    await s.rattraper(instant);
+    assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 3);
   });
 
   it('un membre ne peut plus rejoindre pendant le remboursement de sa caution', async () => {

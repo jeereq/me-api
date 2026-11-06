@@ -71,6 +71,9 @@ export const TontineController = {
     const u = await compte(req);
     res.json(await A.decider(u.nom, p(req.params.userId), req.body.approuve, req.body.motif));
   },
+  reglerRappels: async (req: Request, res: Response) => {
+    res.json(await S.reglerRappels(req.user!.id, p(req.params.id), req.body));
+  },
   quitter: async (req: Request, res: Response) => {
     res.json(await S.quitter(req.user!.id, p(req.params.id)));
   },

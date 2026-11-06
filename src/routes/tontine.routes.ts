@@ -6,7 +6,7 @@ import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js
 import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
+import { tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
@@ -40,6 +40,7 @@ router.post('/membres/:membreId/caution', validateRequest(tontineMembreIdSchema)
 router.get('/:id', validateRequest(tontineIdSchema), asyncHandler(C.detail));
 router.post('/:id/adherer', requireFonction('cotisations'), validateRequest(tontineAdhererSchema), asyncHandler(C.adherer));
 router.post('/:id/inviter', envoiCotisationLimiter, validateRequest(tontineInviterSchema), asyncHandler(C.inviter));
+router.post('/:id/rappels', validateRequest(tontineRappelsSchema), asyncHandler(C.reglerRappels));
 router.post('/:id/quitter', validateRequest(tontineIdSchema), asyncHandler(C.quitter));
 router.post('/:id/annuler', validateRequest(tontineIdSchema), asyncHandler(C.annuler));
 router.post('/:id/demarrer', validateRequest(tontineIdSchema), asyncHandler(C.demarrer));

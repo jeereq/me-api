@@ -108,6 +108,28 @@ export function echeancesObjectif(rythme: RythmeObjectif, debut: string, fin: st
   return [...dates, fin];
 }
 
+/** Rappels obligatoires d'un groupe : l'initiateur règle les jours et les canaux. L'app prévient toujours. */
+export type RappelsGroupe = { avant: number[]; apres: number[]; mail: boolean; sms: boolean };
+export const JOURS_AVANT = [7, 3, 1, 0];
+export const JOURS_APRES = [1, 3, 7];
+export const RAPPELS_DEFAUT: RappelsGroupe = { avant: [1, 0], apres: [1], mail: true, sms: true };
+
+/** Un rappel est dû aujourd'hui ? « avant:1 », « apres:3 », ou null. */
+export function rappelDuJour(r: RappelsGroupe, jour: string, echeance: string) {
+  const ecart = Math.round((enDate(echeance).getTime() - enDate(jour).getTime()) / JOUR_MS);
+  if (ecart >= 0) return r.avant.includes(ecart) ? `avant:${ecart}` : null;
+  return r.apres.includes(-ecart) ? `apres:${-ecart}` : null;
+}
+
+/** Un réglage reçu : au moins un rappel avant l'échéance, seulement les jours proposés. */
+export function rappelsDe(brut: unknown): RappelsGroupe {
+  const b = (brut ?? {}) as Partial<RappelsGroupe>;
+  const avant = (Array.isArray(b.avant) ? b.avant : []).filter((j) => JOURS_AVANT.includes(j));
+  const apres = (Array.isArray(b.apres) ? b.apres : []).filter((j) => JOURS_APRES.includes(j));
+  if (!avant.length) return { ...RAPPELS_DEFAUT, mail: b.mail !== false, sms: b.sms !== false };
+  return { avant, apres, mail: b.mail !== false, sms: b.sms !== false };
+}
+
 /** « 10 USD par mois », « par jour », « par semaine », « une fois ». */
 export function montantTontine(centimes: number, devise: string, rythme: RythmeObjectif) {
   const quand = { mensuel: 'par mois', hebdomadaire: 'par semaine', quotidien: 'par jour', unique: 'une fois' }[rythme];
