@@ -69,7 +69,7 @@ export const patchEspaceSchema = z.object({ body: differences });
 export const putConfigSchema = z.object({ body: z.object({ data: document }) });
 
 export const membreParamsSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
-export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ role: z.enum(['ADMIN', 'UTILISATEUR']) }) });
+export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ role: z.enum(['ADMIN', 'COMMERCIAL', 'UTILISATEUR']), modules: z.array(z.enum(['comptes', 'offres', 'verifications', 'versements'])).max(4).optional() }) });
 
 export const assistantSchema = z.object({
   body: z.object({

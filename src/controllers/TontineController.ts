@@ -13,6 +13,8 @@ const compte = async (req: Request) => {
   return u;
 };
 
+const acteur = (req: Request) => ({ id: req.user!.id, nom: req.user!.nom || req.user!.email, admin: req.user!.role === 'ADMIN' });
+
 export const TontineController = {
   mesGroupes: async (req: Request, res: Response) => {
     res.json(await S.mesGroupes(req.user!.id));
@@ -68,8 +70,8 @@ export const TontineController = {
     res.set({ 'Cache-Control': 'no-store' }).json(await A.piece(p(req.params.userId)));
   },
   adminDecider: async (req: Request, res: Response) => {
-    const u = await compte(req);
-    res.json(await A.decider(u.nom, p(req.params.userId), req.body.approuve, req.body.motif));
+    if (req.params.userId === req.user!.id && req.user!.role !== 'ADMIN') throw new HttpError(403, 'Un autre responsable doit valider ton compte.');
+    res.json(await A.decider(req.user!.nom || req.user!.email, p(req.params.userId), req.body.approuve, req.body.motif));
   },
   reglerRappels: async (req: Request, res: Response) => {
     res.json(await S.reglerRappels(req.user!.id, p(req.params.id), req.body));
@@ -105,10 +107,9 @@ export const TontineController = {
     res.json(await S.resumeAdmin());
   },
   adminVerser: async (req: Request, res: Response) => {
-    const u = await compte(req);
-    res.json(await S.verserTour(u.nom, p(req.params.tourId), req.body.preuve));
+    res.json(await S.verserTour(acteur(req), p(req.params.tourId), req.body.preuve));
   },
   adminRendre: async (req: Request, res: Response) => {
-    res.json(await S.rendreCaution(p(req.params.membreId), req.body.preuve));
+    res.json(await S.rendreCaution(acteur(req), p(req.params.membreId), req.body.preuve));
   },
 };

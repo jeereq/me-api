@@ -113,7 +113,7 @@ export const formuleDe = (f: Fonction): Formule => (f in FONCTIONS_FINANCES ? 'f
 
 /** Champs du compte qui décrivent son abonnement (colonnes de User). */
 export type ChampsAbonnement = {
-  role?: 'ADMIN' | 'UTILISATEUR';
+  role?: 'ADMIN' | 'COMMERCIAL' | 'UTILISATEUR';
   essaiJusqua?: Date | null;
   abonnementFormule?: string | null;
   /** Palier de réunions de Pro (0 à 3). */

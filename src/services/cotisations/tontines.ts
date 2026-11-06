@@ -22,8 +22,11 @@ const MAX_GROUPES = 20;
 /** Au-delà, une cotisation à raison précise compte trop de périodes. */
 const MAX_TOURS_OBJECTIF = 366;
 const COMPTE_A_APPROUVER = 'COMPTE_A_APPROUVER';
+const AUTRE_RESPONSABLE = 'Un autre responsable doit valider ce geste.';
 
 type Contact = { nom: string; telephone: string };
+/** Qui valide une sortie d'argent. */
+export type Acteur = { id: string; nom: string; admin: boolean };
 export type CompteTontine = { id: string; nom: string; fuseau: string; telephone: string | null };
 type Compte = CompteTontine;
 export type CreationTontine = {
@@ -358,8 +361,8 @@ export function creerTontines(d: DepsTontines) {
   }
 
   /** Une sortie d'argent après validation de l'admin : API FlexPaie si elle est ouverte, sinon preuve d'un versement fait hors de Me. */
-  async function sortie(c: { genre: 'versement' | 'caution_rendue'; tontineId: string; membreId: string | null; tourId: string | null; montant: number; devise: string; telephone: string; preuve?: string }) {
-    const base = { reference: reference(), tontineId: c.tontineId, membreId: c.membreId, tourId: c.tourId, genre: c.genre, montant: c.montant, devise: c.devise, telephone: numeroMasque(c.telephone) };
+  async function sortie(c: { acteur: string; genre: 'versement' | 'caution_rendue'; tontineId: string; membreId: string | null; tourId: string | null; montant: number; devise: string; telephone: string; preuve?: string }) {
+    const base = { reference: reference(), tontineId: c.tontineId, membreId: c.membreId, tourId: c.tourId, genre: c.genre, montant: c.montant, devise: c.devise, telephone: numeroMasque(c.telephone), validePar: c.acteur };
     if (!d.versementApi()) {
       if (!c.preuve) throw new HttpError(400, 'Indique la référence du versement.');
       try {
@@ -742,7 +745,7 @@ export function creerTontines(d: DepsTontines) {
     resumeAdmin,
 
     /** Validation de l'admin : seul ce geste fait sortir l'argent d'un tour. */
-    async verserTour(adminNom: string, tourId: string, preuve?: string) {
+    async verserTour(acteur: Acteur, tourId: string, preuve?: string) {
       const tour = await d.db.tontineTour.findUnique({ where: { id: tourId } });
       if (!tour) throw new HttpError(404, 'Tour introuvable.');
       if (tour.etat !== 'a_verser') throw new HttpError(409, 'Ce tour n’attend pas de versement.');
@@ -750,19 +753,22 @@ export function creerTontines(d: DepsTontines) {
       const b = t.membres.find((m) => m.id === tour.beneficiaireId);
       const telephone = estObjectif(t) ? (beneficiaireDe(t)?.telephone ?? '') : b ? contactDe(b).telephone : '';
       if (!telephone) throw new HttpError(409, 'Le bénéficiaire n’a plus de numéro.');
-      await d.db.tontineTour.update({ where: { id: tourId }, data: { valideParNom: adminNom, valideLe: new Date(maintenant()) } });
-      await sortie({ genre: 'versement', tontineId: t.id, membreId: b?.id ?? null, tourId, montant: tour.net, devise: t.devise, telephone, preuve });
+      // Pas de validation pour soi-même : ni sa propre cagnotte, ni celle d'un groupe qu'on organise pour une raison précise.
+      if (!acteur.admin && (b?.userId === acteur.id || (estObjectif(t) && t.organisateurId === acteur.id))) throw new HttpError(403, AUTRE_RESPONSABLE);
+      await d.db.tontineTour.update({ where: { id: tourId }, data: { valideParNom: acteur.nom, valideLe: new Date(maintenant()) } });
+      await sortie({ acteur: acteur.nom, genre: 'versement', tontineId: t.id, membreId: b?.id ?? null, tourId, montant: tour.net, devise: t.devise, telephone, preuve });
       return resumeAdmin();
     },
 
-    async rendreCaution(membreId: string, preuve?: string) {
+    async rendreCaution(acteur: Acteur, membreId: string, preuve?: string) {
       const m = await d.db.tontineMembre.findUnique({ where: { id: membreId } });
       if (!m) throw new HttpError(404, 'Membre introuvable.');
       if (m.cautionStatut !== 'a_rendre') throw new HttpError(409, 'Cette caution n’est pas à rendre.');
+      if (!acteur.admin && m.userId === acteur.id) throw new HttpError(403, AUTRE_RESPONSABLE);
       const t = await charger(m.tontineId);
       const { telephone } = contactDe(m);
       if (!telephone) throw new HttpError(409, 'Le membre n’a plus de numéro.');
-      await sortie({ genre: 'caution_rendue', tontineId: t.id, membreId: m.id, tourId: null, montant: t.montant, devise: t.devise, telephone, preuve });
+      await sortie({ acteur: acteur.nom, genre: 'caution_rendue', tontineId: t.id, membreId: m.id, tourId: null, montant: t.montant, devise: t.devise, telephone, preuve });
       return resumeAdmin();
     },
 
