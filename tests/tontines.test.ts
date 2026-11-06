@@ -669,7 +669,7 @@ describe('une tontine de bout en bout', () => {
   });
 
   it('annuaire : filtre par type, rythme, devise et montant', async () => {
-    const base = { places: 3, mode: 'rotation', visibilite: 'public' };
+    const base = { places: 3, mode: 'rotation', visibilite: 'public' } as const;
     await s.creer(orga, { ...base, nom: 'Petit', montant: 500, devise: 'USD', rythme: 'quotidien' });
     await s.creer(orga, { ...base, nom: 'Grand', montant: 5000, devise: 'USD', rythme: 'mensuel' });
     await s.creer(orga, { ...base, nom: 'Franc', montant: 500000, devise: 'CDF', rythme: 'mensuel' });
