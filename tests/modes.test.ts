@@ -79,7 +79,7 @@ describe('rappelsDuJour avec des réglages personnalisés', () => {
   });
   it('rappels à l’avance et en retard pour le mode normal', () => {
     const cfg: ConfigRappels = { modes: { normal: { avant: [2], retard: true, heure: '10:30' } } };
-    assert.deepEqual(sansBriefing(e, cfg, '2026-10-24').map((x) => [x.quand, x.titre]), [['2026-10-24T10:30', 'Dans 2 j : Payer la facture']]);
+    assert.deepEqual(sansBriefing(e, cfg, '2026-10-24').map((x) => [x.quand, x.titre]), [['2026-10-24T10:30', 'Dans 2 jours : Payer la facture']]);
     assert.deepEqual(sansBriefing(e, cfg, '2026-10-28').map((x) => [x.quand, x.titre]), [['2026-10-28T10:30', 'En retard : Payer la facture']]);
     assert.equal(sansBriefing(e, cfg, '2026-10-25').length, 0);
   });
