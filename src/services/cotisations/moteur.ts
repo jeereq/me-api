@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { libellePeriode, montantCotisation, numeroMasque, periodeDuJour, periodesDepuis, premierePeriodeDue, prenomDe, type RythmeCotisation } from '../../commun/cotisations.js';
+import { libellePeriode, messageCotisation, montantCotisation, numeroMasque, periodeDuJour, periodesDepuis, premierePeriodeDue, prenomDe, type RythmeCotisation } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -18,7 +18,7 @@ const DEMANDES_PAR_JOUR = 5;
 const MAX_COTISATIONS = 30;
 const MAX_MEMBRES = 200;
 
-type Contact = { nom: string; telephone: string };
+type Contact = { nom: string; telephone: string; email?: string };
 type Avis = { cle: string; titre: string; corps: string; parEmail: boolean };
 export type DepsCotisations = {
   db: Pick<PrismaClient, 'cotisation' | 'cotisationMembre' | 'paiementCotisation'>;
@@ -34,6 +34,9 @@ export type DepsCotisations = {
   adresseApp(): string | null;
   exigerNumero(telephone: string): Promise<void>;
   prevenir(userId: string, avis: Avis): Promise<void>;
+  /** Envoie par mail et SMS, selon la configuration du système. */
+  envoyer(userId: string, c: { email?: string | null; telephone: string; titre: string; texte: string }): Promise<{ mail: boolean; sms: boolean }>;
+  canaux(): Promise<{ mail: boolean; sms: boolean }>;
   maintenant?: () => number;
 };
 
@@ -75,6 +78,7 @@ export function creerCotisations(d: DepsCotisations) {
             id: m.id,
             nom: contact.nom,
             telephone: contact.telephone,
+            email: contact.email ?? '',
             lien: lienDe(m.jeton),
             // Un membre arrivé en cours de route ne doit pas les périodes d'avant.
             depuis: periodeDuJour(rythme, jourDe(c.user.fuseau, m.createdAt)),
@@ -190,7 +194,7 @@ export function creerCotisations(d: DepsCotisations) {
   return {
     async liste(userId: string) {
       const cotisations = await d.db.cotisation.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: AVEC_TOUT });
-      return { enLigne: d.enLigne(), cotisations: cotisations.map(vue) };
+      return { enLigne: d.enLigne(), canaux: await d.canaux(), cotisations: cotisations.map(vue) };
     },
 
     async creer(userId: string, corps: { titre: string; montant: number; devise: string; rythme: RythmeCotisation }, fuseau: string) {
@@ -219,7 +223,7 @@ export function creerCotisations(d: DepsCotisations) {
       await complete(userId, id);
       if ((await d.db.cotisationMembre.count({ where: { cotisationId: id } })) >= MAX_MEMBRES) throw new HttpError(409, `${MAX_MEMBRES} membres au maximum.`);
       const telephone = await numeroPour(id, corps.telephone);
-      await d.db.cotisationMembre.create({ data: { cotisationId: id, contact: enCoffre({ nom: corps.nom, telephone }), jeton: randomBytes(12).toString('base64url') } });
+      await d.db.cotisationMembre.create({ data: { cotisationId: id, contact: enCoffre({ nom: corps.nom, telephone, ...(corps.email ? { email: corps.email } : {}) }), jeton: randomBytes(12).toString('base64url') } });
       return relire(userId, id);
     },
 
@@ -227,7 +231,7 @@ export function creerCotisations(d: DepsCotisations) {
       const m = await membreDe(userId, membreId);
       if (m.paiements.some((p) => p.statut === 'en_attente')) throw new HttpError(409, 'Un paiement est en cours pour ce membre.');
       const telephone = await numeroPour(m.cotisationId, corps.telephone, m.id);
-      await d.db.cotisationMembre.update({ where: { id: m.id }, data: { contact: enCoffre({ nom: corps.nom, telephone }) } });
+      await d.db.cotisationMembre.update({ where: { id: m.id }, data: { contact: enCoffre({ nom: corps.nom, telephone, ...(corps.email ? { email: corps.email } : {}) }) } });
       return relire(userId, m.cotisationId);
     },
 
@@ -244,6 +248,20 @@ export function creerCotisations(d: DepsCotisations) {
       const m = await membreDe(userId, membreId);
       await d.db.cotisationMembre.update({ where: { id: m.id }, data: { demandeLe: new Date(maintenant()), demandePeriode: periode } });
       return relire(userId, m.cotisationId);
+    },
+
+    /** Me envoie la demande une fois, par les canaux activés dans le système. */
+    async envoyerDemande(userId: string, membreId: string, periode: string) {
+      const m = await membreDe(userId, membreId);
+      const c = m.cotisation;
+      const contact = horsCoffre<Contact>(m.contact);
+      if (!contact) throw new HttpError(404, 'Membre introuvable.');
+      await d.exigerNumero(contact.telephone);
+      const texte = messageCotisation({ nom: contact.nom, titre: c.titre, montant: c.montant, devise: c.devise, periode, lien: lienDe(m.jeton) });
+      const envoi = await d.envoyer(userId, { email: contact.email, telephone: contact.telephone, titre: `Cotisation « ${c.titre} »`, texte });
+      if (!envoi.mail && !envoi.sms) throw new HttpError(503, 'Aucun envoi possible : vérifie la configuration ou la limite du jour.');
+      await d.db.cotisationMembre.update({ where: { id: m.id }, data: { demandeLe: new Date(maintenant()), demandePeriode: periode } });
+      return { ...envoi, ...(await relire(userId, m.cotisationId)) };
     },
 
     /** Paiement reçu hors de Me (espèces, autre compte). */

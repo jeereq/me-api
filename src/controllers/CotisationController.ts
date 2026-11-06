@@ -32,6 +32,9 @@ export const CotisationController = {
   demande: async (req: Request, res: Response) => {
     res.json(await CotisationService.noterDemande(req.user!.id, parametre(req.params.membreId), req.body.periode));
   },
+  envoyer: async (req: Request, res: Response) => {
+    res.json(await CotisationService.envoyerDemande(req.user!.id, parametre(req.params.membreId), req.body.periode));
+  },
   marquer: async (req: Request, res: Response) => {
     res.json(await CotisationService.marquer(req.user!.id, parametre(req.params.membreId), req.body.periode, req.body.paye));
   },

@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 
 import type { Prisma } from '@prisma/client';
 
-import { horsCoffre } from '../utils/coffre.js';
+import { enCoffre, horsCoffre } from '../utils/coffre.js';
 import { dechiffrer } from '../utils/crypto.js';
 import { empreintesCompte } from './abonnements/essai-unique.js';
 import { etatAbonnement, finEssai, type ChampsAbonnement } from './abonnements/offres.js';
@@ -257,6 +257,7 @@ export const AuthService = {
         notifications: { select: { titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
         abonnementsPush: { select: { appareil: true, createdAt: true } },
         envoisSms: { select: { statut: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
+        tontines: { select: { etat: true, rang: true, cautionStatut: true, createdAt: true, tontine: { select: { nom: true, montant: true, devise: true, rythme: true, etat: true } } } },
         cotisations: { include: { membres: { select: { contact: true, createdAt: true } }, paiements: { select: { reference: true, periode: true, montant: true, devise: true, mode: true, statut: true, telephone: true, payeLe: true, createdAt: true } } } },
         paiements: { select: { reference: true, periode: true, montant: true, devise: true, statut: true, payeLe: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
       },
@@ -266,6 +267,7 @@ export const AuthService = {
       compte: { email: u.email, telephone: u.telephone, nom: u.nom, nomApp: u.nomApp, role: u.role, fuseau: u.fuseau, emailVerifie: u.emailVerifie, connexionGoogle: !!u.googleId, creeLe: u.createdAt },
       espace: u.espace?.data ?? null,
       comptesConnectes: u.integrations.map((i) => ({ ...i, donnees: horsCoffre(i.donnees) })),
+      tontines: u.tontines,
       cotisations: u.cotisations.map((c) => ({ titre: c.titre, montant: c.montant, devise: c.devise, rythme: c.rythme, debut: c.debut, archive: c.archive, createdAt: c.createdAt, membres: c.membres.map((m) => horsCoffre(m.contact)), paiements: c.paiements })),
       notifications: u.notifications,
       appareilsPush: u.abonnementsPush,
@@ -289,6 +291,11 @@ export const AuthService = {
     if (user.role === 'ADMIN' && (await prisma.user.count({ where: { role: 'ADMIN' } })) <= 1 && (await prisma.user.count()) > 1) {
       throw new HttpError(400, 'Tu es le seul admin : nomme un autre admin dans Membres avant de supprimer ton compte.');
     }
+    // L'argent d'un groupe en cours ne peut pas disparaître avec un compte.
+    const engagements = await prisma.tontineMembre.count({ where: { userId, OR: [{ etat: 'accepte', tontine: { etat: 'en_cours' } }, { cautionStatut: { in: ['payee', 'a_rendre'] } }] } });
+    if (engagements) throw new HttpError(409, 'Tu participes à une tontine en cours ou une caution reste à régler : termine-la avant de supprimer ton compte.');
+    if (await prisma.tontine.count({ where: { organisateurId: userId, etat: 'ouvert' } })) throw new HttpError(409, 'Annule d’abord le groupe que tu organises.');
+    await prisma.tontineMembre.updateMany({ where: { userId }, data: { contact: enCoffre({ nom: 'Ancien membre', telephone: '' }) } });
     // Rend l'accès aux comptes Google connectés (Agenda, Gmail) ; les autres jetons disparaissent avec le compte.
     for (const i of user.integrations.filter((x) => x.fournisseur === 'GOOGLE')) {
       try {

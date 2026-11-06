@@ -1,0 +1,34 @@
+import { Router } from 'express';
+
+import { TontineController as C } from '../controllers/TontineController.js';
+import { requireFonction } from '../middlewares/abonnement.js';
+import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js';
+import { envoiCotisationLimiter, payerTontineLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
+import { validateRequest } from '../middlewares/validateRequest.js';
+import { asyncHandler } from '../utils/http.js';
+import { tontineAdhererSchema, tontineCreerSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
+
+const router = Router();
+// Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
+router.post('/flexpaie/retour', retourPaiementLimiter, asyncHandler(C.retour));
+router.use(authenticateJWT);
+
+router.get('/admin/resume', requireAdmin, asyncHandler(C.adminResume));
+router.post('/admin/tours/:tourId/verser', requireAdmin, validateRequest(tontinePreuveTourSchema), asyncHandler(C.adminVerser));
+router.post('/admin/membres/:membreId/rendre', requireAdmin, validateRequest(tontinePreuveMembreSchema), asyncHandler(C.adminRendre));
+
+router.get('/', asyncHandler(C.mesGroupes));
+router.get('/annuaire', asyncHandler(C.annuaire));
+// Créer un groupe fait partie de Finances ; le rejoindre est ouvert à tout compte.
+router.post('/', requireFonction('cotisations'), validateRequest(tontineCreerSchema), asyncHandler(C.creer));
+router.post('/membres/:membreId/decision', validateRequest(tontineDecisionSchema), asyncHandler(C.decider));
+router.post('/membres/:membreId/rappel', envoiCotisationLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.rappeler));
+router.post('/membres/:membreId/caution', validateRequest(tontineMembreIdSchema), asyncHandler(C.utiliserCaution));
+router.get('/:id', validateRequest(tontineIdSchema), asyncHandler(C.detail));
+router.post('/:id/adherer', validateRequest(tontineAdhererSchema), asyncHandler(C.adherer));
+router.post('/:id/quitter', validateRequest(tontineIdSchema), asyncHandler(C.quitter));
+router.post('/:id/annuler', validateRequest(tontineIdSchema), asyncHandler(C.annuler));
+router.post('/:id/demarrer', validateRequest(tontineIdSchema), asyncHandler(C.demarrer));
+router.post('/:id/payer', payerTontineLimiter, validateRequest(tontinePayerSchema), asyncHandler(C.payer));
+router.post('/:id/abandon', validateRequest(tontineIdSchema), asyncHandler(C.abandonner));
+export default router;

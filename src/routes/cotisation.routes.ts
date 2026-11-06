@@ -3,10 +3,10 @@ import { Router } from 'express';
 import { CotisationController as C } from '../controllers/CotisationController.js';
 import { requireFonction } from '../middlewares/abonnement.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
-import { pageCotisationLimiter, payerCotisationLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
+import { envoiCotisationLimiter, pageCotisationLimiter, payerCotisationLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { cotisationCreerSchema, cotisationDemandeSchema, cotisationIdSchema, cotisationJetonSchema, cotisationMarquerSchema, cotisationMembreIdSchema, cotisationMembreModifierSchema, cotisationMembreSchema, cotisationModifierSchema } from '../validators/schemas.js';
+import { cotisationCreerSchema, cotisationDemandeSchema, cotisationEnvoiSchema, cotisationIdSchema, cotisationJetonSchema, cotisationMarquerSchema, cotisationMembreIdSchema, cotisationMembreModifierSchema, cotisationMembreSchema, cotisationModifierSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Ouvertes sans compte : le lien envoyé au membre porte son jeton.
@@ -22,6 +22,7 @@ router.get('/', asyncHandler(C.liste));
 router.use(requireFonction('cotisations'));
 router.post('/', validateRequest(cotisationCreerSchema), asyncHandler(C.creer));
 router.post('/membres/:membreId/demande', validateRequest(cotisationDemandeSchema), asyncHandler(C.demande));
+router.post('/membres/:membreId/envoi', envoiCotisationLimiter, validateRequest(cotisationEnvoiSchema), asyncHandler(C.envoyer));
 router.post('/membres/:membreId/paye', validateRequest(cotisationMarquerSchema), asyncHandler(C.marquer));
 router.patch('/membres/:membreId', validateRequest(cotisationMembreModifierSchema), asyncHandler(C.modifierMembre));
 router.delete('/membres/:membreId', validateRequest(cotisationMembreIdSchema), asyncHandler(C.retirerMembre));

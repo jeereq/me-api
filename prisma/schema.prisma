@@ -57,6 +57,8 @@ model User {
   equipes      EquipeMembre[]
   paiements    Paiement[]
   cotisations  Cotisation[]
+  tontinesOrganisees Tontine[]
+  tontines     TontineMembre[]
   analysesMails AnalyseMail[]
   usageReunions UsageReunion[]
   actionsAbonnement ActionAbonnement[]
@@ -78,6 +80,8 @@ model EnvoiSms {
   messageId String?
   /// soumis, delivre ou echec
   statut    String   @default("soumis")
+  /// compte (rappels et codes) ou cotisation (demandes envoyées à un groupe, avec leur propre limite).
+  genre     String   @default("compte")
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
@@ -464,5 +468,113 @@ model PaiementCotisation {
 
   @@index([cotisationId, statut])
   @@index([membreId, createdAt])
+  @@index([statut, createdAt])
+}
+
+/// Tontine : chacun cotise à chaque tour, un membre reçoit la cagnotte, jusqu'à ce que tous l'aient reçue.
+model Tontine {
+  id             String   @id @default(cuid())
+  organisateurId String?
+  organisateur   User?    @relation(fields: [organisateurId], references: [id], onDelete: SetNull)
+  nom            String
+  description    String?
+  /// Cotisation par membre et par tour, en centimes. La caution vaut le même montant.
+  montant        Int
+  devise         String
+  /// quotidien, hebdomadaire ou mensuel
+  rythme         String
+  /// Nombre de membres, donc de tours.
+  places         Int
+  /// Commission de la plateforme en points de base, figée à la création (500 = 5 %).
+  commissionBps  Int
+  /// Fuseau de l'organisateur : les échéances sont des jours dans ce fuseau.
+  fuseau         String
+  /// ouvert, en_cours, termine ou annule
+  etat           String   @default("ouvert")
+  tourCourant    Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  membres        TontineMembre[]
+  tours          TontineTour[]
+  mouvements     TontineMouvement[]
+
+  @@index([etat, createdAt])
+  @@index([organisateurId])
+}
+
+model TontineMembre {
+  id                String   @id @default(cuid())
+  tontineId         String
+  tontine           Tontine  @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  userId            String?
+  user              User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Nom et numéro mobile money chiffrés.
+  contact           Json
+  /// demande, accepte, refuse ou parti
+  etat              String   @default("demande")
+  /// Position dans l'ordre de réception, tirée au sort au démarrage.
+  rang              Int?
+  /// due, payee, utilisee (un impayé a été couvert), a_rendre ou rendue
+  cautionStatut     String   @default("due")
+  /// Version des conditions acceptées en demandant à rejoindre.
+  conditionsVersion String
+  createdAt         DateTime @default(now())
+  tours             TontineTour[]
+  mouvements        TontineMouvement[]
+
+  @@unique([tontineId, userId])
+  @@index([userId])
+}
+
+model TontineTour {
+  id             String   @id @default(cuid())
+  tontineId      String
+  tontine        Tontine  @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  numero         Int
+  beneficiaireId String?
+  beneficiaire   TontineMembre? @relation(fields: [beneficiaireId], references: [id], onDelete: SetNull)
+  /// Jour limite « AAAA-MM-JJ ».
+  echeance       String
+  /// a_venir, collecte, a_verser ou verse
+  etat           String   @default("a_venir")
+  brut           Int
+  commission     Int
+  net            Int
+  valideParNom   String?
+  valideLe       DateTime?
+  createdAt      DateTime @default(now())
+  mouvements     TontineMouvement[]
+
+  @@unique([tontineId, numero])
+  @@index([etat])
+}
+
+/// Tout l'argent des tontines. Conservé pour la comptabilité si le groupe ou le membre disparaît.
+model TontineMouvement {
+  id        String   @id @default(cuid())
+  /// Commence par TO : jamais confondu avec un abonnement ou une collecte.
+  reference String   @unique
+  tontineId String?
+  tontine   Tontine?       @relation(fields: [tontineId], references: [id], onDelete: SetNull)
+  membreId  String?
+  membre    TontineMembre? @relation(fields: [membreId], references: [id], onDelete: SetNull)
+  tourId    String?
+  tour      TontineTour?   @relation(fields: [tourId], references: [id], onDelete: SetNull)
+  /// caution, cotisation (entrées) ; versement, caution_rendue (sorties) ; caution_utilisee (interne)
+  genre     String
+  montant   Int
+  devise    String
+  /// mobile (FlexPaie), main (fait hors de Me, preuve dans message) ou interne
+  mode      String
+  /// en_attente, paye, echoue, expire ou abandonne
+  statut    String
+  telephone String   @default("")
+  commande  String?
+  message   String?
+  payeLe    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([membreId, createdAt])
+  @@index([tourId, genre])
   @@index([statut, createdAt])
 }

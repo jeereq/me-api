@@ -11,7 +11,7 @@ Ce dossier est la **seule source** du code qui doit donner le même résultat da
 | `projets.ts` | Tâches de projet à rappeler (ni résumés ni tâches bloquées) |
 | `previsions.ts`, `objectifs.ts` | Alertes de budget, prévisions et rappels des objectifs |
 | `prets.ts` | Finances avancées : prêts entre personnes, paiements à venir, bilan du mois, et leurs rappels |
-| `cotisations.ts` | Cotisations de groupe : périodes, ce qui reste dû, message de demande |
+| `cotisations.ts` | Collectes et tontines : périodes, échéances, commission, message de demande |
 | `nom-app.ts` | Nom de l'app choisi par l'utilisateur (à la place de « Me ») : règles et nom par défaut |
 | `patch.ts` | Synchro par différences : `differences(base, local)` côté app, `appliquer(doc, operations)` côté serveur |
 

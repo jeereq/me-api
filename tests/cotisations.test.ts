@@ -156,6 +156,8 @@ describe('cotisations et paiements', () => {
   let enLigne: boolean;
   let avis: { userId: string; titre: string }[];
   let refusDemande: Error | null;
+  let envois: { email?: string | null; telephone: string; titre: string; texte: string }[];
+  let canaux: { mail: boolean; sms: boolean };
   let s: ReturnType<typeof creerCotisations>;
   const U = 'u1';
 
@@ -166,6 +168,8 @@ describe('cotisations et paiements', () => {
     enLigne = true;
     avis = [];
     refusDemande = null;
+    envois = [];
+    canaux = { mail: true, sms: true };
     s = creerCotisations({
       db: b.db,
       flexpaie: {
@@ -184,6 +188,11 @@ describe('cotisations et paiements', () => {
       prevenir: async (userId, a) => {
         avis.push({ userId, titre: a.titre });
       },
+      envoyer: async (_u, c) => {
+        envois.push(c);
+        return canaux;
+      },
+      canaux: async () => canaux,
     });
   });
 
@@ -198,6 +207,18 @@ describe('cotisations et paiements', () => {
     const { m, jeton } = await preparer();
     assert.equal(m.lien, `https://app.test/c/${jeton}`);
     assert.match(jeton, /^[A-Za-z0-9_-]{16}$/);
+  });
+
+  it('envoie la demande par le système, une fois par clic, et le note', async () => {
+    const { c, m } = await preparer();
+    const r = await s.envoyerDemande(U, m.id, c.periode);
+    assert.equal(envois.length, 1);
+    assert.equal(envois[0].telephone, '243812345678');
+    assert.match(envois[0].texte, /Paie ici/);
+    assert.equal(r.cotisation.membres[0].demandePeriode, c.periode);
+    canaux = { mail: false, sms: false };
+    await assert.rejects(s.envoyerDemande(U, m.id, c.periode), /Aucun envoi possible/);
+    await assert.rejects(s.envoyerDemande('intrus', m.id, c.periode), /introuvable/);
   });
 
   it('chiffre le contact et n’accepte pas deux fois le même numéro', async () => {

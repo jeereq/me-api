@@ -304,6 +304,7 @@ const montantCotisation = z.number({ required_error: 'Montant requis' }).int().m
 const contactMembre = z.object({
   nom: z.string({ required_error: 'Nom requis' }).trim().min(1, 'Nom requis').max(80, 'Nom trop long'),
   telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(25, 'Numéro invalide'),
+  email: z.union([z.literal(''), z.string().trim().toLowerCase().email('Email invalide')]).optional(),
 });
 const idCotisation = z.object({ id: z.string().min(1).max(40) });
 const idMembre = z.object({ membreId: z.string().min(1).max(40) });
@@ -319,6 +320,31 @@ export const cotisationMembreModifierSchema = z.object({ params: idMembre, body:
 export const cotisationDemandeSchema = z.object({ params: idMembre, body: z.object({ periode: periodeCotisation }) });
 export const cotisationMarquerSchema = z.object({ params: idMembre, body: z.object({ periode: periodeCotisation, paye: z.boolean() }) });
 export const cotisationJetonSchema = z.object({ params: z.object({ jeton: z.string().regex(/^[A-Za-z0-9_-]{16}$/, 'Ce lien n’est plus valable.') }) });
+/* Tontines */
+const idTontine = z.object({ id: z.string().min(1).max(40) });
+const telephoneTontine = z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(25, 'Numéro invalide');
+const accepteConditions = z.literal(true, { errorMap: () => ({ message: 'Accepte les conditions pour continuer.' }) });
+const preuveVersement = z.object({ preuve: z.string().trim().min(3, 'Référence trop courte').max(120, 'Référence trop longue').optional() });
+export const tontineCreerSchema = z.object({
+  body: z.object({
+    nom: z.string({ required_error: 'Nom requis' }).trim().min(2, 'Nom trop court').max(80, 'Nom trop long'),
+    description: z.string().trim().max(300, 'Description trop longue').optional(),
+    montant: montantCotisation,
+    devise: z.enum(['USD', 'CDF'], { errorMap: () => ({ message: 'Choisis USD ou CDF.' }) }),
+    rythme: z.enum(['quotidien', 'hebdomadaire', 'mensuel'], { errorMap: () => ({ message: 'Choisis le rythme.' }) }),
+    places: z.number().int().min(2, 'Au moins 2 membres').max(50, '50 membres au maximum'),
+    telephone: telephoneTontine,
+    accepte: accepteConditions,
+  }),
+});
+export const tontineIdSchema = z.object({ params: idTontine });
+export const tontineAdhererSchema = z.object({ params: idTontine, body: z.object({ telephone: telephoneTontine, accepte: accepteConditions }) });
+export const tontinePayerSchema = z.object({ params: idTontine, body: z.object({ genre: z.enum(['caution', 'cotisation']) }) });
+export const tontineMembreIdSchema = z.object({ params: idMembre });
+export const tontineDecisionSchema = z.object({ params: idMembre, body: z.object({ accepte: z.boolean() }) });
+export const tontinePreuveTourSchema = z.object({ params: z.object({ tourId: z.string().min(1).max(40) }), body: preuveVersement });
+export const tontinePreuveMembreSchema = z.object({ params: idMembre, body: preuveVersement });
+export const cotisationEnvoiSchema = z.object({ params: idMembre, body: z.object({ periode: periodeCotisation }) });
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });
 export const smsTelephoneSchema = z.object({ body: z.object({ telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(20) }) });
 export const numeroAutoriseSchema = z.object({ body: z.object({ indicatif: z.string().regex(/^[1-9]\d{0,3}$/, 'Indicatif invalide'), numero: z.string().regex(/^\d{0,14}$/, 'Numéro invalide').default('') }) });
