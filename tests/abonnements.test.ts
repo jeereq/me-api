@@ -163,11 +163,11 @@ describe('FlexPaie', () => {
 describe('trois formules : Gratuit, Finances, Pro', () => {
   it('garde le prix le plus haut à 4,99 $ par mois', () => {
     assert.equal(OFFRES.formules.finances.mensuel.prix, 299);
-    assert.equal(OFFRES.formules.finances.annuel.prix, 2999);
+    assert.equal(OFFRES.formules.finances.annuel.prix, 3289);
     assert.equal(OFFRES.formules.pro.mensuel.prix, 499);
     assert.ok(Math.max(OFFRES.formules.finances.mensuel.prix, OFFRES.formules.pro.mensuel.prix) <= 499);
     // Les anciennes versions de l'app lisent toujours `pro`.
-    assert.equal(OFFRES.pro.annuel.prix, 4999);
+    assert.equal(OFFRES.pro.annuel.prix, 5489);
   });
 
   it('ouvre les finances avancées, sans les fonctions Pro, avec Finances', () => {
@@ -250,8 +250,8 @@ describe('paliers de réunions : Pro 0 à Pro 3', () => {
     assert.equal(prixPeriode('pro', 'mensuel', 1), 698);
     assert.equal(prixPeriode('pro', 'mensuel', 2), 998);
     assert.equal(prixPeriode('pro', 'mensuel', 3), 1498);
-    assert.equal(prixPeriode('pro', 'annuel', 1), 6998);
-    assert.equal(prixPeriode('pro', 'annuel', 3), 14998);
+    assert.equal(prixPeriode('pro', 'annuel', 1), 7678);
+    assert.equal(prixPeriode('pro', 'annuel', 3), 16478);
     // Finances n'a pas de palier.
     assert.equal(prixPeriode('finances', 'mensuel', 3), 299);
     assert.deepEqual([1, 2, 3].map((n) => PALIERS[n as 1 | 2 | 3].heures), [3, 10, 25]);
@@ -302,5 +302,12 @@ describe('paliers de réunions : Pro 0 à Pro 3', () => {
     assert.equal(prolonger({ fin: jours(30), formule: 'pro', palier: 2 }, 'mensuel', T0, null, 'pro', 2).toISOString(), ajouterMois(jours(30), 1).toISOString());
     // Redescendre de palier rend plus de jours.
     assert.ok(prolonger({ fin: jours(10), formule: 'pro', palier: 3 }, 'mensuel', T0, null, 'pro', 0) > ajouterMois(jours(10), 1));
+  });
+});
+
+describe('offres annuelles', () => {
+  it('coûtent onze mois : un seul mois offert', () => {
+    for (const f of ['finances', 'pro'] as const) assert.equal(OFFRES.formules[f].annuel.prix, OFFRES.formules[f].mensuel.prix * 11);
+    for (const p of [1, 2, 3] as const) assert.equal(PALIERS[p].annuel.prix, PALIERS[p].mensuel.prix * 11);
   });
 });
