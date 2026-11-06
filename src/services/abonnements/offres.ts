@@ -19,7 +19,7 @@
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-11-04';
+export const VERSION_CGV = '2026-11-06';
 
 export type Periode = 'mensuel' | 'annuel';
 export type Formule = 'finances' | 'pro';
@@ -29,8 +29,8 @@ export type Palier = 0 | 1 | 2 | 3;
 const FORMULE_FINANCES = {
   nom: 'Finances',
   /** Prix TTC en centimes de la devise. */
-  mensuel: { prix: 199, libelle: '1,99 $ par mois', mois: 1 },
-  annuel: { prix: 1999, libelle: '19,99 $ par an', mois: 12, economie: '2 mois offerts' },
+  mensuel: { prix: 299, libelle: '2,99 $ par mois', mois: 1 },
+  annuel: { prix: 2999, libelle: '29,99 $ par an', mois: 12, economie: '2 mois offerts' },
 } as const;
 const FORMULE_PRO = {
   nom: 'Pro',
@@ -230,7 +230,7 @@ const prixMois = (f: Formule, palier: Palier = 0) => prixPeriode(f, 'mensuel', p
  * Nouvelle fin de l'abonnement après un paiement. La période part de la plus tardive de : la fin de l'essai en cours
  * (les jours d'essai ne sont pas perdus), maintenant. Le temps payé qui reste après ce départ s'y ajoute ; s'il était
  * payé pour une autre formule, il est converti au prorata des prix mensuels (un mois de Finances restant vaut
- * 1,99 / 4,99 mois de Pro, et inversement) : rien de ce qui est payé n'est perdu.
+ * 2,99 / 4,99 mois de Pro, et inversement) : rien de ce qui est payé n'est perdu.
  */
 export function prolonger(
   actuel: { fin?: Date | null; formule?: Formule | null; palier?: Palier } | Date | null | undefined,
@@ -273,7 +273,7 @@ export const messageReserve = (f: Fonction) =>
 export type AvisAbonnement = { cle: string; titre: string; corps: string; parEmail: boolean };
 
 const SUITE =
-  "Ensuite, Me reste gratuite pour l'essentiel. Finances (1,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (3, 10 ou 25 h par mois).";
+  "Ensuite, Me reste gratuite pour l'essentiel. Finances (2,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (3, 10 ou 25 h par mois).";
 
 /**
  * Messages liés à l'abonnement, envoyés une seule fois grâce à leur clé :
