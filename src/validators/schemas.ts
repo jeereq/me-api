@@ -298,6 +298,27 @@ export const paiementSchema = z.object({
     accesImmediat: z.literal(true, { errorMap: () => ({ message: "Demande l'accès immédiat à ta formule pour continuer." }) }),
   }),
 });
+/* Cotisations de groupe */
+const titreCotisation = z.string({ required_error: 'Titre requis' }).trim().min(1, 'Titre requis').max(80, 'Titre trop long');
+const montantCotisation = z.number({ required_error: 'Montant requis' }).int().min(100, 'Montant trop petit').max(100_000_000, 'Montant trop grand');
+const contactMembre = z.object({
+  nom: z.string({ required_error: 'Nom requis' }).trim().min(1, 'Nom requis').max(80, 'Nom trop long'),
+  telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(25, 'Numéro invalide'),
+});
+const idCotisation = z.object({ id: z.string().min(1).max(40) });
+const idMembre = z.object({ membreId: z.string().min(1).max(40) });
+const periodeCotisation = z.string().regex(/^(unique|\d{4}-\d{2}(-\d{2})?)$/, 'Période invalide');
+export const cotisationCreerSchema = z.object({
+  body: z.object({ titre: titreCotisation, montant: montantCotisation, devise: z.enum(['USD', 'CDF'], { errorMap: () => ({ message: 'Choisis USD ou CDF.' }) }), rythme: z.enum(['unique', 'hebdomadaire', 'mensuel'], { errorMap: () => ({ message: 'Choisis le rythme.' }) }) }),
+});
+export const cotisationModifierSchema = z.object({ params: idCotisation, body: z.object({ titre: titreCotisation.optional(), montant: montantCotisation.optional(), archive: z.boolean().optional() }) });
+export const cotisationIdSchema = z.object({ params: idCotisation });
+export const cotisationMembreSchema = z.object({ params: idCotisation, body: contactMembre });
+export const cotisationMembreIdSchema = z.object({ params: idMembre });
+export const cotisationMembreModifierSchema = z.object({ params: idMembre, body: contactMembre });
+export const cotisationDemandeSchema = z.object({ params: idMembre, body: z.object({ periode: periodeCotisation }) });
+export const cotisationMarquerSchema = z.object({ params: idMembre, body: z.object({ periode: periodeCotisation, paye: z.boolean() }) });
+export const cotisationJetonSchema = z.object({ params: z.object({ jeton: z.string().regex(/^[A-Za-z0-9_-]{16}$/, 'Ce lien n’est plus valable.') }) });
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });
 export const smsTelephoneSchema = z.object({ body: z.object({ telephone: z.string({ required_error: 'Numéro requis' }).trim().min(8, 'Numéro requis').max(20) }) });
 export const numeroAutoriseSchema = z.object({ body: z.object({ indicatif: z.string().regex(/^[1-9]\d{0,3}$/, 'Indicatif invalide'), numero: z.string().regex(/^\d{0,14}$/, 'Numéro invalide').default('') }) });
