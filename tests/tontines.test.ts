@@ -668,6 +668,18 @@ describe('une tontine de bout en bout', () => {
     assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 3);
   });
 
+  it('annuaire : filtre par type, rythme, devise et montant', async () => {
+    const base = { places: 3, mode: 'rotation', visibilite: 'public' };
+    await s.creer(orga, { ...base, nom: 'Petit', montant: 500, devise: 'USD', rythme: 'quotidien' });
+    await s.creer(orga, { ...base, nom: 'Grand', montant: 5000, devise: 'USD', rythme: 'mensuel' });
+    await s.creer(orga, { ...base, nom: 'Franc', montant: 500000, devise: 'CDF', rythme: 'mensuel' });
+    const noms = async (f: object) => (await s.annuaire(null, f)).groupes.map((g) => g.nom).sort();
+    assert.deepEqual(await noms({ rythme: 'mensuel' }), ['Franc', 'Grand']);
+    assert.deepEqual(await noms({ devise: 'USD', montantMax: 1000 }), ['Petit']);
+    assert.deepEqual(await noms({ mode: 'objectif' }), []);
+    assert.deepEqual(await noms({ q: 'fra' }), ['Franc']);
+  });
+
   it('annuaire public : lisible sans compte, sans photo ni groupe privé', async () => {
     b.roles.orga.photoUrl = 'https://x/p.jpg';
     await creer();

@@ -387,3 +387,12 @@ export const actionAbonnementSchema = membreParamsSchema.extend({
     z.object({ action: z.literal('retirer'), note: noteAdmin }),
   ]),
 });
+
+/** Les filtres de l'annuaire : une valeur inconnue est simplement ignorée. */
+export const filtresAnnuaireSchema = z.object({
+  q: z.string().max(80).optional().catch(undefined),
+  mode: z.enum(['rotation', 'objectif']).optional().catch(undefined),
+  rythme: z.enum(['quotidien', 'hebdomadaire', 'mensuel', 'unique']).optional().catch(undefined),
+  devise: z.enum(['USD', 'CDF']).optional().catch(undefined),
+  montantMax: z.coerce.number().int().positive().optional().catch(undefined),
+});
