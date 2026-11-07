@@ -7,6 +7,7 @@ import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
 import { local } from '../integrations/http.js';
+import { cleAlerte, confianceDe, correspondAlerte, MAX_ALERTES, trier, type Confiance, type FiltresAlerte, type FiltresAnnuaire, type MotifSignalement } from './annuaire.js';
 import type { AvisGroupe } from './envois.js';
 
 /** À changer avec la section « Tontines » de cgv.html. */
@@ -46,7 +47,7 @@ export type CreationTontine = {
   rappels?: RappelsGroupe;
 };
 export type DepsTontines = {
-  db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement'>;
+  db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement' | 'alerteAnnuaire' | 'signalementTontine'>;
   flexpaie: {
     demander(p: { telephone: string; reference: string; montant: number; devise: string; retour: string }): Promise<{ commande: string }>;
     verser(p: { telephone: string; reference: string; montant: number; devise: string; retour: string }): Promise<{ commande: string }>;
@@ -72,7 +73,7 @@ export type DepsTontines = {
   tirer?: (max: number) => number;
 };
 
-const INCLUS = { organisateur: { select: { nom: true, role: true, photoUrl: true } }, membres: { orderBy: { createdAt: 'asc' }, include: { user: { select: { photoUrl: true } } } }, tours: { orderBy: { numero: 'asc' } } } satisfies Prisma.TontineInclude;
+const INCLUS = { organisateur: { select: { nom: true, role: true, photoUrl: true, createdAt: true } }, membres: { orderBy: { createdAt: 'asc' }, include: { user: { select: { photoUrl: true } } } }, tours: { orderBy: { numero: 'asc' } } } satisfies Prisma.TontineInclude;
 type TontineComplete = Prisma.TontineGetPayload<{ include: typeof INCLUS }>;
 type Membre = TontineComplete['membres'][number];
 type Mouvement = Prisma.TontineMouvementGetPayload<object>;
@@ -81,7 +82,7 @@ const reference = () => `TO${Date.now().toString(36).toUpperCase()}${randomBytes
 const estDoublon = (e: unknown) => (e as { code?: string })?.code === 'P2002';
 const contactDe = (m: { contact: unknown }) => horsCoffre<Contact>(m.contact) ?? { nom: 'Ancien membre', telephone: '' };
 
-export type FiltresAnnuaire = { q?: string; mode?: string; rythme?: string; devise?: string; montantMax?: number };
+export type { FiltresAnnuaire };
 
 export function creerTontines(d: DepsTontines) {
   const maintenant = () => d.maintenant?.() ?? Date.now();
@@ -129,7 +130,7 @@ export function creerTontines(d: DepsTontines) {
     return null;
   }
 
-  const carte = (t: TontineComplete, userId: string) => ({
+  const carte = (t: TontineComplete, userId: string, confiance: Confiance | null = null) => ({
     id: t.id,
     nom: t.nom,
     description: t.description,
@@ -150,6 +151,7 @@ export function creerTontines(d: DepsTontines) {
     organisateurPhoto: t.organisateur?.photoUrl ?? null,
     ...repartitionCagnotte(t.montant, t.places, t.commissionBps),
     monEtat: t.membres.find((m) => m.userId === userId)?.etat ?? null,
+    confiance,
   });
 
   function vue(t: TontineComplete, userId: string, mvts: Mouvement[]) {
@@ -398,6 +400,63 @@ export function creerTontines(d: DepsTontines) {
     }
   }
 
+  /** Ce que l'annuaire montre d'un groupe. Sans compte : le prénom de l'organisateur, jamais sa photo. */
+  const carteVisible = (t: TontineComplete, userId: string | null, confiance: Confiance | null) => (userId ? carte(t, userId, confiance) : { ...carte(t, '', confiance), organisateurPhoto: null });
+
+  /** Ce que chaque organisateur a déjà mené sur Me. */
+  async function confianceOrganisateurs(groupes: TontineComplete[]) {
+    const depuis = new Map(groupes.flatMap((t) => (t.organisateurId ? [[t.organisateurId, t.organisateur?.createdAt ?? null] as const] : [])));
+    if (!depuis.size) return new Map<string, Confiance>();
+    const menes = await d.db.tontine.findMany({
+      where: { organisateurId: { in: [...depuis.keys()] }, etat: { in: ['en_cours', 'termine'] } },
+      select: { organisateurId: true, etat: true, tours: { where: { etat: 'verse' }, select: { etat: true, echeance: true, valideLe: true } } },
+    });
+    return new Map([...depuis].map(([id, le]) => [id, confianceDe(menes.filter((m) => m.organisateurId === id), le)]));
+  }
+
+  /** Un nouveau groupe de l'annuaire : prévenir ceux dont la recherche enregistrée y correspond, dans l'app seulement. */
+  async function alerterAnnuaire(t: TontineComplete) {
+    const alertes = await d.db.alerteAnnuaire.findMany({ where: { userId: { not: t.organisateurId ?? '' } }, take: 2000 });
+    const deja = new Set<string>();
+    for (const a of alertes) {
+      if (deja.has(a.userId) || !correspondAlerte(a.filtres as unknown as FiltresAlerte, t)) continue;
+      deja.add(a.userId);
+      const libres = t.places - acceptes(t).length;
+      await d
+        .avertir(a.userId, null, { cle: `annuaire:${t.id}:${a.userId}`, titre: 'Nouveau groupe dans l’annuaire', corps: `« ${t.nom} » : ${montantTontine(t.montant, t.devise, t.rythme)}, ${libres} place${libres > 1 ? 's' : ''}.` }, true)
+        .catch((e) => console.error('Alerte annuaire', e));
+    }
+  }
+
+  async function mesAlertes(userId: string) {
+    const alertes = await d.db.alerteAnnuaire.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    return { alertes: alertes.map((a) => ({ id: a.id, filtres: a.filtres as unknown as FiltresAlerte, creeLe: a.createdAt })) };
+  }
+
+  /** Pour l'équipe : les groupes signalés, les plus signalés d'abord. */
+  async function adminSignalements() {
+    const ouverts = await d.db.signalementTontine.findMany({ where: { statut: 'ouvert' }, orderBy: { createdAt: 'desc' } });
+    const parGroupe = new Map<string, typeof ouverts>();
+    for (const x of ouverts) parGroupe.set(x.tontineId, [...(parGroupe.get(x.tontineId) ?? []), x]);
+    const groupes = await Promise.all(
+      [...parGroupe].map(async ([id, liste]) => {
+        const t = await d.db.tontine.findUnique({ where: { id }, include: INCLUS });
+        if (!t) return null;
+        return {
+          tontineId: id,
+          groupe: t.nom,
+          organisateur: t.organisateur?.nom ?? '',
+          organisateurId: t.organisateurId,
+          membres: acceptes(t).length,
+          retire: !!t.retireAnnuaireLe,
+          nombre: liste.length,
+          motifs: liste.map((x) => ({ motif: x.motif as MotifSignalement, texte: x.texte, le: x.createdAt })),
+        };
+      }),
+    );
+    return { signalements: groupes.filter((g): g is NonNullable<typeof g> => g !== null).sort((a, b) => b.nombre - a.nombre) };
+  }
+
   /** Pour l'admin : ce qui attend sa validation, et l'argent par devise. */
   async function resumeAdmin() {
     const [tours, cautions, mouvements, verses] = await Promise.all([
@@ -439,7 +498,8 @@ export function creerTontines(d: DepsTontines) {
     async annuaire(userId: string | null, f: FiltresAnnuaire = {}) {
       const where: Prisma.TontineWhereInput = {
         visibilite: 'public',
-        etat: { in: ['ouvert', 'en_cours'] },
+        retireAnnuaireLe: null,
+        etat: f.ouverts ? 'ouvert' : { in: ['ouvert', 'en_cours'] },
         ...(f.mode ? { mode: f.mode } : {}),
         ...(f.rythme ? { rythme: f.rythme } : {}),
         ...(f.devise ? { devise: f.devise } : {}),
@@ -450,9 +510,68 @@ export function creerTontines(d: DepsTontines) {
       const groupes = tous.filter((t) => accueille(t) && acceptes(t).length < t.places && (!mot || t.nom.toLowerCase().includes(mot)));
       // Seuls les groupes des comptes approuvés sont visibles.
       const approuves = await d.comptesApprouves(groupes.flatMap((t) => (t.organisateurId ? [t.organisateurId] : [])));
-      const visibles = groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId)).slice(0, 100);
-      // Sans compte, l'annuaire montre le groupe et le prénom de l'organisateur, jamais sa photo.
-      return { groupes: visibles.map((t) => (userId ? carte(t, userId) : { ...carte(t, ''), organisateurPhoto: null })) };
+      const visibles = trier(
+        groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId)).map((t) => ({ t, montant: t.montant, places: t.places, inscrits: acceptes(t).length, createdAt: t.createdAt })),
+        f.tri,
+      )
+        .slice(0, 100)
+        .map((x) => x.t);
+      const confiances = await confianceOrganisateurs(visibles);
+      return { groupes: visibles.map((t) => carteVisible(t, userId, confiances.get(t.organisateurId!) ?? null)) };
+    },
+
+    /** La page d'un groupe de l'annuaire, à partager. Un membre la voit encore quand le groupe est complet. */
+    async groupeAnnuaire(userId: string | null, id: string) {
+      const t = await d.db.tontine.findUnique({ where: { id }, include: INCLUS });
+      const membre = !!userId && !!t?.membres.some((m) => m.userId === userId && ['demande', 'accepte'].includes(m.etat));
+      if (!t || t.visibilite !== 'public' || !t.organisateurId) throw new HttpError(404, 'Ce groupe n’est plus dans l’annuaire.');
+      const visible = !t.retireAnnuaireLe && accueille(t) && acceptes(t).length < t.places && (await d.comptesApprouves([t.organisateurId])).has(t.organisateurId);
+      if (!visible && !membre) throw new HttpError(404, 'Ce groupe n’est plus dans l’annuaire.');
+      const confiances = await confianceOrganisateurs([t]);
+      return { groupe: carteVisible(t, userId, confiances.get(t.organisateurId) ?? null) };
+    },
+
+    mesAlertes,
+
+    async creerAlerte(userId: string, f: FiltresAlerte) {
+      const filtres: FiltresAlerte = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== '')) as FiltresAlerte;
+      const miennes = await d.db.alerteAnnuaire.findMany({ where: { userId } });
+      if (!miennes.some((a) => cleAlerte(a.filtres as unknown as FiltresAlerte) === cleAlerte(filtres))) {
+        if (miennes.length >= MAX_ALERTES) throw new HttpError(409, `${MAX_ALERTES} alertes au maximum : supprime-en une.`);
+        await d.db.alerteAnnuaire.create({ data: { userId, filtres: filtres as Prisma.InputJsonObject } });
+      }
+      return mesAlertes(userId);
+    },
+
+    async supprimerAlerte(userId: string, id: string) {
+      await d.db.alerteAnnuaire.deleteMany({ where: { id, userId } });
+      return mesAlertes(userId);
+    },
+
+    /** Un signalement par personne et par groupe : le renvoyer met à jour le motif. */
+    async signaler(userId: string, id: string, motif: MotifSignalement, texte?: string) {
+      const t = await d.db.tontine.findUnique({ where: { id }, include: INCLUS });
+      if (!t || t.visibilite !== 'public') throw new HttpError(404, 'Groupe introuvable.');
+      if (t.organisateurId === userId) throw new HttpError(400, 'Tu ne peux pas signaler ton propre groupe.');
+      const data = { motif, texte: texte?.trim() || null, statut: 'ouvert', traitePar: null, traiteLe: null };
+      const deja = await d.db.signalementTontine.findFirst({ where: { tontineId: id, userId } });
+      if (deja) await d.db.signalementTontine.update({ where: { id: deja.id }, data });
+      else await d.db.signalementTontine.create({ data: { tontineId: id, userId, ...data } });
+      return { ok: true };
+    },
+
+    adminSignalements,
+
+    /** Retirer garde le groupe pour ses membres et son argent : il ne figure plus dans l'annuaire, et personne ne peut plus le rejoindre. */
+    async adminDeciderSignalement(a: Acteur, id: string, decision: 'retirer' | 'rejeter') {
+      const t = await charger(id);
+      const donnees = { statut: decision === 'retirer' ? 'retire' : 'rejete', traitePar: a.nom, traiteLe: new Date(maintenant()) };
+      await d.db.signalementTontine.updateMany({ where: { tontineId: id, statut: 'ouvert' }, data: donnees });
+      if (decision === 'retirer' && !t.retireAnnuaireLe) {
+        await d.db.tontine.update({ where: { id }, data: { retireAnnuaireLe: new Date(maintenant()) } });
+        await prevenirOrganisateur(t, `tontine:retire:${id}`, { titre: 'Groupe retiré de l’annuaire', corps: `« ${t.nom} » ne figure plus dans l’annuaire après des signalements. Tes membres et leur argent ne changent pas.` });
+      }
+      return adminSignalements();
     },
 
     async mesGroupes(userId: string) {
@@ -509,6 +628,7 @@ export function creerTontines(d: DepsTontines) {
       });
       await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, etat: 'accepte', cautionStatut: cautionRequise ? 'due' : 'dispense', contact: enCoffre({ nom: u.nom, telephone }), conditionsVersion: VERSION_CONDITIONS_TONTINE } });
       for (const [i, echeance] of dates.entries()) await d.db.tontineTour.create({ data: { tontineId: t.id, numero: i + 1, echeance, etat: i === 0 ? 'collecte' : 'a_venir', brut: 0, commission: 0, net: 0 } });
+      if (publique) void charger(t.id).then(alerterAnnuaire).catch((e) => console.error('Alerte annuaire', e));
       return relire(t.id, u.id);
     },
 
@@ -557,6 +677,7 @@ export function creerTontines(d: DepsTontines) {
     async adherer(u: Compte, id: string) {
       const t = await charger(id);
       if (t.visibilite !== 'public') throw new HttpError(404, 'Groupe introuvable.');
+      if (t.retireAnnuaireLe) throw new HttpError(404, 'Ce groupe n’est plus dans l’annuaire.');
       if (!accueille(t)) throw new HttpError(409, 'Ce groupe n’accepte plus de membres.');
       await exigerApprobation(u.id);
       if (acceptes(t).length >= t.places) throw new HttpError(409, 'Ce groupe est complet.');

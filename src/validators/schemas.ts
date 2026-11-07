@@ -395,4 +395,23 @@ export const filtresAnnuaireSchema = z.object({
   rythme: z.enum(['quotidien', 'hebdomadaire', 'mensuel', 'unique']).optional().catch(undefined),
   devise: z.enum(['USD', 'CDF']).optional().catch(undefined),
   montantMax: z.coerce.number().int().positive().optional().catch(undefined),
+  tri: z.enum(['recent', 'montant', 'places']).optional().catch(undefined),
+  ouverts: z.preprocess((v) => v === '1' || v === 'true' || v === true, z.boolean()).optional().catch(undefined),
 });
+
+/** Une recherche enregistrée : les mêmes critères que l'annuaire, sans le tri. */
+export const alerteAnnuaireSchema = z.object({
+  body: z.object({
+    q: z.string().trim().max(80).optional(),
+    mode: z.enum(['rotation', 'objectif']).optional(),
+    rythme: z.enum(['quotidien', 'hebdomadaire', 'mensuel', 'unique']).optional(),
+    devise: z.enum(['USD', 'CDF']).optional(),
+    montantMax: z.number().int().positive().max(2_000_000_000).optional(),
+  }),
+});
+export const alerteIdSchema = z.object({ params: z.object({ id: z.string().min(1).max(40) }) });
+export const signalerTontineSchema = z.object({
+  params: idTontine,
+  body: z.object({ motif: z.enum(['arnaque', 'trompeur', 'inapproprie', 'autre']), texte: z.string().trim().max(500).optional() }),
+});
+export const deciderSignalementSchema = z.object({ params: idTontine, body: z.object({ decision: z.enum(['retirer', 'rejeter']) }) });

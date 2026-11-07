@@ -3,16 +3,17 @@ import { Router } from 'express';
 import { TontineController as C } from '../controllers/TontineController.js';
 import { requireFonction } from '../middlewares/abonnement.js';
 import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.js';
-import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter } from '../middlewares/rateLimits.js';
+import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter, signalementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
+import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
 router.post('/flexpaie/retour', retourPaiementLimiter, asyncHandler(C.retour));
 // Lisibles sans compte : l'annuaire public et les limites à respecter.
 router.get('/public/annuaire', pageAnnuaireLimiter, asyncHandler(C.annuairePublic));
+router.get('/public/annuaire/:id', pageAnnuaireLimiter, validateRequest(tontineIdSchema), asyncHandler(C.groupePublic));
 router.get('/limites', pageAnnuaireLimiter, asyncHandler(C.limites));
 router.get('/invitation/:code', invitationTontineLimiter, validateRequest(tontineInvitationSchema), asyncHandler(C.invitation));
 router.use(authenticateJWT);
@@ -24,6 +25,8 @@ router.post('/admin/membres/:membreId/rendre', requireModule('versements'), vali
 router.get('/admin/approbations', requireModule('verifications'), asyncHandler(C.adminApprobations));
 router.get('/admin/approbations/:userId/piece', requireModule('verifications'), validateRequest(tontineUserIdSchema), asyncHandler(C.adminPiece));
 router.post('/admin/approbations/:userId', requireModule('verifications'), validateRequest(tontineApprobationSchema), asyncHandler(C.adminDecider));
+router.get('/admin/signalements', requireModule('verifications'), asyncHandler(C.adminSignalements));
+router.post('/admin/signalements/:id', requireModule('verifications'), validateRequest(deciderSignalementSchema), asyncHandler(C.adminDeciderSignalement));
 
 router.get('/eligibilite', asyncHandler(C.eligibilite));
 router.post('/eligibilite/code', requireFonction('cotisations'), codeTontineLimiter, validateRequest(tontineSmsSchema), asyncHandler(C.demanderCode));
@@ -33,6 +36,11 @@ router.post('/invitation/:code', requireFonction('cotisations'), validateRequest
 
 router.get('/', asyncHandler(C.mesGroupes));
 router.get('/annuaire', asyncHandler(C.annuaire));
+router.get('/annuaire/:id', validateRequest(tontineIdSchema), asyncHandler(C.groupeAnnuaire));
+router.post('/annuaire/:id/signaler', signalementLimiter, validateRequest(signalerTontineSchema), asyncHandler(C.signaler));
+router.get('/alertes', asyncHandler(C.mesAlertes));
+router.post('/alertes', validateRequest(alerteAnnuaireSchema), asyncHandler(C.creerAlerte));
+router.delete('/alertes/:id', validateRequest(alerteIdSchema), asyncHandler(C.supprimerAlerte));
 // Créer ou rejoindre un groupe demande au moins Finances. Un membre déjà engagé peut toujours payer : le groupe compte sur lui.
 router.post('/', requireFonction('cotisations'), validateRequest(tontineCreerSchema), asyncHandler(C.creer));
 router.post('/membres/:membreId/decision', validateRequest(tontineDecisionSchema), asyncHandler(C.decider));

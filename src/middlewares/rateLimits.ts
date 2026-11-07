@@ -129,6 +129,8 @@ export const codeTontineLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 3
 export const confirmerTontineLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
 export const pieceIdentiteLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
 /** Page d'invitation, ouverte sans compte : on ne devine pas un code en le testant. */
+/** Signaler un groupe : quelques fois par heure. */
+export const signalementLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });
 export const invitationTontineLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, message });
 /** Photo de profil : chaque envoi passe par Cloudinary. */
 export const photoProfilLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, keyGenerator: compteKey, standardHeaders: 'draft-7', legacyHeaders: false, message });

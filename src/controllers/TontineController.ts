@@ -34,6 +34,30 @@ export const TontineController = {
   annuaire: async (req: Request, res: Response) => {
     res.json(await S.annuaire(req.user!.id, filtresAnnuaire(req)));
   },
+  groupePublic: async (req: Request, res: Response) => {
+    res.json(await S.groupeAnnuaire(null, p(req.params.id)));
+  },
+  groupeAnnuaire: async (req: Request, res: Response) => {
+    res.json(await S.groupeAnnuaire(req.user!.id, p(req.params.id)));
+  },
+  mesAlertes: async (req: Request, res: Response) => {
+    res.json(await S.mesAlertes(req.user!.id));
+  },
+  creerAlerte: async (req: Request, res: Response) => {
+    res.json(await S.creerAlerte(req.user!.id, req.body));
+  },
+  supprimerAlerte: async (req: Request, res: Response) => {
+    res.json(await S.supprimerAlerte(req.user!.id, p(req.params.id)));
+  },
+  signaler: async (req: Request, res: Response) => {
+    res.json(await S.signaler(req.user!.id, p(req.params.id), req.body.motif, req.body.texte));
+  },
+  adminSignalements: async (_req: Request, res: Response) => {
+    res.json(await S.adminSignalements());
+  },
+  adminDeciderSignalement: async (req: Request, res: Response) => {
+    res.json(await S.adminDeciderSignalement(acteur(req), p(req.params.id), req.body.decision));
+  },
   detail: async (req: Request, res: Response) => {
     res.json(await S.detail(req.user!.id, p(req.params.id)));
   },
