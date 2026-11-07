@@ -425,7 +425,7 @@ export function creerTontines(d: DepsTontines) {
       deja.add(a.userId);
       const libres = t.places - acceptes(t).length;
       await d
-        .avertir(a.userId, null, { cle: `annuaire:${t.id}:${a.userId}`, titre: 'Nouveau groupe dans l’annuaire', corps: `« ${t.nom} » : ${montantTontine(t.montant, t.devise, t.rythme)}, ${libres} place${libres > 1 ? 's' : ''}.` }, true)
+        .avertir(a.userId, null, { cle: `annuaire:${t.id}:${a.userId}`, titre: 'Nouveau groupe dans l’annuaire', corps: `« ${t.nom} » : ${montantTontine(t.montant, t.devise, t.rythme as RythmeObjectif)}, ${libres} place${libres > 1 ? 's' : ''}.` }, true)
         .catch((e) => console.error('Alerte annuaire', e));
     }
   }
