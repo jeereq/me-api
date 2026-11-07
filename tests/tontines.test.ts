@@ -22,7 +22,7 @@ function table(uniques: (l: Ligne, t: Ligne[]) => boolean = () => false) {
       if (v && typeof v === 'object' && !(v instanceof Date)) {
         const o = v as Ligne;
         if (o.in) return o.in.includes(l[k]);
-        if (o.not === null) return l[k] != null;
+        if ('not' in o) return o.not === null ? l[k] != null : l[k] !== o.not;
         if (o.gt) return l[k] > o.gt;
         if (o.lte) return l[k] <= o.lte;
       }
@@ -39,6 +39,13 @@ function table(uniques: (l: Ligne, t: Ligne[]) => boolean = () => false) {
       return l;
     },
     update: async ({ where, data }: Ligne) => Object.assign(lignes.find((l) => l.id === where.id)!, data),
+    findMany: async ({ where }: Ligne = {}) => lignes.filter((l) => correspond(l, where)),
+    findFirst: async ({ where }: Ligne = {}) => lignes.find((l) => correspond(l, where)) ?? null,
+    deleteMany: async ({ where }: Ligne) => {
+      const avant = lignes.length;
+      for (let i = lignes.length - 1; i >= 0; i--) if (correspond(lignes[i], where)) lignes.splice(i, 1);
+      return { count: avant - lignes.length };
+    },
     updateMany: async ({ where, data }: Ligne) => {
       const t = lignes.filter((l) => correspond(l, where));
       t.forEach((l) => Object.assign(l, data));
@@ -66,10 +73,14 @@ function baseMemoire() {
     tours: tours.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => a.numero - b.numero),
   });
   const brut = (l: Ligne) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...l });
+  const alertes = table();
+  const signalements = table();
   const db = {
+    alerteAnnuaire: alertes,
+    signalementTontine: signalements,
     tontine: {
       ...tontines,
-      create: async ({ data }: Ligne) => tontines.create({ data: { etat: 'ouvert', tourCourant: 0, mode: 'rotation', visibilite: 'public', cautionRequise: true, beneficiaire: null, ...data } }),
+      create: async ({ data }: Ligne) => tontines.create({ data: { etat: 'ouvert', tourCourant: 0, mode: 'rotation', visibilite: 'public', cautionRequise: true, beneficiaire: null, retireAnnuaireLe: null, ...data } }),
       findUnique: async ({ where }: Ligne) => {
         const t = tontines.lignes.find((x) => (where.codeInvitation ? x.codeInvitation === where.codeInvitation : x.id === where.id));
         return t ? complet(t) : null;
@@ -99,7 +110,7 @@ function baseMemoire() {
       findFirst: async ({ where }: Ligne) => mvts.lignes.find((m) => mvts.correspond(m, where)) ?? null,
     },
   };
-  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles };
+  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles, alertes, signalements };
 }
 
 describe('calculs des tontines', () => {
@@ -691,6 +702,81 @@ describe('une tontine de bout en bout', () => {
     assert.equal(r.groupes[0].monEtat, null);
     assert.equal(JSON.stringify(r).includes('812345'), false);
     assert.equal((await s.annuaire('marie')).groupes[0].organisateurPhoto, 'https://x/p.jpg');
+  });
+
+  it('annuaire : trie, et masque les groupes déjà démarrés sur demande', async () => {
+    const base = { places: 3, mode: 'rotation', visibilite: 'public', devise: 'USD', rythme: 'mensuel' } as const;
+    await s.creer(orga, { ...base, nom: 'Cher', montant: 5000 });
+    await s.creer(orga, { ...base, nom: 'Petit', montant: 500 });
+    const presque = await s.creer(orga, { ...base, nom: 'Presque', montant: 1000 });
+    await s.adherer(paul, presque.groupe.id);
+    await s.decider('orga', b.membres.lignes.find((m) => m.userId === 'paul')!.id, true);
+    const noms = async (f: object) => (await s.annuaire(null, f)).groupes.map((g) => g.nom);
+    assert.deepEqual(await noms({}), ['Presque', 'Petit', 'Cher']);
+    assert.deepEqual(await noms({ tri: 'montant' }), ['Petit', 'Presque', 'Cher']);
+    assert.equal((await noms({ tri: 'places' }))[0], 'Presque');
+    b.tontines.lignes.find((t) => t.nom === 'Cher')!.etat = 'en_cours';
+    assert.deepEqual(await noms({ ouverts: true }), ['Presque', 'Petit']);
+  });
+
+  it('annuaire : la page d’un groupe, et ce qu’on sait de l’organisateur', async () => {
+    b.roles.orga.photoUrl = 'https://x/p.jpg';
+    const { groupe } = await creer();
+    const pub = (await s.groupeAnnuaire(null, groupe.id)).groupe;
+    assert.equal(pub.nom, 'Famille');
+    assert.equal(pub.organisateurPhoto, null);
+    assert.equal(pub.lien, `https://app.test/annuaire/famille-${groupe.id}`);
+    assert.deepEqual(pub.confiance, { termines: 0, versements: 0, aTemps: 0, depuis: null });
+    const ancien = b.tontines.lignes[0];
+    b.tontines.lignes.push({ ...ancien, id: 'vieux', etat: 'termine', nom: 'Vieux' });
+    b.tours.lignes.push({ id: 't1', tontineId: 'vieux', numero: 1, etat: 'verse', echeance: '2026-10-01', valideLe: new Date('2026-10-02T10:00:00Z') });
+    b.tours.lignes.push({ id: 't2', tontineId: 'vieux', numero: 2, etat: 'verse', echeance: '2026-10-08', valideLe: new Date('2026-10-20T10:00:00Z') });
+    const c = (await s.annuaire(null)).groupes.find((g) => g.nom === 'Famille')!.confiance;
+    assert.deepEqual(c, { termines: 1, versements: 2, aTemps: 1, depuis: null });
+    await assert.rejects(s.groupeAnnuaire(null, 'inconnu'), /plus dans l’annuaire/);
+    approuves.delete('orga');
+    await assert.rejects(s.groupeAnnuaire(null, groupe.id), /plus dans l’annuaire/);
+    assert.equal((await s.groupeAnnuaire('orga', groupe.id)).groupe.nom, 'Famille');
+  });
+
+  it('alertes : prévient dans l’app quand un nouveau groupe correspond', async () => {
+    await s.creerAlerte('paul', { rythme: 'mensuel', devise: 'USD', montantMax: 2000 });
+    await s.creerAlerte('paul', { rythme: 'mensuel', devise: 'USD', montantMax: 2000 });
+    await s.creerAlerte('marie', { q: 'famille' });
+    await s.creerAlerte('orga', {});
+    assert.equal((await s.mesAlertes('paul')).alertes.length, 1);
+    await s.creer(orga, { nom: 'Famille', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'public' });
+    await s.creer(orga, { nom: 'Grand', montant: 9000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'public' });
+    await s.creer(orga, { nom: 'Privé', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'prive', telephone: '0812345670' });
+    await new Promise((r) => setTimeout(r, 20));
+    const alertes = avis.filter((a) => a.cle.startsWith('annuaire:'));
+    assert.deepEqual(alertes.map((a) => a.userId).sort(), ['marie', 'paul']);
+    assert.equal(alertes.every((a) => a.seul), true);
+    for (let i = 0; i < 4; i++) await s.creerAlerte('paul', { q: `g${i}` });
+    await assert.rejects(s.creerAlerte('paul', { q: 'trop' }), /5 alertes au maximum/);
+    const id = (await s.mesAlertes('paul')).alertes[0].id;
+    assert.equal((await s.supprimerAlerte('marie', id)).alertes.length, 1);
+    assert.equal((await s.supprimerAlerte('paul', id)).alertes.length, 4);
+  });
+
+  it('signalements : l’équipe retire un groupe de l’annuaire, ses membres le gardent', async () => {
+    const { groupe } = await creer();
+    await assert.rejects(s.signaler('orga', groupe.id, 'arnaque'), /propre groupe/);
+    await s.signaler('paul', groupe.id, 'arnaque', 'Demande de payer hors de Me');
+    await s.signaler('paul', groupe.id, 'trompeur');
+    await s.signaler('marie', groupe.id, 'autre');
+    const liste = (await s.adminSignalements()).signalements;
+    assert.equal(liste.length, 1);
+    assert.equal(liste[0].nombre, 2);
+    assert.deepEqual(liste[0].motifs.map((m) => m.motif).sort(), ['autre', 'trompeur']);
+    assert.equal((await s.adminDeciderSignalement({ id: 'admin', nom: 'Admin', admin: true }, groupe.id, 'retirer')).signalements.length, 0);
+    assert.equal((await s.annuaire(null)).groupes.length, 0);
+    await assert.rejects(s.adherer(marie, groupe.id), /plus dans l’annuaire/);
+    assert.equal((await s.groupeAnnuaire('orga', groupe.id)).groupe.nom, 'Famille');
+    assert.equal(avis.some((a) => a.userId === 'orga' && a.cle === `tontine:retire:${groupe.id}`), true);
+    await s.signaler('paul', groupe.id, 'arnaque');
+    await s.adminDeciderSignalement({ id: 'admin', nom: 'Admin', admin: true }, groupe.id, 'rejeter');
+    assert.equal(b.signalements.lignes.every((x) => x.statut !== 'ouvert'), true);
   });
 
   it('respecte les limites de l’admin, à la création seulement', async () => {

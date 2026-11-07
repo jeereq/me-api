@@ -64,6 +64,8 @@ model User {
   paiements    Paiement[]
   cotisations  Cotisation[]
   tontinesOrganisees Tontine[]
+  alertesAnnuaire    AlerteAnnuaire[]
+  signalements       SignalementTontine[]
   tontines     TontineMembre[]
   approbation  ApprobationCompte?
   analysesMails AnalyseMail[]
@@ -514,11 +516,14 @@ model Tontine {
   /// ouvert, en_cours, termine ou annule
   etat           String   @default("ouvert")
   tourCourant    Int      @default(0)
+  /// Retiré de l'annuaire par l'équipe après des signalements : le groupe continue pour ses membres.
+  retireAnnuaireLe DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   membres        TontineMembre[]
   tours          TontineTour[]
   mouvements     TontineMouvement[]
+  signalements   SignalementTontine[]
 
   @@index([etat, createdAt])
   @@index([organisateurId])
@@ -621,3 +626,36 @@ model ApprobationCompte {
 
   @@index([statut, updatedAt])
 }
+
+/// Une recherche enregistrée : Me prévient quand un nouveau groupe de l'annuaire y correspond.
+model AlerteAnnuaire {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// q, mode, rythme, devise, montantMax
+  filtres   Json
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// Un groupe de l'annuaire signalé à l'équipe de Me.
+model SignalementTontine {
+  id        String    @id @default(cuid())
+  tontineId String
+  tontine   Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// arnaque, trompeur, inapproprie ou autre
+  motif     String
+  texte     String?
+  /// ouvert, retire ou rejete
+  statut    String    @default("ouvert")
+  traitePar String?
+  traiteLe  DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([tontineId, userId])
+  @@index([statut])
+}
+
