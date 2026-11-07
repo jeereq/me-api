@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { cleAlerte, confianceDe, correspondAlerte, trier } = await import('../src/services/cotisations/annuaire.js');
+const { cheminGroupe, cleAlerte, confianceDe, correspondAlerte, trier } = await import('../src/services/cotisations/annuaire.js');
 const { alerteAnnuaireSchema, filtresAnnuaireSchema, signalerTontineSchema } = await import('../src/validators/schemas.js');
 
 describe('outils de l’annuaire', () => {
@@ -30,6 +30,10 @@ describe('outils de l’annuaire', () => {
       new Date('2026-03-15T00:00:00Z'),
     );
     assert.deepEqual(c, { termines: 1, versements: 2, aTemps: 1, depuis: '2026-03' });
+  });
+  it('fait un lien lisible pour chaque groupe', () => {
+    assert.equal(cheminGroupe({ id: 'ck1', nom: 'Tontine des Commerçants !' }), '/annuaire/tontine-des-commercants-ck1');
+    assert.equal(cheminGroupe({ id: 'ck2', nom: '!!!' }), '/annuaire/groupe-ck2');
   });
   it('valide les filtres, les alertes et les signalements', () => {
     assert.deepEqual(filtresAnnuaireSchema.parse({ tri: 'places', ouverts: '1' }), { tri: 'places', ouverts: true });

@@ -11,6 +11,18 @@ export type FiltresAnnuaire = FiltresAlerte & { tri?: TriAnnuaire; ouverts?: boo
 export type Confiance = { termines: number; versements: number; aTemps: number; depuis: string | null };
 
 export const MAX_ALERTES = 5;
+
+/** « Tontine des commerçants » devient « tontine-des-commercants ». L'identifiant, sans tiret, termine le lien. */
+export const slugGroupe = (nom: string) =>
+  nom
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '') || 'groupe';
+export const cheminGroupe = (t: { id: string; nom: string }) => `/annuaire/${slugGroupe(t.nom)}-${t.id}`;
 export const MOTIFS_SIGNALEMENT = ['arnaque', 'trompeur', 'inapproprie', 'autre'] as const;
 export type MotifSignalement = (typeof MOTIFS_SIGNALEMENT)[number];
 

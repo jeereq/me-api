@@ -725,6 +725,7 @@ describe('une tontine de bout en bout', () => {
     const pub = (await s.groupeAnnuaire(null, groupe.id)).groupe;
     assert.equal(pub.nom, 'Famille');
     assert.equal(pub.organisateurPhoto, null);
+    assert.equal(pub.lien, `https://app.test/annuaire/famille-${groupe.id}`);
     assert.deepEqual(pub.confiance, { termines: 0, versements: 0, aTemps: 0, depuis: null });
     const ancien = b.tontines.lignes[0];
     b.tontines.lignes.push({ ...ancien, id: 'vieux', etat: 'termine', nom: 'Vieux' });

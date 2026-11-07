@@ -7,7 +7,7 @@ import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
 import { local } from '../integrations/http.js';
-import { cleAlerte, confianceDe, correspondAlerte, MAX_ALERTES, trier, type Confiance, type FiltresAlerte, type FiltresAnnuaire, type MotifSignalement } from './annuaire.js';
+import { cheminGroupe, cleAlerte, confianceDe, correspondAlerte, MAX_ALERTES, trier, type Confiance, type FiltresAlerte, type FiltresAnnuaire, type MotifSignalement } from './annuaire.js';
 import type { AvisGroupe } from './envois.js';
 
 /** À changer avec la section « Tontines » de cgv.html. */
@@ -152,6 +152,8 @@ export function creerTontines(d: DepsTontines) {
     ...repartitionCagnotte(t.montant, t.places, t.commissionBps),
     monEtat: t.membres.find((m) => m.userId === userId)?.etat ?? null,
     confiance,
+    /** La page du groupe dans l'annuaire, à partager. */
+    lien: t.visibilite === 'public' && d.adresseApp() ? `${d.adresseApp()}${cheminGroupe(t)}` : null,
   });
 
   function vue(t: TontineComplete, userId: string, mvts: Mouvement[]) {
