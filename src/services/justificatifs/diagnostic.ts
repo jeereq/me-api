@@ -30,7 +30,7 @@ export async function diagnosticFichiers(): Promise<{ ok: boolean; etapes: Etape
 
   // 2. La configuration.
   const c = configCloudinary();
-  etapes.push(c ? { etape: 'Configuration Cloudinary', ok: true, detail: `compte « ${c.cloud} », clé …${c.cle.slice(-4)}` } : { etape: 'Configuration Cloudinary', ok: false, detail: 'CLOUDINARY_URL absente ou mal écrite (attendu : cloudinary://<clé>:<secret>@<compte>)' });
+  etapes.push(c ? { etape: 'Configuration Cloudinary', ok: true, detail: `compte « ${c.cloud} », clé …${c.cle.slice(-4)} (${c.cle.length} chiffres), secret de ${c.secret.length} caractères${/^\*+$/.test(c.secret) ? ' : ce sont des étoiles, copie le vrai secret' : ''}` } : { etape: 'Configuration Cloudinary', ok: false, detail: 'CLOUDINARY_URL absente ou mal écrite (attendu : cloudinary://<clé>:<secret>@<compte>)' });
   if (!c) return fin();
 
   // 3. La clé.
@@ -38,7 +38,7 @@ export async function diagnosticFichiers(): Promise<{ ok: boolean; etapes: Etape
     await Cloudinary.verifier(c);
     etapes.push({ etape: 'Clé Cloudinary', ok: true, detail: 'acceptée' });
   } catch (e) {
-    etapes.push({ etape: 'Clé Cloudinary', ok: false, detail: raisonCloudinary(e) });
+    etapes.push({ etape: 'Clé Cloudinary', ok: false, detail: raisonCloudinary(e, true) });
     return fin();
   }
 
@@ -49,7 +49,7 @@ export async function diagnosticFichiers(): Promise<{ ok: boolean; etapes: Etape
     await Cloudinary.supprimer(c, d.publicId, 'image', 'authenticated').catch(() => {});
     etapes.push({ etape: 'Dépôt d’essai', ok: true, detail: 'déposé puis effacé' });
   } catch (e) {
-    etapes.push({ etape: 'Dépôt d’essai', ok: false, detail: raisonCloudinary(e) });
+    etapes.push({ etape: 'Dépôt d’essai', ok: false, detail: raisonCloudinary(e, true) });
   }
   return fin();
 }

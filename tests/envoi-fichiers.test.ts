@@ -43,3 +43,27 @@ describe('envoi de fichiers', () => {
     }
   });
 });
+
+describe('signature Cloudinary', () => {
+  it('réessaie en SHA-256 quand le compte refuse la signature SHA-1', async () => {
+    const { Cloudinary } = await import('../src/services/justificatifs/cloudinary.js');
+    const vus: string[] = [];
+    const avant = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, o: { body: FormData }) => {
+      const algo = o.body.get('signature_algorithm') ? 'sha256' : 'sha1';
+      vus.push(algo);
+      if (algo === 'sha1') return new Response(JSON.stringify({ error: { message: 'Invalid Signature abc. String to sign - folder=x&timestamp=1' } }), { status: 401 });
+      return new Response(JSON.stringify({ public_id: 'x/p', secure_url: 'https://res/x', resource_type: 'image', format: 'png', bytes: 3 }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const d = await Cloudinary.deposer({ cloud: 'c', cle: 'k', secret: 's' }, { contenu: new Blob(['abc']), nom: 'p.png' }, 'x', 'image');
+      assert.equal(d.publicId, 'x/p');
+      assert.deepEqual(vus, ['sha1', 'sha256']);
+    } finally {
+      globalThis.fetch = avant;
+    }
+  });
+  it('le diagnostic montre la réponse exacte de Cloudinary', () => {
+    assert.match(raisonCloudinary(new ErreurCloudinary(401, 'Invalid api_key 123'), true), /réponse de Cloudinary : « Invalid api_key 123 »/);
+  });
+});
