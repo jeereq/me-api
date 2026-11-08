@@ -117,6 +117,18 @@ export const TontineController = {
     if (req.params.userId === req.user!.id && req.user!.role !== 'ADMIN') throw new HttpError(403, 'Un autre responsable doit valider ton compte.');
     res.json(await A.decider(req.user!.nom || req.user!.email, p(req.params.userId), req.body.approuve, req.body.motif));
   },
+  reglerRegles: async (req: Request, res: Response) => {
+    res.json(await S.reglerRegles(req.user!.id, p(req.params.id), req.body));
+  },
+  ordonner: async (req: Request, res: Response) => {
+    res.json(await S.ordonner(req.user!.id, p(req.params.id), req.body.membres));
+  },
+  noterEspeces: async (req: Request, res: Response) => {
+    res.json(await S.noterEspeces(req.user!.id, p(req.params.membreId)));
+  },
+  exclure: async (req: Request, res: Response) => {
+    res.json(await S.exclure(req.user!.id, p(req.params.membreId)));
+  },
   reglerRappels: async (req: Request, res: Response) => {
     res.json(await S.reglerRappels(req.user!.id, p(req.params.id), req.body));
   },
