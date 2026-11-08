@@ -8,7 +8,18 @@ import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
 import { local } from '../integrations/http.js';
 import { cheminGroupe, cleAlerte, confianceDe, correspondAlerte, MAX_ALERTES, trier, type Confiance, type FiltresAlerte, type FiltresAnnuaire, type MotifSignalement } from './annuaire.js';
+import { tientEnUnSms } from '../sms/asmsc.js';
 import type { AvisGroupe } from './envois.js';
+
+/** Le SMS d'invitation : le lien doit arriver entier, quitte à raccourcir le nom du groupe. */
+export function smsInvitation(qui: string, nom: string, montant: string, lien: string): string {
+  const qui2 = qui ? `${qui} t'invite` : 'Invitation';
+  for (const n of [nom, nom.length > 24 ? `${nom.slice(0, 22).trimEnd()}…` : null]) {
+    if (!n) continue;
+    for (const t of [`${qui2} à la cotisation « ${n} » : ${montant}. Rejoindre : ${lien}`, `${qui2} à « ${n} » (${montant}) : ${lien}`]) if (tientEnUnSms(t)) return t;
+  }
+  return `Invitation Me : ${lien}`;
+}
 
 /** À changer avec la section « Tontines » de cgv.html. */
 export const VERSION_CONDITIONS_TONTINE = '2026-11-06';
@@ -67,7 +78,7 @@ export type DepsTontines = {
   /** Les limites réglées par l'admin. */
   limites(): Promise<LimitesCotisation>;
   /** Une invitation envoyée par Me, selon les canaux du système. */
-  envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string }): Promise<{ mail: boolean; sms: boolean }>;
+  envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string; sms?: string }): Promise<{ mail: boolean; sms: boolean }>;
   maintenant?: () => number;
   /** Pour les tests : le tirage au sort. */
   tirer?: (max: number) => number;
@@ -216,7 +227,7 @@ export function creerTontines(d: DepsTontines) {
     const fait = await d.db.tontineTour.updateMany({ where: { id: tourId, etat: 'collecte' }, data: { etat: 'a_verser' } });
     if (!fait.count) return;
     const b = t.membres.find((m) => m.id === tour.beneficiaireId);
-    if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:complet:${tourId}`, titre: 'Ta cagnotte est complète', corps: `« ${t.nom} » : ${montantCotisation(tour.net, t.devise)} en cours de validation.` }).catch((e) => console.error('Avis de tontine', e));
+    if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:complet:${tourId}`, titre: 'Ta cagnotte est complète', corps: `${montantCotisation(tour.net, t.devise)} réunis dans « ${t.nom} », en cours de validation. Tu seras prévenu au versement.` }).catch((e) => console.error('Avis de tontine', e));
   }
 
   /** Argent reçu et vérifié. */
@@ -285,7 +296,7 @@ export function creerTontines(d: DepsTontines) {
       return;
     }
     const b = t.membres.find((m) => m.id === tour.beneficiaireId);
-    if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:verse:${tourId}`, titre: 'Ta cagnotte est versée', corps: `« ${t.nom} » : ${montantCotisation(tour.net, t.devise)}.` }).catch((e) => console.error('Avis de tontine', e));
+    if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:verse:${tourId}`, titre: 'Ta cagnotte est versée', corps: `${montantCotisation(tour.net, t.devise)} du groupe « ${t.nom} » t’ont été versés.` }).catch((e) => console.error('Avis de tontine', e));
     const suivant = t.tours.find((x) => x.numero === tour.numero + 1);
     if (!suivant) {
       await d.db.tontine.update({ where: { id: t.id }, data: { etat: 'termine' } });
@@ -671,7 +682,8 @@ export function creerTontines(d: DepsTontines) {
       if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
       await d.exigerNumero(telephone);
       const qui = prenomDe(t.organisateur?.nom ?? '');
-      const envoi = await d.envoyerInvitation(userId, { telephone, titre: `Invitation « ${t.nom} »`, texte: `${qui ? `${qui} t'invite` : 'Tu es invité'} à la cotisation « ${t.nom} » : ${montantTontine(t.montant, t.devise, t.rythme as RythmeObjectif)}. Rejoindre : ${lien}` });
+      const texte = `${qui ? `${qui} t'invite` : 'Tu es invité'} à la cotisation « ${t.nom} » : ${montantTontine(t.montant, t.devise, t.rythme as RythmeObjectif)}. Rejoindre : ${lien}`;
+      const envoi = await d.envoyerInvitation(userId, { telephone, titre: `Invitation « ${t.nom} »`, texte, sms: smsInvitation(qui, t.nom, montantTontine(t.montant, t.devise, t.rythme as RythmeObjectif), lien) });
       if (!envoi.mail && !envoi.sms) throw new HttpError(503, 'Aucun envoi possible : vérifie la configuration ou la limite du jour.');
       return envoi;
     },
@@ -706,7 +718,7 @@ export function creerTontines(d: DepsTontines) {
       if (!accueille(t) || m.etat !== 'demande') throw new HttpError(409, 'Cette demande n’est plus ouverte.');
       if (accepte && acceptes(t).length >= t.places) throw new HttpError(409, 'Le groupe est complet.');
       await d.db.tontineMembre.update({ where: { id: m.id }, data: { etat: accepte ? 'accepte' : 'refuse' } });
-      if (m.userId) await d.avertir(m.userId, contactDe(m).telephone, accepte ? { cle: `tontine:accepte:${m.id}`, titre: 'Demande acceptée', corps: `« ${t.nom} » : paie ta caution de ${montantCotisation(t.montant, t.devise)}.` } : { cle: `tontine:refuse:${m.id}`, titre: 'Demande refusée', corps: `« ${t.nom} ».` }).catch((e) => console.error('Avis de tontine', e));
+      if (m.userId) await d.avertir(m.userId, contactDe(m).telephone, accepte ? { cle: `tontine:accepte:${m.id}`, titre: 'Demande acceptée', corps: `Tu entres dans « ${t.nom} ». Dernière étape : paie ta caution de ${montantCotisation(t.montant, t.devise)}.` } : { cle: `tontine:refuse:${m.id}`, titre: 'Demande refusée', corps: `L’organisateur de « ${t.nom} » n’a pas accepté ta demande. D’autres groupes t’attendent dans l’annuaire.` }).catch((e) => console.error('Avis de tontine', e));
       return relire(t.id, userId);
     },
 
@@ -729,7 +741,7 @@ export function creerTontines(d: DepsTontines) {
       if (estObjectif(t) && (await mouvementsDe(id)).some((x) => x.genre === 'cotisation' && ['paye', 'en_attente'].includes(x.statut))) throw new HttpError(409, 'Des paiements existent : la cotisation va jusqu’à sa date de fin.');
       await d.db.tontine.update({ where: { id }, data: { etat: 'annule' } });
       await d.db.tontineMembre.updateMany({ where: { tontineId: id, cautionStatut: 'payee' }, data: { cautionStatut: 'a_rendre' } });
-      await prevenirTous(t, `tontine:annule:${id}`, { titre: 'Groupe annulé', corps: `« ${t.nom} » : une caution payée te sera rendue.` }, t.membres.find((m) => m.userId === userId)?.id);
+      await prevenirTous(t, `tontine:annule:${id}`, { titre: 'Groupe annulé', corps: `« ${t.nom} » est annulé. Si tu as payé une caution, elle te sera rendue.` }, t.membres.find((m) => m.userId === userId)?.id);
       return relire(id, userId);
     },
 
@@ -850,7 +862,7 @@ export function creerTontines(d: DepsTontines) {
         {
           cle: `tontine:rappel:${m.id}:${du.tourId ?? 'caution'}:${jourDe(t)}`,
           titre: du.genre === 'caution' ? `Caution à payer : ${montantCotisation(du.montant, t.devise)}` : `Cotisation à payer : ${montantCotisation(du.montant, t.devise)}`,
-          corps: `« ${t.nom} ».`,
+          corps: `Groupe « ${t.nom} ». L’organisateur te le rappelle : paie dans Me, onglet Cotisations.`,
         },
         { mail: reglage.mail, sms: reglage.sms },
       );
@@ -881,7 +893,7 @@ export function creerTontines(d: DepsTontines) {
       const fait = await d.db.tontineMembre.updateMany({ where: { id: m.id, cautionStatut: 'payee' }, data: { cautionStatut: 'utilisee' } });
       if (!fait.count) throw new HttpError(409, 'Ce membre n’a plus de caution : le groupe est bloqué, contacte l’administrateur.');
       await d.db.tontineMouvement.create({ data: { reference: reference(), tontineId: t.id, membreId: m.id, tourId: tour.id, genre: 'caution_utilisee', montant: t.montant, devise: t.devise, mode: 'interne', statut: 'paye', payeLe: new Date(maintenant()) } });
-      if (m.userId) await d.avertir(m.userId, contactDe(m).telephone, { cle: `tontine:couvert:${m.id}:${tour.id}`, titre: 'Ta caution a couvert ta cotisation', corps: `« ${t.nom} » : refais ta caution de ${montantCotisation(t.montant, t.devise)}.` }).catch((e) => console.error('Avis de tontine', e));
+      if (m.userId) await d.avertir(m.userId, contactDe(m).telephone, { cle: `tontine:couvert:${m.id}:${tour.id}`, titre: 'Ta caution a couvert ta cotisation', corps: `L’échéance de « ${t.nom} » était passée. Refais ta caution (${montantCotisation(t.montant, t.devise)}) pour rester dans le groupe.` }).catch((e) => console.error('Avis de tontine', e));
       await fermerCollecte(t.id, tour.id);
       return relire(t.id, userId);
     },
@@ -959,8 +971,8 @@ export function creerTontines(d: DepsTontines) {
               contactDe(m).telephone,
               {
                 cle: `tontine:echeance:${tour.id}:${m.id}:${moment}`,
-                titre: retard ? `Cotisation en retard : ${montantCotisation(t.montant, t.devise)}` : moment === 'avant:0' ? `Cotisation à payer aujourd’hui : ${montantCotisation(t.montant, t.devise)}` : `Cotisation à payer avant le ${date}`,
-                corps: estObjectif(t) ? `« ${t.nom} ».` : `« ${t.nom} », tour ${tour.numero} sur ${t.places}.`,
+                titre: retard ? `Cotisation en retard : ${montantCotisation(t.montant, t.devise)}` : moment === 'avant:0' ? `Cotisation à payer aujourd’hui : ${montantCotisation(t.montant, t.devise)}` : `Cotisation de ${montantCotisation(t.montant, t.devise)} à payer avant le ${date}`,
+                corps: `Groupe « ${t.nom} »${estObjectif(t) ? '' : `, tour ${tour.numero} sur ${t.places}`}. ${retard ? `L’échéance du ${date} est passée : paie dès que possible.` : 'Paie dans Me, onglet Cotisations.'}`,
               },
               { mail: reglage.mail, sms: reglage.sms },
             )

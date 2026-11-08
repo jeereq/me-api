@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { aDroit, etatAbonnement, FONCTIONS_PRO } from '../src/services/abonnements/offres.js';
-import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, placeSms, raisonPanne, rappelsParSms, rappelSecondaire, statutLivraison, texteCode, texteRappels, texteReinitialisation, type ConfigSms } from '../src/services/sms/asmsc.js';
+import { adresseService, Asmsc, cleValide, codeValide, configSms, creerCode, empreinteCode, ErreurSms, preparerTexte, placeSms, raisonPanne, rappelsParSms, rappelSecondaire, statutLivraison, texteCode, texteRappels, texteReinitialisation, tientEnUnSms, composerSms, phrase, type ConfigSms } from '../src/services/sms/asmsc.js';
 
 const fetchOrigine = globalThis.fetch;
 afterEach(() => {
@@ -126,8 +126,14 @@ describe('texte d’un SMS', () => {
     assert.equal(r.texte, `${'€'.repeat(78)}...`);
   });
   it('un rappel seul donne son titre et son texte, plusieurs leur nombre et leurs titres', () => {
-    assert.equal(texteRappels([{ titre: 'A', corps: 'détail' }]), 'A. détail');
-    assert.equal(texteRappels([{ titre: 'A', corps: 'x' }, { titre: 'B', corps: 'y' }]), '2 rappels : A ; B');
+    assert.equal(texteRappels([{ titre: 'A', corps: 'détail' }]), 'A. Détail.');
+    assert.equal(texteRappels([{ titre: 'A', corps: 'x' }, { titre: 'B', corps: 'y' }]), 'A. X. B. Y.');
+    // Trop long pour tout dire : le détail du premier, le titre des suivants, et combien restent.
+    const longs = Array.from({ length: 6 }, (_, i) => ({ titre: `Rappel numéro ${i + 1}`, corps: `Un détail assez long pour le rappel numéro ${i + 1}.` }));
+    const t = texteRappels(longs);
+    assert.match(t, /^Rappel numéro 1\. Un détail assez long pour le rappel numéro 1\./);
+    assert.match(t, /\+\d autres? dans Me\.$/);
+    assert.ok(tientEnUnSms(t));
   });
 });
 
@@ -249,5 +255,27 @@ describe('droits', () => {
     assert.equal(aDroit(etatAbonnement({ abonnementFormule: 'pro', abonnementFinLe: fin }, maintenant, true, null), 'sms'), true);
     assert.equal(aDroit(etatAbonnement({ abonnementFormule: 'finances', abonnementFinLe: fin }, maintenant, true, null), 'sms'), false);
     assert.equal(aDroit(etatAbonnement({}, maintenant, true, null), 'sms'), false);
+  });
+});
+
+describe('SMS clairs', () => {
+  it('écrit des phrases propres, sans emoji', () => {
+    assert.equal(phrase('  🍽 repas   dépassé '), 'Repas dépassé.');
+    assert.equal(phrase('Prêt ?'), 'Prêt ?');
+  });
+  it('ne coupe jamais un lien : il passe en entier, sinon l’adresse du site', () => {
+    const lien = 'https://me.neevo.app/finances?onglet=cotisations';
+    assert.equal(composerSms(['Cotisation de 10 $ à payer', 'Groupe « A ».'], lien), `Cotisation de 10 $ à payer. Groupe « A ». ${lien}`);
+    const long = composerSms(['Cotisation de 10 $ à payer avant le 12/11', 'Groupe « Commerçants de Limete », tour 3 sur 10. Paie dans Me, onglet Cotisations.'], lien);
+    assert.ok(long.endsWith(' me.neevo.app') && tientEnUnSms(long), long);
+  });
+  it('garde les phrases entières, dans l’ordre', () => {
+    const t = composerSms(['Essentiel', 'x'.repeat(200), 'Court']);
+    assert.equal(t, 'Essentiel. Court.');
+  });
+  it('coupe un texte trop long entre deux mots', () => {
+    const t = preparerTexte('mot '.repeat(60));
+    assert.match(t.texte, /mot\.\.\.$/);
+    assert.equal(t.coupe, true);
   });
 });

@@ -13,6 +13,7 @@
     "prets.ts",
     "previsions.ts",
     "projets.ts",
+    "rapport.ts",
     "signature.ts"
   ]
 }
