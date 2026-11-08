@@ -80,7 +80,8 @@ export function somme(n: number, devise: string): string {
   const a = Math.abs(n);
   const v = a >= 100 ? Math.round(a) : Math.round(a * 100) / 100;
   const [e, d] = (v % 1 ? v.toFixed(2) : String(v)).split('.');
-  return `${n < 0 ? '-' : ''}${e.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}${d ? `,${d}` : ''} ${devise}`;
+  // Espaces insécables : un montant ne se coupe pas en fin de ligne (le SMS les remet en espaces simples).
+  return `${n < 0 ? '-' : ''}${e.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0')}${d ? `,${d}` : ''}\u00a0${devise}`;
 }
 const decimal = (n: number) => String(Math.round(n * 10) / 10).replace('.', ',');
 

@@ -5,6 +5,9 @@ import { aDesFinances, periodeCourte, periodeDite, rapportDepenses, rapportsDuSo
 import { avisRapport, emailRapport, smsRapport } from '../src/services/rapport-email.js';
 import { preparerTexte, tientEnUnSms } from '../src/services/sms/asmsc.js';
 
+/** Les montants ont des espaces insécables. */
+const n = (s: string) => s.replace(/\u00a0/g, ' ');
+
 const dep = (id: string, date: string, montant: number, cat: string, note = '') => ({ id, date, montant, categories: [cat], budget: null, note });
 const noms = [{ id: 'c1', nom: 'Repas', emoji: '🍽' }, { id: 'c2', nom: 'Transport' }, { id: 'c3', nom: 'Logement' }];
 const f = {
@@ -35,9 +38,9 @@ describe('rapport des dépenses', () => {
     assert.equal(periodeDite('trimestre', '2026-11-08'), 'du 4e trimestre 2026');
     assert.equal(periodeDite('annee', '2026-11-08'), 'de 2026');
     assert.equal(periodeCourte('trimestre', '2026-10-01'), 'T4 2026');
-    assert.equal(somme(372000, 'FC'), '372 000 FC');
-    assert.equal(somme(12.5, '$'), '12,50 $');
-    assert.equal(somme(15285.71, 'FC'), '15 286 FC');
+    assert.equal(somme(372000, 'FC'), '372\u00a0000\u00a0FC');
+    assert.equal(n(somme(12.5, '$')), '12,50 $');
+    assert.equal(n(somme(15285.71, 'FC')), '15 286 FC');
   });
 
   it('le jour : total, catégories, budget dépassé, reste du mois, habitude', () => {
@@ -51,8 +54,8 @@ describe('rapport des dépenses', () => {
     assert.deepEqual(r.resteMois, { reste: 372000, jours: 22, parJour: 16909 });
     assert.ok(r.habitude! > 15000 && r.habitude! < 15500);
     assert.deepEqual(r.conseils.map((c) => c.ton), ['alerte', 'conseil', 'alerte']);
-    assert.match(r.conseils[0].texte, /au-dessus du budget\. Vise moins de 10 000 FC demain/);
-    assert.equal(r.conseils[1].court, 'Reste du mois : 372 000 FC, soit 16 909 FC/jour.');
+    assert.match(n(r.conseils[0].texte), /au-dessus du budget\. Vise moins de 10 000 FC demain/);
+    assert.equal(n(r.conseils[1].court), 'Reste du mois : 372 000 FC, soit 16 909 FC/jour.');
   });
 
   it('le mois et l’année : revenus, épargne, ce qui pèse le plus', () => {
@@ -60,7 +63,7 @@ describe('rapport des dépenses', () => {
     assert.equal(m.revenus, 900000);
     assert.equal(m.resteMois, null);
     assert.ok(m.conseils.some((c) => c.ton === 'bravo' && /resté de côté/.test(c.texte)));
-    assert.ok(m.conseils.some((c) => /Logement fait 88 %/.test(c.texte)));
+    assert.ok(m.conseils.some((c) => /Logement fait 88 %/.test(n(c.texte))));
     const a = rapportDepenses(f, 'annee', '2026-11-08', '2026-11-08', noms);
     assert.equal(a.titre, 'Tes dépenses de 2026');
     assert.equal(a.depenses, 468000);
@@ -88,7 +91,7 @@ describe('rapport des dépenses', () => {
     assert.ok(s.startsWith('Dépenses du 8/11 : 28 000 FC (3 dépenses). Repas dépassé de 10 000 FC.'), s);
     assert.ok(tientEnUnSms(s));
     assert.equal(preparerTexte(s).encodage, 'T');
-    assert.match(avisRapport(r).corps, /^28 000 FC dépensés en 3 dépenses/);
+    assert.match(n(avisRapport(r).corps), /^28 000 FC dépensés en 3 dépenses/);
     const e = emailRapport([r, rapportDepenses(f, 'semaine', '2026-11-08', '2026-11-08', noms)], 'Jeereq', 'https://me.neevo.app/finances');
     assert.equal(e.sujet, 'Tes dépenses du 8 novembre et de la semaine du 2 au 8 novembre');
     assert.match(e.html, /Conseils/);

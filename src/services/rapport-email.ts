@@ -3,7 +3,7 @@ import { composerSms } from './sms/asmsc.js';
 
 const echapper = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const TON = { alerte: '#FF6474', conseil: '#FFCB5C', bravo: '#3EF0B0' } as const;
-export const PIED_RAPPORT = 'Tu reçois ce rapport parce que tu as un abonnement Me. Tu peux le couper ou changer son heure dans Finances › Alertes.';
+export const PIED_RAPPORT = 'Tu reçois ce rapport parce que tu as un abonnement Me. Tu peux le couper ou changer son heure dans Finances › Réglages.';
 
 /** Le SMS d'un rapport : le total d'abord, puis les conseils qui tiennent, et le lien s'il tient en entier. */
 export function smsRapport(r: Rapport, lien?: string | null): string {
