@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { CAGNOTTE_MAX, COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesGroupe, type ReglesPartielles, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
+import { CAGNOTTE_MAX, COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesPartielles, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
