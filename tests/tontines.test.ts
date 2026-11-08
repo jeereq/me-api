@@ -4,7 +4,7 @@ import { beforeEach, describe, it } from 'node:test';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 
-const { echeancesTontine, limitesDe, LIMITES_DEFAUT, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
+const { echeancesTontine, limitesDe, LIMITES_DEFAUT, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, reglesPlateformeDe, REGLES_PLATEFORME_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
 const { tontineAdhererSchema, tontineCreerSchema, tontineRappelsSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
 const { FONCTIONS_FINANCES, formuleDe, photoManquante } = await import('../src/services/abonnements/offres.js');
@@ -204,6 +204,8 @@ describe('une tontine de bout en bout', () => {
   let approuves: Set<string>;
   let limites: { montantMax: { USD: number; CDF: number }; membresMax: number };
   let invitations: Ligne[];
+  // Les anciens tests : 5 % partout, et chaque membre lance son paiement.
+  let cadre = reglesPlateformeDe({ prive: { demandes: 'tous' }, public: { commissionBps: 500, demandes: 'tous' } });
   const JOUR = 86400000;
   const orga = { id: 'orga', nom: 'Jeereq Takango', fuseau: 'Africa/Kinshasa', telephone: '243812345670' };
   const paul = { id: 'paul', nom: 'Paul Kasongo', fuseau: 'Africa/Kinshasa', telephone: '243812345671' };
@@ -224,6 +226,7 @@ describe('une tontine de bout en bout', () => {
     approuves = new Set(['orga', 'paul', 'marie']);
     limites = limitesDe(null);
     invitations = [];
+    cadre = reglesPlateformeDe({ prive: { demandes: 'tous' }, public: { commissionBps: 500, demandes: 'tous' } });
     s = creerTontines({
       db: b.db,
       flexpaie: {
@@ -259,6 +262,7 @@ describe('une tontine de bout en bout', () => {
         return { mail: false, sms: true };
       },
       responsablesVersements: async () => ['admin'],
+      reglesPlateforme: async () => cadre,
       maintenant: () => instant,
       // Tirage fixe : l'ordre reste celui de la liste.
       tirer: (max) => max - 1,
@@ -996,6 +1000,36 @@ describe('une tontine de bout en bout', () => {
     assert.ok(avis.some((a) => a.userId === 'admin' && /^Relance/.test(a.titre)));
     const r = await s.resumeAdmin();
     assert.equal(r.versements[0].demandes, 2);
+  });
+
+  it('règles de la plateforme : 10 % dans l’annuaire, demandes par l’initiateur', async () => {
+    cadre = REGLES_PLATEFORME_DEFAUT;
+    const pub = (await creer()).groupe;
+    assert.equal(pub.commissionBps, 1000);
+    assert.deepEqual([pub.brut, pub.commission, pub.net], [3000, 300, 2700]);
+    assert.equal(pub.demandesParInitiateur, true);
+    const pv = (await s.creer(orga, { nom: 'Amis', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 2, mode: 'rotation', visibilite: 'prive', cautionRequise: false, telephone: '0812345670' })).groupe;
+    assert.equal(pv.commission, 100);
+    // Un membre ne lance pas lui-même la demande ; l'initiateur, si.
+    await s.adherer(paul, pub.id);
+    await s.decider('orga', b.membres.lignes.find((x) => x.userId === 'paul')!.id, true);
+    await assert.rejects(s.payer('paul', pub.id, 'caution'), /t’enverra la demande/);
+    await s.payer('orga', pub.id, 'caution');
+    await s.demanderPaiement('orga', b.membres.lignes.find((x) => x.userId === 'paul')!.id);
+    assert.equal(demandes.at(-1)!.telephone, '243812345671');
+  });
+
+  it('règles de la plateforme : cadre imposé aux règles du groupe', async () => {
+    cadre = reglesPlateformeDe({ prive: { especes: false, penaliteMaxPct: 10, compteApprouve: true, retardsMax: 1, cautionObligatoire: true } });
+    const g = (await prive({ especes: true, penalite: { montant: 500, grace: 0 }, entree: { retardsMax: 3 } })).groupe;
+    assert.equal(g.regles.especes, false);
+    assert.equal(g.regles.penalite.montant, 100);
+    assert.equal(g.regles.entree.compteApprouve, true);
+    assert.equal(g.regles.entree.retardsMax, 1);
+    assert.equal(g.cautionRequise, true);
+    // L'annuaire n'accepte jamais d'espèces et exige toujours l'approbation.
+    assert.deepEqual([reglesPlateformeDe({ public: { especes: true, compteApprouve: false } }).public.especes, reglesPlateformeDe({ public: { compteApprouve: false } }).public.compteApprouve], [false, true]);
+    assert.equal(reglesPlateformeDe({ prive: { commissionBps: 99999 } }).prive.commissionBps, 500);
   });
 });
 
