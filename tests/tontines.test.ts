@@ -258,6 +258,7 @@ describe('une tontine de bout en bout', () => {
         invitations.push(c);
         return { mail: false, sms: true };
       },
+      responsablesVersements: async () => ['admin'],
       maintenant: () => instant,
       // Tirage fixe : l'ordre reste celui de la liste.
       tirer: (max) => max - 1,
@@ -978,6 +979,23 @@ describe('une tontine de bout en bout', () => {
     assert.equal(demandes.at(-1)!.telephone, '243812345672');
     ouvert = () => false;
     await assert.rejects(s.demanderPaiement('orga', paulId), /pas encore ouvert/);
+  });
+
+  it('cagnotte complète : l’initiateur demande le versement, l’équipe est prévenue', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    await assert.rejects(s.demanderVersement('orga', id), /pas encore complète/);
+    await cotiserTous(id);
+    await assert.rejects(s.demanderVersement('paul', id), /organisateur/);
+    const g = (await s.demanderVersement('orga', id)).groupe;
+    assert.ok(g.tours[0].versementDemandeLe);
+    assert.ok(avis.some((a) => a.userId === 'admin' && /^Versement demandé : 28,50 USD/.test(a.titre)));
+    await assert.rejects(s.demanderVersement('orga', id), /relancer demain/);
+    instant += 25 * JOUR / 24;
+    await s.demanderVersement('orga', id);
+    assert.ok(avis.some((a) => a.userId === 'admin' && /^Relance/.test(a.titre)));
+    const r = await s.resumeAdmin();
+    assert.equal(r.versements[0].demandes, 2);
   });
 });
 

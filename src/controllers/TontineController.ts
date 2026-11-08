@@ -126,6 +126,9 @@ export const TontineController = {
   demanderPaiement: async (req: Request, res: Response) => {
     res.json(await S.demanderPaiement(req.user!.id, p(req.params.membreId)));
   },
+  demanderVersement: async (req: Request, res: Response) => {
+    res.json(await S.demanderVersement(req.user!.id, p(req.params.id)));
+  },
   demanderATous: async (req: Request, res: Response) => {
     res.json(await S.demanderATous(req.user!.id, p(req.params.id)));
   },

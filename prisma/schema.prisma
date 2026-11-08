@@ -572,6 +572,9 @@ model TontineTour {
   net            Int
   /// Part payée en espèces, remise par l'organisateur : ni versée par Me, ni soumise à la commission.
   especes        Int      @default(0)
+  /// L'initiateur a demandé à l'équipe de verser la cagnotte : quand, et combien de fois.
+  versementDemandeLe DateTime?
+  versementDemandes  Int      @default(0)
   valideParNom   String?
   valideLe       DateTime?
   createdAt      DateTime @default(now())

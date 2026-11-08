@@ -35,4 +35,7 @@ export const TontineService = creerTontines({
     return limitesDe((c?.data as { limitesCotisations?: unknown } | null)?.limitesCotisations);
   },
   envoyerInvitation: (userId, c) => Envois.invitation(userId, c),
+  // Ceux qui valident les versements : les admins, et les commerciaux qui ont le module « versements ».
+  responsablesVersements: async () =>
+    (await prisma.user.findMany({ where: { OR: [{ role: 'ADMIN' }, { role: 'COMMERCIAL', modules: { has: 'versements' } }] }, select: { id: true } })).map((u) => u.id),
 });

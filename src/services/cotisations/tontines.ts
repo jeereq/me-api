@@ -80,6 +80,8 @@ export type DepsTontines = {
   limites(): Promise<LimitesCotisation>;
   /** Une invitation envoyée par Me, selon les canaux du système. */
   envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string; sms?: string }): Promise<{ mail: boolean; sms: boolean }>;
+  /** Ceux qui valident les versements (admins, commerciaux du module « versements »). */
+  responsablesVersements?: () => Promise<string[]>;
   maintenant?: () => number;
   /** Pour les tests : le tirage au sort. */
   tirer?: (max: number) => number;
@@ -230,7 +232,7 @@ export function creerTontines(d: DepsTontines) {
       reglesModifiables: orga && (estObjectif(t) ? !mvts.some((x) => x.genre === 'cotisation' && x.statut === 'paye') : t.etat === 'ouvert'),
       invitations: orga ? t.invitations.map((x) => ({ id: x.id, numero: x.numero, mail: x.mail, sms: x.sms, envois: x.envois, envoyeLe: x.envoyeLe, rejointLe: x.rejointLe })) : [],
       collecte: mvts.filter((x) => x.genre === 'cotisation' && x.statut === 'paye').reduce((n, x) => n + x.montant, 0),
-      final: tourFinal(t) ? { etat: tourFinal(t)!.etat, net: tourFinal(t)!.net, commission: tourFinal(t)!.commission } : null,
+      final: tourFinal(t) ? { etat: tourFinal(t)!.etat, net: tourFinal(t)!.net, commission: tourFinal(t)!.commission, versementDemandeLe: tourFinal(t)!.versementDemandeLe } : null,
       tourCourant: t.tourCourant,
       jour: jourDe(t),
       moi: moi ? { id: moi.id, etat: moi.etat, rang: moi.rang, cautionStatut: moi.cautionStatut, telephone: numeroMasque(contactDe(moi).telephone) } : null,
@@ -253,7 +255,7 @@ export function creerTontines(d: DepsTontines) {
           }))
         : [],
       demandes: orga ? t.membres.filter((m) => m.etat === 'demande').map((m) => ({ id: m.id, nom: contactDe(m).nom })) : [],
-      tours: (orga || estAccepte) && !estObjectif(t) ? t.tours.map((x) => ({ numero: x.numero, beneficiaire: x.beneficiaireId ? (parMembre.get(x.beneficiaireId)?.nom ?? '') : '', pourMoi: x.beneficiaireId === moi?.id, echeance: x.echeance, etat: x.etat, net: x.net, especes: x.especes })) : [],
+      tours: (orga || estAccepte) && !estObjectif(t) ? t.tours.map((x) => ({ numero: x.numero, beneficiaire: x.beneficiaireId ? (parMembre.get(x.beneficiaireId)?.nom ?? '') : '', pourMoi: x.beneficiaireId === moi?.id, echeance: x.echeance, etat: x.etat, net: x.net, especes: x.especes, versementDemandeLe: x.versementDemandeLe })) : [],
     };
   }
 
@@ -578,6 +580,8 @@ export function creerTontines(d: DepsTontines) {
     for (const x of verses) ligne(x.tontine.devise).commission += x.commission;
     const groupes = new Map<string, TontineComplete>();
     for (const id of new Set([...tours.map((x) => x.tontineId), ...cautions.map((m) => m.tontineId)])) groupes.set(id, await charger(id));
+    // Les versements demandés par l'initiateur d'abord, le plus ancien en tête.
+    tours.sort((a, b) => Number(!a.versementDemandeLe) - Number(!b.versementDemandeLe) || (a.versementDemandeLe?.getTime() ?? 0) - (b.versementDemandeLe?.getTime() ?? 0));
     return {
       versementApi: d.versementApi(),
       totaux: [...parDevise].map(([devise, v]) => ({ devise, ...v })),
@@ -585,7 +589,7 @@ export function creerTontines(d: DepsTontines) {
         const t = groupes.get(x.tontineId)!;
         const b = t.membres.find((m) => m.id === x.beneficiaireId);
         const contact = estObjectif(t) ? beneficiaireDe(t) : b ? contactDe(b) : null;
-        return { tourId: x.id, raison: t.raison, groupe: t.nom, numero: x.numero, places: t.places, beneficiaire: contact?.nom ?? '', telephone: contact?.telephone ?? '', brut: x.brut, commission: x.commission, net: x.net, especes: x.especes, devise: t.devise };
+        return { tourId: x.id, raison: t.raison, groupe: t.nom, numero: x.numero, places: t.places, beneficiaire: contact?.nom ?? '', telephone: contact?.telephone ?? '', brut: x.brut, commission: x.commission, net: x.net, especes: x.especes, devise: t.devise, demandeLe: x.versementDemandeLe, demandes: x.versementDemandes };
       }),
       cautions: cautions.map((m) => {
         const t = groupes.get(m.tontineId)!;
@@ -1121,6 +1125,29 @@ export function creerTontines(d: DepsTontines) {
     },
 
     resumeAdmin,
+
+    /**
+     * Cagnotte complète : l'initiateur demande à l'équipe de Me de verser au bénéficiaire. Le versement reste validé par
+     * l'équipe (seul geste qui fait sortir l'argent). Une relance est possible après un jour.
+     */
+    async demanderVersement(userId: string, id: string) {
+      const t = await charger(id);
+      exigerOrganisateur(t, userId);
+      const tour = estObjectif(t) ? tourFinal(t) : t.tours.find((x) => x.etat === 'a_verser');
+      if (!tour || tour.etat !== 'a_verser') throw new HttpError(409, estObjectif(t) ? 'La cotisation n’est pas encore clôturée.' : 'La cagnotte n’est pas encore complète.');
+      if (tour.versementDemandeLe && tour.versementDemandeLe.getTime() > maintenant() - 86400000) throw new HttpError(409, 'Versement déjà demandé : tu pourras relancer demain.');
+      await d.db.tontineTour.update({ where: { id: tour.id }, data: { versementDemandeLe: new Date(maintenant()), versementDemandes: (tour.versementDemandes ?? 0) + 1 } });
+      const b = t.membres.find((m) => m.id === tour.beneficiaireId);
+      const pour = estObjectif(t) ? (beneficiaireDe(t)?.nom ?? 'le bénéficiaire') : b ? contactDe(b).nom : 'le bénéficiaire';
+      const relance = (tour.versementDemandes ?? 0) > 0;
+      const qui = prenomDe(t.organisateur?.nom ?? '') || 'L’initiateur';
+      for (const admin of (await d.responsablesVersements?.()) ?? [])
+        await d
+          .avertir(admin, null, { cle: `tontine:versement-demande:${tour.id}:${(tour.versementDemandes ?? 0) + 1}`, titre: `${relance ? 'Relance : versement' : 'Versement'} demandé : ${montantCotisation(tour.net, t.devise)}`, corps: `${qui} demande le versement de « ${t.nom} »${estObjectif(t) ? '' : `, tour ${tour.numero}`} à ${pour}. À valider dans Cotisations › Versements.` }, true)
+          .catch((e) => console.error('Avis de tontine', e));
+      if (b?.userId && b.userId !== userId) await d.avertir(b.userId, null, { cle: `tontine:versement-demande-b:${tour.id}`, titre: 'Ton versement est demandé', corps: `${qui} a demandé à Me de te verser ${montantCotisation(tour.net, t.devise)} de « ${t.nom} ».` }, true).catch((e) => console.error('Avis de tontine', e));
+      return relire(id, userId);
+    },
 
     /** Validation de l'admin : seul ce geste fait sortir l'argent d'un tour. */
     async verserTour(acteur: Acteur, tourId: string, preuve?: string) {
