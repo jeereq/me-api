@@ -48,7 +48,7 @@ describe('dépôt et suppression', () => {
     assert.equal(f.get('type'), 'authenticated');
     assert.equal(f.get('signature'), signer({ folder: 'me/justificatifs/u1', type: 'authenticated', timestamp: Number(f.get('timestamp')) }, 'secret'));
     assert.ok(f.get('file') instanceof Blob);
-    assert.deepEqual(d, { publicId: 'me/justificatifs/u1/abc', url: 'https://res.cloudinary.com/cloud/image/upload/v1/me/justificatifs/u1/abc.pdf', genre: 'image', format: 'pdf', octets: 2048, pages: 2 });
+    assert.deepEqual(d, { publicId: 'me/justificatifs/u1/abc', url: 'https://res.cloudinary.com/cloud/image/upload/v1/me/justificatifs/u1/abc.pdf', genre: 'image', acces: 'authenticated', format: 'pdf', octets: 2048, pages: 2 });
   });
 
   it('remonte le message de Cloudinary quand il refuse', async () => {

@@ -1,5 +1,5 @@
 import { estFichier } from '../../utils/formulaire.js';
-import { Cloudinary, configCloudinary, raisonCloudinary } from './cloudinary.js';
+import { Cloudinary, configCloudinary, peutSigner, raisonCloudinary } from './cloudinary.js';
 
 /** Une étape du test d'envoi de fichiers, pour l'admin. */
 export type EtapeDiagnostic = { etape: string; ok: boolean; detail: string };
@@ -30,24 +30,35 @@ export async function diagnosticFichiers(): Promise<{ ok: boolean; etapes: Etape
 
   // 2. La configuration.
   const c = configCloudinary();
-  etapes.push(c ? { etape: 'Configuration Cloudinary', ok: true, detail: `compte « ${c.cloud} », clé …${c.cle.slice(-4)} (${c.cle.length} chiffres), secret de ${c.secret.length} caractères${/^\*+$/.test(c.secret) ? ' : ce sont des étoiles, copie le vrai secret' : ''}` } : { etape: 'Configuration Cloudinary', ok: false, detail: 'CLOUDINARY_URL absente ou mal écrite (attendu : cloudinary://<clé>:<secret>@<compte>)' });
-  if (!c) return fin();
-
-  // 3. La clé.
-  try {
-    await Cloudinary.verifier(c);
-    etapes.push({ etape: 'Clé Cloudinary', ok: true, detail: 'acceptée' });
-  } catch (e) {
-    etapes.push({ etape: 'Clé Cloudinary', ok: false, detail: raisonCloudinary(e, true) });
+  if (!c) {
+    etapes.push({ etape: 'Configuration Cloudinary', ok: false, detail: 'Rien de configuré : CLOUDINARY_CLOUD_NAME et CLOUDINARY_UPLOAD_PRESET (preset non signé), ou CLOUDINARY_URL (cloudinary://<clé>:<secret>@<compte>).' });
     return fin();
   }
+  etapes.push(
+    c.preset
+      ? { etape: 'Configuration Cloudinary', ok: true, detail: `compte « ${c.cloud} », preset non signé « ${c.preset} »${peutSigner(c) ? '' : ' (sans secret : les fichiers ne seront pas supprimés de Cloudinary)'}` }
+      : { etape: 'Configuration Cloudinary', ok: true, detail: `compte « ${c.cloud} », clé …${c.cle.slice(-4)} (${c.cle.length} chiffres), secret de ${c.secret.length} caractères${/^\*+$/.test(c.secret) ? ' : ce sont des étoiles, copie le vrai secret' : ''}` },
+  );
 
-  // 4. Un vrai dépôt, effacé aussitôt.
+  // 3. La clé, sauf avec un preset qui s'en passe.
+  if (!c.preset) {
+    try {
+      await Cloudinary.verifier(c);
+      etapes.push({ etape: 'Clé Cloudinary', ok: true, detail: 'acceptée' });
+    } catch (e) {
+      etapes.push({ etape: 'Clé Cloudinary', ok: false, detail: raisonCloudinary(e, true) });
+      return fin();
+    }
+  }
+
+  // 4. Un vrai dépôt, effacé aussitôt quand c'est possible.
   try {
     const racine = process.env.CLOUDINARY_DOSSIER?.trim() || 'me/justificatifs';
     const d = await Cloudinary.deposer(c, { contenu: new Blob([PIXEL], { type: 'image/png' }), nom: 'essai.png' }, `${racine}-diagnostic`, 'image');
-    await Cloudinary.supprimer(c, d.publicId, 'image', 'authenticated').catch(() => {});
-    etapes.push({ etape: 'Dépôt d’essai', ok: true, detail: 'déposé puis effacé' });
+    const efface = peutSigner(c) ? await Cloudinary.supprimer(c, d.publicId, 'image', d.acces).then(() => true, () => false) : false;
+    // Un preset qui dépose en privé demanderait le secret pour montrer chaque fichier.
+    if (c.preset && d.acces === 'authenticated' && !peutSigner(c)) etapes.push({ etape: 'Dépôt d’essai', ok: false, detail: 'Le preset dépose en privé (« authenticated ») : règle son « Delivery type » sur « upload », ou ajoute la clé et le secret.' });
+    else etapes.push({ etape: 'Dépôt d’essai', ok: true, detail: efface ? 'déposé puis effacé' : 'déposé (fichier d’essai de 1 pixel resté chez Cloudinary)' });
   } catch (e) {
     etapes.push({ etape: 'Dépôt d’essai', ok: false, detail: raisonCloudinary(e, true) });
   }
