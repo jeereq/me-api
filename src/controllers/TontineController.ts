@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { TAILLE_PIECE_MAX } from '../services/cotisations/approbations.js';
 import { SmsService } from '../services/SmsService.js';
 import { ApprobationService as A, TontineService as S } from '../services/TontineService.js';
-import { lireFormulaire } from '../utils/formulaire.js';
+import { estFichier, lireFormulaire } from '../utils/formulaire.js';
 import { HttpError } from '../utils/http.js';
 import { dossierEligibiliteSchema, filtresAnnuaireSchema } from '../validators/schemas.js';
 import { prisma } from '../utils/prisma.js';
@@ -96,7 +96,7 @@ export const TontineController = {
   soumettre: async (req: Request, res: Response) => {
     const form = await lireFormulaire(req, TAILLE_PIECE_MAX + 64 * 1024, 'Photo trop lourde : 5 Mo au plus.');
     const fichier = form.get('fichier');
-    if (!(fichier instanceof File)) throw new HttpError(400, 'Aucune photo reçue.');
+    if (!estFichier(fichier)) throw new HttpError(400, 'Aucune photo reçue. Choisis la photo à nouveau.');
     let brut: unknown;
     try {
       brut = JSON.parse(String(form.get('dossier') ?? ''));

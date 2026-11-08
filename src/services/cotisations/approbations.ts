@@ -64,7 +64,7 @@ export function creerApprobations(d: DepsApprobations) {
       if (existante?.statut === 'approuvee') throw new HttpError(409, 'Ton compte est déjà approuvé.');
       if (octets.length > TAILLE_PIECE_MAX) throw new HttpError(413, 'Photo trop lourde : 5 Mo au plus.', 'TROP_LOURD');
       const type = typeImage(octets);
-      if (!type) throw new HttpError(400, 'Envoie une photo JPEG, PNG ou WebP de ta pièce d’identité.');
+      if (!type) throw new HttpError(400, 'Cette photo n’est ni en JPEG, ni en PNG, ni en WebP : reprends ta pièce d’identité en photo depuis Me.', 'TYPE_REFUSE');
       if (!estMajeur(dossier.dateNaissance, new Date(maintenant()).toISOString().slice(0, 10))) throw new HttpError(400, `Il faut avoir au moins ${AGE_MINIMUM} ans.`);
       const piece = chiffrer(`${type};${Buffer.from(octets).toString('base64')}`);
       const chiffre = enCoffre(dossier);

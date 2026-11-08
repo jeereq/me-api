@@ -12,15 +12,23 @@ export type ConfigCloudinary = { cloud: string; cle: string; secret: string };
  * `CLOUDINARY_URL=cloudinary://<clé>:<secret>@<cloud>` (celle du tableau de bord Cloudinary),
  * ou les trois variables séparées. Null tant que rien n'est configuré.
  */
+/** Une variable collée telle quelle : sans le nom devant (« CLOUDINARY_URL= »), sans guillemets ni espaces autour. */
+const propre = (v: string | undefined, nom: string) =>
+  (v ?? '')
+    .trim()
+    .replace(new RegExp(`^${nom}\\s*=\\s*`, 'i'), '')
+    .replace(/^["'<]+|[">']+$/g, '')
+    .trim();
+
 export function configCloudinary(env: NodeJS.ProcessEnv = process.env): ConfigCloudinary | null {
-  const url = env.CLOUDINARY_URL?.trim();
+  const url = propre(env.CLOUDINARY_URL, 'CLOUDINARY_URL');
   if (url) {
-    const m = /^cloudinary:\/\/([^:]+):([^@]+)@([^/?#]+)/.exec(url);
+    const m = /^cloudinary:\/\/([^:\s]+):([^@\s]+)@([^/?#\s]+)/i.exec(url);
     if (m) return { cle: decodeURIComponent(m[1]), secret: decodeURIComponent(m[2]), cloud: m[3] };
   }
-  const cloud = env.CLOUDINARY_CLOUD_NAME?.trim();
-  const cle = env.CLOUDINARY_API_KEY?.trim();
-  const secret = env.CLOUDINARY_API_SECRET?.trim();
+  const cloud = propre(env.CLOUDINARY_CLOUD_NAME, 'CLOUDINARY_CLOUD_NAME');
+  const cle = propre(env.CLOUDINARY_API_KEY, 'CLOUDINARY_API_KEY');
+  const secret = propre(env.CLOUDINARY_API_SECRET, 'CLOUDINARY_API_SECRET');
   return cloud && cle && secret ? { cloud, cle, secret } : null;
 }
 
@@ -77,11 +85,48 @@ async function appeler(c: ConfigCloudinary, chemin: string, champs: Record<strin
     throw new Error(estDelai(e) ? 'Cloudinary met trop de temps à répondre.' : 'Cloudinary est injoignable.');
   }
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string } };
-  if (!res.ok) throw new Error(`Cloudinary ${res.status} : ${data.error?.message ?? 'réponse illisible'}`);
+  if (!res.ok) throw new ErreurCloudinary(res.status, data.error?.message ?? 'réponse illisible');
   return data;
 }
 
+/** Une réponse d'erreur de Cloudinary : son code et son message, pour dire ce qui ne va pas. */
+export class ErreurCloudinary extends Error {
+  constructor(
+    public status: number,
+    public detail: string,
+  ) {
+    super(`Cloudinary ${status} : ${detail}`);
+  }
+}
+
+/** Ce qui empêche l'envoi, en clair : ce que l'administrateur doit corriger, ou ce que l'utilisateur peut faire. */
+export function raisonCloudinary(e: unknown): string {
+  if (e instanceof ErreurCloudinary) {
+    const d = e.detail.toLowerCase();
+    if (e.status === 401 || /api key|signature|api_secret|unknown api/.test(d)) return 'la clé Cloudinary du serveur est refusée (CLOUDINARY_URL à vérifier)';
+    if (e.status === 404 || /cloud name|cloud_name|invalid cloud/.test(d)) return 'le nom du compte Cloudinary est inconnu (CLOUDINARY_URL à vérifier)';
+    if (e.status === 420 || /rate limit|quota|exceeded|limit/.test(d)) return 'le compte Cloudinary a atteint sa limite (stockage ou envois du mois)';
+    if (/file size|too large/.test(d)) return 'le fichier est trop lourd pour le compte Cloudinary';
+    if (/invalid image|unsupported|invalid file/.test(d)) return 'Cloudinary ne sait pas lire ce fichier : essaie une photo JPEG ou un PDF';
+    if (/disabled|blocked|suspended/.test(d)) return 'le compte Cloudinary est désactivé';
+    return `Cloudinary a refusé le fichier (${e.status} : ${e.detail.slice(0, 120)})`;
+  }
+  return e instanceof Error && /injoignable|trop de temps/.test(e.message) ? e.message.replace(/\.$/, '') : 'Cloudinary ne répond pas';
+}
+
 export const Cloudinary = {
+  /** Vérifie la clé sans rien déposer (API d'administration : /ping). */
+  async verifier(c: ConfigCloudinary) {
+    let res: Response;
+    try {
+      res = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(c.cloud)}/ping`, { headers: { Authorization: `Basic ${Buffer.from(`${c.cle}:${c.secret}`).toString('base64')}` }, signal: delai(15_000) });
+    } catch (e) {
+      throw new Error(estDelai(e) ? 'Cloudinary met trop de temps à répondre.' : 'Cloudinary est injoignable.');
+    }
+    const data = (await res.json().catch(() => ({}))) as { status?: string; error?: { message?: string } };
+    if (!res.ok) throw new ErreurCloudinary(res.status, data.error?.message ?? 'réponse illisible');
+  },
+
   async deposer(c: ConfigCloudinary, fichier: { contenu: Blob; nom: string }, dossier: string, genre: GenreRessource, acces: AccesRessource = 'authenticated'): Promise<Depot> {
     const d = await appeler(c, `${genre}/upload`, { folder: dossier, type: acces }, fichier);
     return {
