@@ -959,6 +959,26 @@ describe('une tontine de bout en bout', () => {
     assert.equal(b.membres.lignes.find((x) => x.id === m.id)!.etat, 'exclu');
     assert.ok(avis.some((a) => a.userId === 'invite' && a.titre === 'Exclu du groupe'));
   });
+
+  it('l’initiateur déclenche la demande de paiement sur le numéro du membre', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const paulId = b.membres.lignes.find((x) => x.userId === 'paul')!.id;
+    await assert.rejects(s.demanderPaiement('paul', paulId), /organisateur/);
+    await s.demanderPaiement('orga', paulId);
+    assert.equal(demandes.at(-1)!.telephone, '243812345671');
+    assert.equal(demandes.at(-1)!.montant, 1000);
+    assert.ok(avis.some((a) => a.userId === 'paul' && /à valider/.test(a.titre) && a.seul));
+    await assert.rejects(s.demanderPaiement('orga', paulId), /déjà en cours/);
+    await valider();
+    // Paul a payé : plus rien à demander ; « à tous » ne demande qu'à Marie.
+    await assert.rejects(s.demanderPaiement('orga', paulId), /rien à payer/);
+    const r = await s.demanderATous('orga', id);
+    assert.deepEqual([r.envoyees, r.enCours], [1, 0]);
+    assert.equal(demandes.at(-1)!.telephone, '243812345672');
+    ouvert = () => false;
+    await assert.rejects(s.demanderPaiement('orga', paulId), /pas encore ouvert/);
+  });
 });
 
 describe('approbation des comptes', () => {

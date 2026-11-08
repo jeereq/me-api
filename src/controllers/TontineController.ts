@@ -123,6 +123,12 @@ export const TontineController = {
   ordonner: async (req: Request, res: Response) => {
     res.json(await S.ordonner(req.user!.id, p(req.params.id), req.body.membres));
   },
+  demanderPaiement: async (req: Request, res: Response) => {
+    res.json(await S.demanderPaiement(req.user!.id, p(req.params.membreId)));
+  },
+  demanderATous: async (req: Request, res: Response) => {
+    res.json(await S.demanderATous(req.user!.id, p(req.params.id)));
+  },
   noterEspeces: async (req: Request, res: Response) => {
     res.json(await S.noterEspeces(req.user!.id, p(req.params.membreId)));
   },
