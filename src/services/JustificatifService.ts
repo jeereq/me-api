@@ -6,7 +6,7 @@ import { prisma } from '../utils/prisma.js';
 import { assertPeutEcrire } from './equipes/droits.js';
 import { AssistantService } from './AssistantService.js';
 import { EquipeService } from './EquipeService.js';
-import { Cloudinary, configCloudinary, type AccesRessource, type GenreRessource, urlLivraison, urlTelechargement } from './justificatifs/cloudinary.js';
+import { Cloudinary, configCloudinary, raisonCloudinary, type AccesRessource, type GenreRessource, urlLivraison, urlTelechargement } from './justificatifs/cloudinary.js';
 import { dossier, nomPropre, TAILLE_MAX, typeFichier } from './justificatifs/fichiers.js';
 import { type ContexteFacture, imagePourIA, type LectureFacture, lireLecture, messagesFacture, SCHEMA_FACTURE } from './justificatifs/lecture-ia.js';
 
@@ -52,7 +52,7 @@ export const JustificatifService = {
       depot = await Cloudinary.deposer(c, { contenu: fichier, nom }, dossier(userId, equipeId), type.genre);
     } catch (e) {
       console.error('Dépôt Cloudinary', e);
-      throw new HttpError(502, "Le justificatif n'a pas pu être enregistré. Réessaie dans un instant.", 'DEPOT_ECHOUE');
+      throw new HttpError(502, `Le justificatif n'a pas pu être enregistré : ${raisonCloudinary(e)}.`, 'DEPOT_ECHOUE');
     }
     const ligne = await prisma.justificatif.create({ data: { publicId: depot.publicId, genre: depot.genre, acces: 'authenticated', format: depot.format || null, userId, equipeId: equipeId ?? null } });
     return {

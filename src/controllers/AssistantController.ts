@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 
+import { estFichier } from '../utils/formulaire.js';
 import { HttpError } from '../utils/http.js';
 import { AnalyseMailService } from '../services/AnalyseMailService.js';
 import { lireTraduction, type LangueTraduction } from '../services/analyse-mails.js';
@@ -46,7 +47,7 @@ export const AssistantController = {
   transcrire: async (req: Request, res: Response) => {
     const form = await lireFormulaire(req, AUDIO_MAX + 64 * 1024);
     const audio = form.get('audio');
-    if (!(audio instanceof File) || !audio.size) throw new HttpError(400, 'Aucun enregistrement reçu (champ « audio »).');
+    if (!estFichier(audio) || !audio.size) throw new HttpError(400, 'Aucun enregistrement reçu (champ « audio »).');
     if (audio.size > AUDIO_MAX) throw new HttpError(413, 'Enregistrement trop long : 25 Mo au plus.', 'TROP_LOURD');
     const contexte = form.get('contexte');
     const annoncee = Number(form.get('duree'));

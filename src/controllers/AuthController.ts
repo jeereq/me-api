@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService.js';
 import { ConnexionGoogle, retourConnexion } from '../services/comptes/google.js';
 import { PhotoProfil, TAILLE_PHOTO_MAX } from '../services/comptes/photo.js';
-import { lireFormulaire } from '../utils/formulaire.js';
+import { estFichier, lireFormulaire } from '../utils/formulaire.js';
 import { HttpError } from '../utils/http.js';
 
 /** Renvoie vers l'app avec le résultat de la connexion Google. */
@@ -17,7 +17,7 @@ export const AuthController = {
   photo: async (req: Request, res: Response) => {
     const form = await lireFormulaire(req, TAILLE_PHOTO_MAX + 64 * 1024, 'Photo trop lourde : 5 Mo au plus.');
     const fichier = form.get('fichier');
-    if (!(fichier instanceof File)) throw new HttpError(400, 'Aucune photo reçue.');
+    if (!estFichier(fichier)) throw new HttpError(400, 'Aucune photo reçue. Choisis la photo à nouveau.');
     res.status(201).json({ photo: await PhotoProfil.deposer(req.user!.id, new Uint8Array(await fichier.arrayBuffer())) });
   },
   options: async (_req: Request, res: Response) => {

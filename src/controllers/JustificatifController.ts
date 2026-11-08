@@ -5,8 +5,9 @@ import type { ReadableStream as FluxWeb } from 'node:stream/web';
 import type { Request, Response } from 'express';
 
 import { estVue, JustificatifService } from '../services/JustificatifService.js';
+import { diagnosticFichiers } from '../services/justificatifs/diagnostic.js';
 import { TAILLE_MAX } from '../services/justificatifs/fichiers.js';
-import { lireFormulaire } from '../utils/formulaire.js';
+import { estFichier, lireFormulaire } from '../utils/formulaire.js';
 import { HttpError } from '../utils/http.js';
 import type { AnalyseJustificatifBody, LiensJustificatifsBody } from '../validators/schemas.js';
 
@@ -14,6 +15,9 @@ import type { AnalyseJustificatifBody, LiensJustificatifsBody } from '../validat
 const AFFICHABLES = /^(image\/(jpeg|png|webp|heic|heif|gif)|application\/pdf)$/;
 
 export const JustificatifController = {
+  diagnostic: async (_req: Request, res: Response) => {
+    res.json(await diagnosticFichiers());
+  },
   etat: async (_req: Request, res: Response) => {
     res.json({ disponible: JustificatifService.disponible(), tailleMax: TAILLE_MAX });
   },
@@ -21,7 +25,7 @@ export const JustificatifController = {
     // La marge couvre les en-têtes du formulaire autour du fichier.
     const form = await lireFormulaire(req, TAILLE_MAX + 64 * 1024, 'Fichier trop lourd : 10 Mo au plus.');
     const fichier = form.get('fichier');
-    if (!(fichier instanceof File)) throw new HttpError(400, 'Aucun fichier reçu (champ « fichier »).');
+    if (!estFichier(fichier)) throw new HttpError(400, 'Aucun fichier reçu. Choisis le fichier à nouveau.');
     const equipe = form.get('equipe');
     res.status(201).json({ justificatif: await JustificatifService.deposer(req.user!.id, fichier, typeof equipe === 'string' && equipe ? equipe : undefined) });
   },
