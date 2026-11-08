@@ -105,6 +105,12 @@ fetch('jeton', { method: 'POST', headers: { 'Content-Type': 'application/json' }
   lienPiece: async (req: Request, res: Response) => {
     res.json(await IntegrationService.lienPiece(req.user!.id, req.params.id, req.params.mail, req.params.piece, typeof req.body?.message === 'string' ? req.body.message.slice(0, 500) : undefined));
   },
+  donneesPiece: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.donneesPiece(req.user!.id, req.params.id, req.params.mail, req.params.piece, req.body?.message));
+  },
+  analyserPiece: async (req: Request, res: Response) => {
+    res.json(await IntegrationService.analyserPiece(req.user!.id, req.params.id, req.params.mail, req.params.piece, req.body));
+  },
   /** Ouvert par un lien, sans en-tête d'authentification : le lien signé en tient lieu. */
   ouvrirPiece: async (req: Request, res: Response) => {
     const p = await IntegrationService.ouvrirPiece(String(req.query.j ?? ''));

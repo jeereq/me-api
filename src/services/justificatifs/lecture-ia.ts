@@ -92,7 +92,7 @@ export function messagesFacture(c: ContexteFacture, imageBase64: string) {
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const SYMBOLES: Record<string, string> = { $: 'USD', US$: 'USD', '€': 'EUR', '£': 'GBP', FC: 'CDF', CFA: 'XAF', FCFA: 'XAF' };
 
-function dateValable(v: unknown, aujourdhui: string): string | null {
+export function dateValable(v: unknown, aujourdhui: string): string | null {
   if (typeof v !== 'string') return null;
   const m = DATE.exec(v.trim());
   if (!m) return null;
@@ -112,7 +112,7 @@ function heureValable(v: unknown): string | null {
   return `${m[1].padStart(2, '0')}:${m[2]}`;
 }
 
-function montantValable(v: unknown): number | null {
+export function montantValable(v: unknown): number | null {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.replace(/[\s ]/g, '').replace(',', '.')) : NaN;
   if (!Number.isFinite(n) || n <= 0 || n > 1e12) return null;
   return Math.round(n * 100) / 100;

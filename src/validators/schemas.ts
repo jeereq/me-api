@@ -415,3 +415,14 @@ export const signalerTontineSchema = z.object({
   body: z.object({ motif: z.enum(['arnaque', 'trompeur', 'inapproprie', 'autre']), texte: z.string().trim().max(500).optional() }),
 });
 export const deciderSignalementSchema = z.object({ params: idTontine, body: z.object({ decision: z.enum(['retirer', 'rejeter']) }) });
+
+/** Une pièce jointe d'un mail à lire : `message`, un ancien message du fil quand la pièce y est. */
+export const donneesPieceSchema = z.object({ body: z.object({ message: z.string().trim().max(500).optional() }) });
+export const analysePieceSchema = z.object({
+  body: z.object({
+    message: z.string().trim().max(500).optional(),
+    aujourdhui: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date du jour attendue (AAAA-MM-JJ)'),
+    devise: z.string().trim().min(1).max(8).default('USD'),
+  }),
+});
+

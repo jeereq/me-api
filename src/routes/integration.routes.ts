@@ -2,11 +2,12 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { IntegrationController } from '../controllers/IntegrationController.js';
-import { requirePro } from '../middlewares/abonnement.js';
+import { requireFonction, requirePro } from '../middlewares/abonnement.js';
+import { analysePieceLimiter } from '../middlewares/rateLimits.js';
 import { authenticateJWT } from '../middlewares/authenticateJWT.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { personnesSchema, chercherMailsSchema, lireMailSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, trierMailsSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
+import { analysePieceSchema, donneesPieceSchema, personnesSchema, chercherMailsSchema, lireMailSchema, creerEvenementSchema, activerRegleSchema, creerTacheSchema, deplacerMailSchema, trierMailsSchema, dossiersSchema, envoyerMailSchema, etiqueterMailSchema, filMailSchema, mailsDossierSchema, integrationParamsSchema, lireMailQuerySchema, majTacheSchema, modifierEvenementSchema, patchIntegrationSchema, repondreMailSchema, supprimerEvenementSchema, trelloJetonSchema } from '../validators/schemas.js';
 
 // La saisie d'une adresse : une demande après chaque pause.
 const limitePersonnes = rateLimit({ windowMs: 60 * 1000, limit: 60, keyGenerator: (req) => req.user!.id, standardHeaders: 'draft-7', legacyHeaders: false });
@@ -49,6 +50,8 @@ router.post('/:id/repondre/pieces', asyncHandler(IntegrationController.repondreA
 router.post('/:id/envoyer/pieces', asyncHandler(IntegrationController.envoyerAvecPieces));
 router.get('/:id/signature', asyncHandler(IntegrationController.signature));
 router.post('/:id/mails/:mail/pieces/:piece/lien', asyncHandler(IntegrationController.lienPiece));
+router.post('/:id/mails/:mail/pieces/:piece/donnees', validateRequest(donneesPieceSchema), asyncHandler(IntegrationController.donneesPiece));
+router.post('/:id/mails/:mail/pieces/:piece/analyse', requireFonction('assistant'), analysePieceLimiter, validateRequest(analysePieceSchema), asyncHandler(IntegrationController.analyserPiece));
 router.post('/:id/repondre', validateRequest(repondreMailSchema), asyncHandler(IntegrationController.repondre));
 router.post('/:id/envoyer', validateRequest(envoyerMailSchema), asyncHandler(IntegrationController.envoyer));
 router.post('/:id/agenda', validateRequest(creerEvenementSchema), asyncHandler(IntegrationController.creerEvenement));

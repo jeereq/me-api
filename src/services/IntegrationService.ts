@@ -18,6 +18,23 @@ import { slackConnecteur } from './integrations/slack.js';
 import { trello } from './integrations/trello.js';
 import { CHARGEMENT_DEFAUT, vide, type Connecteur, type Ctx, type EcritureEvenement, type Elements, type Prefs, type PrefsCompte, type SourceKey } from './integrations/types.js';
 import { etatAbonnement } from './abonnements/offres.js';
+import { AssistantService } from './AssistantService.js';
+import { genrePiece, lireAnalysePiece, messagesPiece, SCHEMA_PIECE } from './pieces/analyse.js';
+import { lireCsv, lireXlsx, tableauEnTexte } from './pieces/tableur.js';
+
+/** Au-delà, une pièce jointe n'est pas lue par le serveur : elle se télécharge. */
+const MAX_PIECE_ANALYSE = 10 * 1024 * 1024;
+
+/** Un tableur illisible ne bloque pas : l'app propose alors de le télécharger. */
+function lireTableur(f: { nom: string; type: string; octets: Buffer }) {
+  try {
+    const xlsx = /\.xlsx$/i.test(f.nom) || f.type.includes('spreadsheetml') || (f.octets[0] === 0x50 && f.octets[1] === 0x4b);
+    return xlsx ? lireXlsx(f.octets) : lireCsv(f.octets.toString('utf8'));
+  } catch (e) {
+    console.error('Lecture du tableur', f.nom, (e as Error).message);
+    throw new HttpError(422, 'Ce tableur n’a pas pu être lu. Télécharge-le pour l’ouvrir.', 'TABLEUR_ILLISIBLE');
+  }
+}
 
 export const CONNECTEURS: Record<string, Connecteur> = { google, microsoft, trello, slack: slackConnecteur };
 const parFournisseur = (f: Fournisseur) => Object.values(CONNECTEURS).find((c) => c.fournisseur === f)!;
@@ -465,6 +482,43 @@ export const IntegrationService = {
     const boite = this._mailGarde(i, mailId)?.boite;
     const jeton = jwt.sign({ typ: 'piece', userId, compte: id, mailId: message || mailId, pieceId, ...(boite ? { boite } : {}) }, process.env.JWT_SECRET as string, { expiresIn: '5m' });
     return { url: `/api/integrations/pieces/ouvrir?j=${encodeURIComponent(jeton)}` };
+  },
+
+  /** La pièce jointe telle que le service la donne, pour la lire ici : rien n'est gardé. */
+  async _octetsPiece(userId: string, id: string, mailId: string, pieceId: string, message?: string) {
+    const { i, c, jetons } = await this._pourEcrire(userId, id, 'lirePiece');
+    const boite = this._mailGarde(i, mailId)?.boite;
+    const f = await this._ecrire(() => c.lirePiece!(jetons, { mailId: message || mailId, pieceId, boite }), i, false);
+    if (f.octets.length > MAX_PIECE_ANALYSE) throw new HttpError(413, 'Cette pièce jointe est trop lourde pour être lue ici (10 Mo au plus).', 'TROP_LOURD');
+    return f;
+  },
+
+  /** Les données d'un tableur joint (CSV ou Excel), pour les montrer en tableau. Sans IA. */
+  async donneesPiece(userId: string, id: string, mailId: string, pieceId: string, message?: string) {
+    const f = await this._octetsPiece(userId, id, mailId, pieceId, message);
+    if (genrePiece(f.nom, f.type) !== 'tableur') throw new HttpError(415, 'Ce fichier n’est pas un tableur.', 'TYPE_REFUSE');
+    return { tableau: lireTableur(f) };
+  },
+
+  /**
+   * Fait analyser une pièce jointe par l'IA : nature, résumé, informations clés, dépense à préparer, échéance.
+   * Un tableur est d'abord lu ici, exactement ; l'IA ne fait que le résumer. Rien n'est enregistré.
+   */
+  async analyserPiece(userId: string, id: string, mailId: string, pieceId: string, o: { message?: string; aujourdhui: string; devise: string }) {
+    const f = await this._octetsPiece(userId, id, mailId, pieceId, o.message);
+    const genre = genrePiece(f.nom, f.type);
+    if (!genre) throw new HttpError(415, 'Ce format ne peut pas être analysé : photo, PDF, CSV, Excel ou texte seulement.', 'TYPE_REFUSE');
+    const c = { aujourdhui: o.aujourdhui, devise: o.devise };
+    const tableau = genre === 'tableur' ? lireTableur(f) : null;
+    const contenu =
+      genre === 'tableur'
+        ? { genre, nom: f.nom, texte: tableau ? tableauEnTexte(tableau) : '' }
+        : genre === 'texte'
+          ? { genre, nom: f.nom, texte: f.octets.toString('utf8') }
+          : { genre, nom: f.nom, type: genre === 'image' ? (f.type || 'image/jpeg') : 'application/pdf', base64: f.octets.toString('base64') };
+    const { texte, modele } = await AssistantService.lireImage(messagesPiece(c, contenu), { type: 'json_schema', json_schema: SCHEMA_PIECE }, 'cette pièce jointe');
+    const lue = lireAnalysePiece(texte, c);
+    return { analyse: { ...lue, tableau: tableau ?? lue.tableau }, modele };
   },
 
   /** La pièce jointe d'un lien : rien n'est gardé, elle est lue chez le service à chaque ouverture. */
