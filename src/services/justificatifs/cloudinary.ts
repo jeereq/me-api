@@ -33,13 +33,13 @@ export function configCloudinary(env: NodeJS.ProcessEnv = process.env): ConfigCl
 }
 
 /** Signature Cloudinary : paramètres triés « a=1&b=2 », suivis du secret, en SHA-1. */
-export function signer(params: Record<string, string | number>, secret: string) {
+export function signer(params: Record<string, string | number>, secret: string, algo: 'sha1' | 'sha256' = 'sha1') {
   const chaine = Object.keys(params)
     .filter((k) => params[k] !== '' && params[k] !== undefined)
     .sort()
     .map((k) => `${k}=${params[k]}`)
     .join('&');
-  return createHash('sha1').update(chaine + secret).digest('hex');
+  return createHash(algo).update(chaine + secret).digest('hex');
 }
 
 /** Images et PDF passent en « image » : Cloudinary sait alors faire la vignette de la première page d'un PDF. */
@@ -68,13 +68,24 @@ export function urlTelechargement(c: ConfigCloudinary, f: { publicId: string; ge
 
 export type Depot = { publicId: string; url: string; genre: GenreRessource; format: string; octets: number; pages?: number; largeur?: number; hauteur?: number };
 
+/** Un compte Cloudinary réglé pour signer en SHA-256 refuse les signatures SHA-1 : on réessaie alors une fois en SHA-256. */
 async function appeler(c: ConfigCloudinary, chemin: string, champs: Record<string, string | number>, fichier?: { contenu: Blob; nom: string }) {
+  try {
+    return await appelerAvec(c, chemin, champs, fichier, 'sha1');
+  } catch (e) {
+    if (!(e instanceof ErreurCloudinary) || e.status !== 401 || !/signature/i.test(e.detail)) throw e;
+    return appelerAvec(c, chemin, champs, fichier, 'sha256');
+  }
+}
+
+async function appelerAvec(c: ConfigCloudinary, chemin: string, champs: Record<string, string | number>, fichier: { contenu: Blob; nom: string } | undefined, algo: 'sha1' | 'sha256') {
   const timestamp = Math.floor(Date.now() / 1000);
   const signes = { ...champs, timestamp };
   const form = new FormData();
   for (const [k, v] of Object.entries(signes)) form.append(k, String(v));
   form.append('api_key', c.cle);
-  form.append('signature', signer(signes, c.secret));
+  form.append('signature', signer(signes, c.secret, algo));
+  if (algo === 'sha256') form.append('signature_algorithm', 'sha256');
   if (fichier) form.append('file', fichier.contenu, fichier.nom);
   // Le signal couvre l'envoi du fichier et la lecture de la réponse ; un service qui ne répond plus ne garde pas la requête ouverte.
   const signal = delai(DELAI_FICHIER_MS);
@@ -100,7 +111,8 @@ export class ErreurCloudinary extends Error {
 }
 
 /** Ce qui empêche l'envoi, en clair : ce que l'administrateur doit corriger, ou ce que l'utilisateur peut faire. */
-export function raisonCloudinary(e: unknown): string {
+export function raisonCloudinary(e: unknown, detaille = false): string {
+  if (e instanceof ErreurCloudinary && detaille) return `${raisonCloudinary(e)} — réponse de Cloudinary : « ${e.detail.slice(0, 160)} »`;
   if (e instanceof ErreurCloudinary) {
     const d = e.detail.toLowerCase();
     if (e.status === 401 || /api key|signature|api_secret|unknown api/.test(d)) return 'la clé Cloudinary du serveur est refusée (CLOUDINARY_URL à vérifier)';
