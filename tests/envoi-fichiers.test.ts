@@ -67,3 +67,40 @@ describe('signature Cloudinary', () => {
     assert.match(raisonCloudinary(new ErreurCloudinary(401, 'Invalid api_key 123'), true), /réponse de Cloudinary : « Invalid api_key 123 »/);
   });
 });
+
+describe('preset non signé', () => {
+  it('se configure avec le nom du compte et le preset, sans secret', () => {
+    assert.deepEqual(configCloudinary({ CLOUDINARY_CLOUD_NAME: 'moncompte', CLOUDINARY_UPLOAD_PRESET: ' "me-api" ' }), { cloud: 'moncompte', cle: '', secret: '', preset: 'me-api' });
+    // Avec une CLOUDINARY_URL déjà là : le nom du compte en vient, le preset passe devant pour l'envoi.
+    assert.deepEqual(configCloudinary({ CLOUDINARY_URL: 'cloudinary://1:x@moncompte', CLOUDINARY_UPLOAD_PRESET: 'me-api' }), { cloud: 'moncompte', cle: '1', secret: 'x', preset: 'me-api' });
+    assert.equal(configCloudinary({ CLOUDINARY_UPLOAD_PRESET: 'me-api' }), null);
+  });
+
+  it('envoie le fichier avec le preset, sans clé ni signature, et ne tente pas de supprimer', async () => {
+    const { Cloudinary } = await import('../src/services/justificatifs/cloudinary.js');
+    const corps: FormData[] = [];
+    const avant = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, o: { body: FormData }) => {
+      corps.push(o.body);
+      return new Response(JSON.stringify({ public_id: 'me/x/abc', secure_url: 'https://res/x', resource_type: 'image', type: 'upload', format: 'jpg', bytes: 3 }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const c = { cloud: 'moncompte', cle: '', secret: '', preset: 'me-api' };
+      const d = await Cloudinary.deposer(c, { contenu: new Blob(['abc']), nom: 'r.jpg' }, 'me/x', 'image');
+      assert.equal(d.acces, 'upload');
+      assert.equal(corps[0].get('upload_preset'), 'me-api');
+      assert.equal(corps[0].get('folder'), 'me/x');
+      assert.equal(corps[0].get('signature'), null);
+      assert.equal(corps[0].get('api_key'), null);
+      await assert.rejects(Cloudinary.supprimer(c, d.publicId, 'image'), /sans clé ni secret/);
+      assert.equal(corps.length, 1);
+    } finally {
+      globalThis.fetch = avant;
+    }
+  });
+
+  it('dit clairement quand le preset n’est pas non signé ou n’existe pas', () => {
+    assert.match(raisonCloudinary(new ErreurCloudinary(400, 'Upload preset must be whitelisted for unsigned uploads')), /mode « Unsigned »/);
+    assert.match(raisonCloudinary(new ErreurCloudinary(400, 'Upload preset not found')), /introuvable/);
+  });
+});

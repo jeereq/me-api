@@ -1,7 +1,7 @@
 import { HttpError } from '../../utils/http.js';
 import { prisma } from '../../utils/prisma.js';
 import { typeImage } from '../cotisations/approbations.js';
-import { Cloudinary, configCloudinary, raisonCloudinary, urlLivraison } from '../justificatifs/cloudinary.js';
+import { Cloudinary, configCloudinary, peutSigner, raisonCloudinary, urlLivraison } from '../justificatifs/cloudinary.js';
 
 export const TAILLE_PHOTO_MAX = 5 * 1024 * 1024;
 const DOSSIER = () => `${process.env.CLOUDINARY_DOSSIER?.trim() || 'me/justificatifs'}-profils`;
@@ -31,7 +31,8 @@ export const PhotoProfil = {
   /** Ne fait jamais échouer l'action en cours : une ancienne photo orpheline ne gêne personne. */
   async supprimer(photoId: string | null | undefined) {
     const c = configCloudinary();
-    if (!c || !photoId) return;
+    // Sans clé ni secret (preset non signé), l'ancienne photo reste chez Cloudinary.
+    if (!c || !photoId || !peutSigner(c)) return;
     await Cloudinary.supprimer(c, photoId, 'image', 'upload').catch((e) => console.error('Photo de profil', e));
   },
 };

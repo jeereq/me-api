@@ -6,7 +6,11 @@ import { DELAI_FICHIER_MS, delai, estDelai } from '../../utils/delai.js';
  * Stockage des justificatifs chez Cloudinary, sans SDK : deux appels REST signés (dépôt, suppression).
  * La clé secrète reste sur le serveur ; l'app n'envoie que le fichier à me-api.
  */
-export type ConfigCloudinary = { cloud: string; cle: string; secret: string };
+/**
+ * `preset` : envoi par un preset non signé (CLOUDINARY_UPLOAD_PRESET), sans clé ni secret. La clé et le secret, s'ils sont
+ * là, ne servent alors qu'à supprimer les fichiers ; sans eux, les fichiers restent chez Cloudinary.
+ */
+export type ConfigCloudinary = { cloud: string; cle: string; secret: string; preset?: string };
 
 /**
  * `CLOUDINARY_URL=cloudinary://<clé>:<secret>@<cloud>` (celle du tableau de bord Cloudinary),
@@ -22,10 +26,14 @@ const propre = (v: string | undefined, nom: string) =>
 
 export function configCloudinary(env: NodeJS.ProcessEnv = process.env): ConfigCloudinary | null {
   const url = propre(env.CLOUDINARY_URL, 'CLOUDINARY_URL');
-  if (url) {
-    const m = /^cloudinary:\/\/([^:\s]+):([^@\s]+)@([^/?#\s]+)/i.exec(url);
-    if (m) return { cle: decodeURIComponent(m[1]), secret: decodeURIComponent(m[2]), cloud: m[3] };
+  const m = url ? /^cloudinary:\/\/([^:\s]+):([^@\s]+)@([^/?#\s]+)/i.exec(url) : null;
+  const preset = propre(env.CLOUDINARY_UPLOAD_PRESET, 'CLOUDINARY_UPLOAD_PRESET');
+  // Le preset l'emporte : il ne demande que le nom du compte.
+  if (preset) {
+    const nom = propre(env.CLOUDINARY_CLOUD_NAME, 'CLOUDINARY_CLOUD_NAME') || m?.[3] || '';
+    if (nom) return { cloud: nom, cle: m ? decodeURIComponent(m[1]) : propre(env.CLOUDINARY_API_KEY, 'CLOUDINARY_API_KEY'), secret: m ? decodeURIComponent(m[2]) : propre(env.CLOUDINARY_API_SECRET, 'CLOUDINARY_API_SECRET'), preset };
   }
+  if (m) return { cle: decodeURIComponent(m[1]), secret: decodeURIComponent(m[2]), cloud: m[3] };
   const cloud = propre(env.CLOUDINARY_CLOUD_NAME, 'CLOUDINARY_CLOUD_NAME');
   const cle = propre(env.CLOUDINARY_API_KEY, 'CLOUDINARY_API_KEY');
   const secret = propre(env.CLOUDINARY_API_SECRET, 'CLOUDINARY_API_SECRET');
@@ -66,7 +74,10 @@ export function urlTelechargement(c: ConfigCloudinary, f: { publicId: string; ge
   return `https://api.cloudinary.com/v1_1/${encodeURIComponent(c.cloud)}/${f.genre ?? 'image'}/download?${q}`;
 }
 
-export type Depot = { publicId: string; url: string; genre: GenreRessource; format: string; octets: number; pages?: number; largeur?: number; hauteur?: number };
+export type Depot = { publicId: string; url: string; genre: GenreRessource; acces: AccesRessource; format: string; octets: number; pages?: number; largeur?: number; hauteur?: number };
+
+/** Une clé et un secret permettent les gestes signés (supprimer, adresse privée, téléchargement). */
+export const peutSigner = (c: ConfigCloudinary) => !!c.cle && !!c.secret;
 
 /** Un compte Cloudinary réglé pour signer en SHA-256 refuse les signatures SHA-1 : on réessaie alors une fois en SHA-256. */
 async function appeler(c: ConfigCloudinary, chemin: string, champs: Record<string, string | number>, fichier?: { contenu: Blob; nom: string }) {
@@ -100,6 +111,23 @@ async function appelerAvec(c: ConfigCloudinary, chemin: string, champs: Record<s
   return data;
 }
 
+/** Un dépôt par preset non signé : le nom du compte, le preset, le dossier et le fichier, rien d'autre. */
+async function deposerParPreset(c: ConfigCloudinary, fichier: { contenu: Blob; nom: string }, dossier: string, genre: GenreRessource) {
+  const form = new FormData();
+  form.append('upload_preset', c.preset!);
+  form.append('folder', dossier);
+  form.append('file', fichier.contenu, fichier.nom);
+  let res: Response;
+  try {
+    res = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(c.cloud)}/${genre}/upload`, { method: 'POST', body: form, signal: delai(DELAI_FICHIER_MS) });
+  } catch (e) {
+    throw new Error(estDelai(e) ? 'Cloudinary met trop de temps à répondre.' : 'Cloudinary est injoignable.');
+  }
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string } };
+  if (!res.ok) throw new ErreurCloudinary(res.status, data.error?.message ?? 'réponse illisible');
+  return data;
+}
+
 /** Une réponse d'erreur de Cloudinary : son code et son message, pour dire ce qui ne va pas. */
 export class ErreurCloudinary extends Error {
   constructor(
@@ -115,6 +143,8 @@ export function raisonCloudinary(e: unknown, detaille = false): string {
   if (e instanceof ErreurCloudinary && detaille) return `${raisonCloudinary(e)} — réponse de Cloudinary : « ${e.detail.slice(0, 160)} »`;
   if (e instanceof ErreurCloudinary) {
     const d = e.detail.toLowerCase();
+    if (/whitelisted for unsigned|unsigned upload/.test(d)) return 'le preset n’est pas en mode « Unsigned » (Cloudinary › Settings › Upload presets)';
+    if (/upload preset not found|preset.*not found/.test(d)) return 'le preset est introuvable (CLOUDINARY_UPLOAD_PRESET à vérifier)';
     if (e.status === 401 || /api key|signature|api_secret|unknown api/.test(d)) return 'la clé Cloudinary du serveur est refusée (CLOUDINARY_URL à vérifier)';
     if (e.status === 404 || /cloud name|cloud_name|invalid cloud/.test(d)) return 'le nom du compte Cloudinary est inconnu (CLOUDINARY_URL à vérifier)';
     if (e.status === 420 || /rate limit|quota|exceeded|limit/.test(d)) return 'le compte Cloudinary a atteint sa limite (stockage ou envois du mois)';
@@ -140,11 +170,13 @@ export const Cloudinary = {
   },
 
   async deposer(c: ConfigCloudinary, fichier: { contenu: Blob; nom: string }, dossier: string, genre: GenreRessource, acces: AccesRessource = 'authenticated'): Promise<Depot> {
-    const d = await appeler(c, `${genre}/upload`, { folder: dossier, type: acces }, fichier);
+    // Preset non signé : le type de livraison vient du preset ; ni clé ni secret.
+    const d = c.preset ? await deposerParPreset(c, fichier, dossier, genre) : await appeler(c, `${genre}/upload`, { folder: dossier, type: acces }, fichier);
     return {
       publicId: String(d.public_id),
       url: String(d.secure_url),
       genre: d.resource_type === 'raw' ? 'raw' : 'image',
+      acces: d.type === 'authenticated' ? 'authenticated' : c.preset ? 'upload' : acces,
       format: String(d.format ?? ''),
       octets: Number(d.bytes ?? 0),
       ...(typeof d.pages === 'number' ? { pages: d.pages } : {}),
@@ -155,6 +187,7 @@ export const Cloudinary = {
 
   /** Supprime le fichier et vide le cache du CDN. Un fichier déjà absent compte comme supprimé. */
   async supprimer(c: ConfigCloudinary, publicId: string, genre: GenreRessource, acces: AccesRessource = 'upload') {
+    if (!peutSigner(c)) throw new Error('Suppression impossible sans clé ni secret : le fichier reste chez Cloudinary.');
     const d = await appeler(c, `${genre}/destroy`, { public_id: publicId, invalidate: 'true', type: acces });
     if (d.result !== 'ok' && d.result !== 'not found') throw new Error(`Cloudinary : suppression refusée (${String(d.result)})`);
   },

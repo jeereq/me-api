@@ -1,6 +1,6 @@
 import { prisma } from '../../utils/prisma.js';
 
-import { Cloudinary, configCloudinary, type AccesRessource, type GenreRessource } from './cloudinary.js';
+import { Cloudinary, configCloudinary, peutSigner, type AccesRessource, type GenreRessource } from './cloudinary.js';
 import { estReference } from './fichiers.js';
 
 /** Un justificatif retiré de sa dépense (ou dont la dépense est supprimée) est effacé de Cloudinary après ce délai. */
@@ -11,7 +11,8 @@ type Ligne = { publicId: string; genre: string; acces: string; userId: string; e
 
 async function effacer(lignes: Ligne[]) {
   const c = configCloudinary();
-  if (!c) return 0;
+  // Sans clé ni secret (preset non signé), Cloudinary ne laisse rien supprimer : les fiches restent pour un passage futur.
+  if (!c || !peutSigner(c)) return 0;
   let n = 0;
   for (const l of lignes) {
     try {
@@ -70,7 +71,7 @@ export const StockJustificatifs = {
    */
   async rendrePrives(lot = PAR_PASSAGE) {
     const c = configCloudinary();
-    if (!c || process.env.JUSTIFICATIFS_PRIVES !== 'true') return { prives: 0, echecs: 0 };
+    if (!c || c.preset || process.env.JUSTIFICATIFS_PRIVES !== 'true') return { prives: 0, echecs: 0 };
     const lignes = await prisma.justificatif.findMany({ where: { acces: 'upload' }, orderBy: { createdAt: 'asc' }, take: lot, select: { publicId: true, genre: true } });
     let prives = 0;
     let echecs = 0;

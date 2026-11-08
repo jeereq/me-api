@@ -6,7 +6,7 @@ import { prisma } from '../utils/prisma.js';
 import { assertPeutEcrire } from './equipes/droits.js';
 import { AssistantService } from './AssistantService.js';
 import { EquipeService } from './EquipeService.js';
-import { Cloudinary, configCloudinary, raisonCloudinary, type AccesRessource, type GenreRessource, urlLivraison, urlTelechargement } from './justificatifs/cloudinary.js';
+import { Cloudinary, configCloudinary, peutSigner, raisonCloudinary, type AccesRessource, type GenreRessource, urlLivraison, urlTelechargement } from './justificatifs/cloudinary.js';
 import { dossier, nomPropre, TAILLE_MAX, typeFichier } from './justificatifs/fichiers.js';
 import { type ContexteFacture, imagePourIA, type LectureFacture, lireLecture, messagesFacture, SCHEMA_FACTURE } from './justificatifs/lecture-ia.js';
 
@@ -54,7 +54,7 @@ export const JustificatifService = {
       console.error('Dépôt Cloudinary', e);
       throw new HttpError(502, `Le justificatif n'a pas pu être enregistré : ${raisonCloudinary(e)}.`, 'DEPOT_ECHOUE');
     }
-    const ligne = await prisma.justificatif.create({ data: { publicId: depot.publicId, genre: depot.genre, acces: 'authenticated', format: depot.format || null, userId, equipeId: equipeId ?? null } });
+    const ligne = await prisma.justificatif.create({ data: { publicId: depot.publicId, genre: depot.genre, acces: depot.acces, format: depot.format || null, userId, equipeId: equipeId ?? null } });
     return {
       id: depot.publicId,
       url: '',
@@ -98,7 +98,7 @@ export const JustificatifService = {
     try {
       let res = await lire(urlLivraison(c, { ...f, ...('transformation' in voulu ? voulu : { format: ligne.format }) }));
       // Le CDN peut refuser de livrer un PDF (réglage de sécurité du compte Cloudinary) : l'API de téléchargement, elle, le donne.
-      if (!res.ok && vue === 'fichier' && ligne.format) res = await lire(urlTelechargement(c, { ...f, format: ligne.format }));
+      if (!res.ok && vue === 'fichier' && ligne.format && peutSigner(c)) res = await lire(urlTelechargement(c, { ...f, format: ligne.format }));
       if (res.status === 404) throw new HttpError(404, 'Justificatif introuvable.', 'JUSTIFICATIF_INCONNU');
       if (!res.ok || !res.body) throw new Error(`Cloudinary ${res.status}`);
       return res;
