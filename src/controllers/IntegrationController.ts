@@ -25,7 +25,8 @@ async function formulaireMail(req: Request) {
   } catch {
     throw new HttpError(400, 'Formulaire illisible.');
   }
-  const fichiers = form.getAll('pieces').filter((x): x is File => estFichier(x));
+  const fichiers: File[] = [];
+  for (const x of form.getAll('pieces')) if (estFichier(x)) fichiers.push(x);
   // Des pièces annoncées mais illisibles : on ne part pas sans elles.
   if (form.getAll('pieces').length !== fichiers.length) throw new HttpError(400, 'Une pièce jointe est arrivée vide. Ajoute-la à nouveau.');
   const pieces = await Promise.all(fichiers.map(async (f) => ({ nom: f.name, type: f.type, octets: Buffer.from(await f.arrayBuffer()) })));
