@@ -167,6 +167,8 @@ export type ReglesGroupe = {
   /** Entrée : acceptée d'office (annuaire), compte approuvé exigé (invitation), retards permis dans les autres groupes (-1 : sans limite). */
   entree: { automatique: boolean; compteApprouve: boolean; retardsMax: number };
 };
+/** Des règles reçues ou en cours de saisie : chaque partie peut manquer. */
+export type ReglesPartielles = { especes?: boolean; penalite?: Partial<ReglesGroupe['penalite']>; ordre?: OrdreTours; exclusion?: Partial<ReglesGroupe['exclusion']>; entree?: Partial<ReglesGroupe['entree']> };
 export const REGLES_DEFAUT: ReglesGroupe = { especes: false, penalite: { montant: 0, grace: 0 }, ordre: 'tirage', exclusion: { retards: 0 }, entree: { automatique: false, compteApprouve: false, retardsMax: -1 } };
 export const GRACES = [0, 1, 2, 3, 7];
 export const SEUILS_EXCLUSION = [0, 2, 3, 5];
@@ -178,7 +180,7 @@ const entier = (v: unknown, min: number, max: number, defaut: number) => (typeof
  * les paiements), l'entrée d'office seulement dans l'annuaire, une pénalité d'au plus une cotisation.
  */
 export function reglesDe(brut: unknown, g: { visibilite: 'public' | 'prive'; montant: number }): ReglesGroupe {
-  const b = (brut ?? {}) as Partial<ReglesGroupe> & { penalite?: Partial<ReglesGroupe['penalite']>; exclusion?: Partial<ReglesGroupe['exclusion']>; entree?: Partial<ReglesGroupe['entree']> };
+  const b = (brut ?? {}) as ReglesPartielles;
   const prive = g.visibilite === 'prive';
   return {
     especes: prive && b.especes === true,

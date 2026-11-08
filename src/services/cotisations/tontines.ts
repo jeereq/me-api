@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { CAGNOTTE_MAX, COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesGroupe, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
+import { CAGNOTTE_MAX, COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesGroupe, type ReglesPartielles, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -56,7 +56,7 @@ export type CreationTontine = {
   beneficiaire?: { nom: string; telephone: string };
   dateFin?: string;
   rappels?: RappelsGroupe;
-  regles?: Partial<ReglesGroupe>;
+  regles?: ReglesPartielles;
 };
 export type DepsTontines = {
   db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement' | 'alerteAnnuaire' | 'signalementTontine' | 'tontineInvitation'>;
@@ -956,7 +956,7 @@ export function creerTontines(d: DepsTontines) {
     },
 
     /** L'organisateur règle son groupe avant le démarrage (pour une raison précise : avant le premier paiement). Les membres sont prévenus. */
-    async reglerRegles(userId: string, id: string, brut: Partial<ReglesGroupe>) {
+    async reglerRegles(userId: string, id: string, brut: ReglesPartielles) {
       const t = await charger(id);
       exigerOrganisateur(t, userId);
       const mvts = await mouvementsDe(id);
