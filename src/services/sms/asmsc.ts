@@ -46,7 +46,7 @@ const poidsGsm = (c: string) => (GSM_DOUBLE.includes(c) ? 2 : 1);
  * l'alphabet GSM sont simplifiés (un SMS en Unicode tient en 70 caractères au lieu de 160). Unicode ne sert que si
  * le texte contient autre chose (emoji, autre alphabet).
  */
-export function preparerTexte(brut: string): { texte: string; encodage: Encodage } {
+export function preparerTexte(brut: string): { texte: string; encodage: Encodage; coupe?: boolean } {
   const propre = brut
     .replace(/[’‘ʼ]/g, "'")
     .replace(/«\s*/g, '"')
@@ -72,13 +72,70 @@ export function preparerTexte(brut: string): { texte: string; encodage: Encodage
     garde += c;
     total += poids(c);
   }
-  return { texte: `${garde.trimEnd()}...`, encodage: gsm ? 'T' : 'U' };
+  // On coupe entre deux mots plutôt qu'au milieu d'un mot (sauf si le dernier espace est trop loin).
+  const espace = garde.lastIndexOf(' ');
+  if (espace > garde.length - 25 && espace > 0) garde = garde.slice(0, espace);
+  return { texte: `${garde.trimEnd().replace(/[\s,;:.-]+$/, '')}...`, encodage: gsm ? 'T' : 'U', coupe: true };
 }
 
-/** Le SMS d'un passage des rappels : le rappel s'il est seul, sinon leur nombre et leurs titres. */
+/** Le texte tient-il en un seul SMS, sans rien couper ? */
+export const tientEnUnSms = (t: string) => !preparerTexte(t).coupe;
+
+/** Une phrase propre pour un SMS : sans emoji (il ferait passer le SMS de 160 à 70 caractères), majuscule, point final. */
+export function phrase(t: string | null | undefined): string {
+  const x = (t ?? '').replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}]/gu, '').replace(/\s+/g, ' ').trim();
+  if (!x) return '';
+  const p = x[0].toUpperCase() + x.slice(1);
+  return /[.!?:…)»"]$/.test(p) ? p : `${p}.`;
+}
+
+/** Le lien réduit à son adresse (« me.neevo.app ») quand le lien entier ne tient pas. */
+const adresseSeule = (lien: string) => {
+  try {
+    return new URL(lien).host;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Un SMS clair qui tient en un seul message : les phrases dans l'ordre, tant qu'elles tiennent entières (l'essentiel
+ * d'abord), puis le lien s'il tient en entier (un lien coupé ne marche plus), sinon l'adresse du site. Seule la première
+ * phrase peut être coupée, si elle est trop longue à elle seule.
+ */
+export function composerSms(phrases: (string | null | undefined | false)[], lien?: string | null): string {
+  const l = phrases.filter((x): x is string => typeof x === 'string').map(phrase).filter(Boolean);
+  let t = l[0] ?? '';
+  for (const p of l.slice(1)) if (tientEnUnSms(`${t} ${p}`)) t = `${t} ${p}`;
+  if (lien) {
+    const court = adresseSeule(lien);
+    if (tientEnUnSms(`${t} ${lien}`)) t = `${t} ${lien}`;
+    else if (court && tientEnUnSms(`${t} ${court}`)) t = `${t} ${court}`;
+  }
+  return t;
+}
+
+/**
+ * Le SMS d'un passage des rappels, concret : le plus important avec son détail, puis les autres avec le leur s'il tient,
+ * sinon leur titre, et combien restent dans l'app.
+ */
 export function texteRappels(rappels: { titre: string; corps: string; corpsSms?: string }[]): string {
-  if (rappels.length === 1) return `${rappels[0].titre}. ${rappels[0].corpsSms ?? rappels[0].corps}`;
-  return `${rappels.length} rappels : ${rappels.map((r) => r.titre).join(' ; ')}`;
+  const detail = (r: (typeof rappels)[number]) => `${phrase(r.titre)} ${phrase(r.corpsSms ?? r.corps)}`.trim();
+  if (rappels.length <= 1) return rappels[0] ? composerSms([detail(rappels[0])]) : '';
+  const plus = (n: number) => (n > 0 ? ` +${n} autre${n > 1 ? 's' : ''} dans Me.` : '');
+  // Le premier avec son détail s'il tient avec la mention des autres, sinon son titre seul.
+  let t = tientEnUnSms(detail(rappels[0]) + plus(rappels.length - 1)) ? detail(rappels[0]) : phrase(rappels[0].titre);
+  let mis = 1;
+  for (const r of rappels.slice(1)) {
+    const reste = rappels.length - mis - 1;
+    const complet = `${t} ${detail(r)}`;
+    const court = `${t} ${phrase(r.titre)}`;
+    if (tientEnUnSms(complet + plus(reste))) t = complet;
+    else if (tientEnUnSms(court + plus(reste))) t = court;
+    else break;
+    mis++;
+  }
+  return t + plus(rappels.length - mis);
 }
 
 /** Le SMS de mot de passe oublié ; null si le lien ne tiendrait pas en un SMS : coupé, il ne marcherait plus. */

@@ -4,6 +4,7 @@ import { EmailService } from '../EmailService.js';
 import { emailRappels } from '../rappels-email.js';
 import { PushService } from '../PushService.js';
 import { SmsService } from '../SmsService.js';
+import { composerSms } from '../sms/asmsc.js';
 
 type Prefs = { app?: boolean; email?: boolean; sms?: boolean };
 export type AvisGroupe = { cle: string; titre: string; corps: string };
@@ -42,19 +43,19 @@ export const Envois = {
       mail = await EmailService.envoyer(u.email, avis.titre, m.texte, m.html);
       if (mail) await prisma.notification.updateMany({ where: { userId, cle: avis.cle }, data: { parEmail: true } });
     }
-    const sms = canaux.sms && (obligatoire ? obligatoire.sms : prefs.sms !== false) && !!telephone ? await SmsService.envoyer(userId, telephone, `${avis.titre}. ${avis.corps} ${lienApp()}`) : false;
+    const sms = canaux.sms && (obligatoire ? obligatoire.sms : prefs.sms !== false) && !!telephone ? await SmsService.envoyer(userId, telephone, composerSms([avis.titre, avis.corps], lienApp())) : false;
     return { nouveau: true, mail, sms };
   },
 
   /** Une invitation à un groupe envoyée par Me à une personne pas encore inscrite, selon les canaux du système. */
-  async invitation(organisateurId: string, c: { email?: string | null; telephone: string; titre: string; texte: string }) {
+  async invitation(organisateurId: string, c: { email?: string | null; telephone: string; titre: string; texte: string; sms?: string }) {
     const canaux = await canauxSysteme();
     let mail = false;
     if (canaux.mail && c.email) {
       const html = `<p style="font-family:sans-serif;font-size:15px;white-space:pre-line">${c.texte.replace(/[&<>"]/g, (x) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[x] as string)}</p>`;
       mail = await EmailService.envoyer(c.email, c.titre, c.texte, html);
     }
-    const sms = canaux.sms ? await SmsService.envoyerCotisation(organisateurId, c.telephone, c.texte) : false;
+    const sms = canaux.sms ? await SmsService.envoyerCotisation(organisateurId, c.telephone, c.sms ?? c.texte) : false;
     return { mail, sms };
   },
 };

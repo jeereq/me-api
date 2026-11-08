@@ -4,13 +4,15 @@ import { adresseApp } from './comptes/emails.js';
 import { EmailService } from './EmailService.js';
 import { emailRappels } from './rappels-email.js';
 import { PushService } from './PushService.js';
-import { rappelsParSms, rappelSecondaire, texteRappels } from './sms/asmsc.js';
+import { composerSms, rappelsParSms, rappelSecondaire, texteRappels } from './sms/asmsc.js';
 import { SmsService } from './SmsService.js';
 import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './abonnements/offres.js';
 import { annonceMails, type MailImporte } from './integrations/choix.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
 import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
+import { aDesFinances, type FinancesRapport, type NomsCategories, rapportDepenses, rapportsDuSoir } from '../commun/rapport.js';
+import { avisRapport, emailRapport, smsRapport } from './rapport-email.js';
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
 const RATTRAPAGE_MIN = 45;
@@ -54,6 +56,11 @@ export const NotificationService = {
       const etat = etatAbonnement(u, maintenant);
       const dus = jours.flatMap((j) => rappelsDuJour(e, cfg, j, { financesAvancees: aDroit(etat, 'prets') })).filter((r) => r.quand > borne && r.quand <= nowLocal);
 
+      // Le rapport des dépenses du soir : pour les abonnés (Finances ou Pro, essai compris).
+      if (aDroit(etat, 'alertes')) {
+        await this.rapports(u, e as EspaceRappels & { finances?: FinancesRapport; categories?: NomsCategories }, { jours, borne, nowLocal, aujourdhui: date, push: prefs.app !== false, mail: parMailPossible, sms: parSmsPossible && aDroit(etat, 'sms') }).catch((x) => console.error('Rapport du soir', x));
+      }
+
       if (!dus.length) continue;
       // Un rappel déjà créé lors d'un passage précédent n'est pas renvoyé.
       const deja = new Set((await prisma.notification.findMany({ where: { userId: u.id, cle: { in: dus.map((r) => r.cle) } }, select: { cle: true } })).map((n) => n.cle));
@@ -85,6 +92,44 @@ export const NotificationService = {
     await SmsService.purger(maintenant);
     // On garde 60 jours d'historique.
     await prisma.notification.deleteMany({ where: { createdAt: { lt: new Date(maintenant.getTime() - 60 * 86400000) } } });
+  },
+
+  /**
+   * Les rapports des dépenses dus à ce passage (celui du jour, et ceux des périodes qui finissent ce soir, si demandés) :
+   * une notification chacun, un push, un seul email et un seul SMS (le rapport le plus long). Jamais deux fois : la clé.
+   */
+  async rapports(
+    u: { id: string; email: string | null; nom: string; telephone: string | null },
+    e: { finances?: FinancesRapport; categories?: NomsCategories },
+    o: { jours: string[]; borne: string; nowLocal: string; aujourdhui: string; push: boolean; mail: boolean; sms: boolean },
+  ) {
+    const f = e.finances;
+    if (!aDesFinances(f)) return;
+    const reglages = f?.alertes?.rapport ?? {};
+    const dus = o.jours.flatMap((j) => rapportsDuSoir(f, j).map((x) => ({ ...x, jour: j }))).filter((x) => `${x.jour}T${x.heure}` > o.borne && `${x.jour}T${x.heure}` <= o.nowLocal);
+    if (!dus.length) return;
+    const nouveaux = [];
+    for (const x of dus) {
+      const r = rapportDepenses(f, x.periode, x.jour, o.aujourdhui, e.categories ?? []);
+      const a = avisRapport(r);
+      const { count } = await prisma.notification.createMany({ data: [{ userId: u.id, cle: x.cle, titre: a.titre, corps: a.corps, mode: 'briefing', quand: `${x.jour}T${x.heure}`, lu: !o.push }], skipDuplicates: true });
+      if (count) nouveaux.push({ cle: x.cle, rapport: r, avis: a });
+    }
+    if (!nouveaux.length) return;
+    const app = adresseApp();
+    const lien = app ? `${app}/finances` : undefined;
+    const canaux = { push: f?.alertes?.push !== false, email: f?.alertes?.email !== false };
+    if (o.push && canaux.push) {
+      const n = nouveaux[nouveaux.length - 1];
+      await PushService.envoyer(u.id, { titre: n.avis.titre, corps: n.avis.corps, mode: 'briefing', url: '/finances', tag: n.cle });
+    }
+    if (o.mail && canaux.email) {
+      const m = emailRapport(nouveaux.map((n) => n.rapport), u.nom, lien);
+      if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: nouveaux.map((n) => n.cle) } }, data: { parEmail: true } });
+    }
+    // Un SMS par soir, et seulement s'il y a quelque chose à dire : le rapport le plus long, sinon celui du jour.
+    const pourSms = [...nouveaux].reverse().find((n) => n.rapport.nombre > 0 || n.rapport.budgets.length > 0);
+    if (o.sms && reglages.sms !== false && pourSms && u.telephone) await SmsService.envoyer(u.id, u.telephone, smsRapport(pourSms.rapport, lien), true);
   },
 
   /** Prévient de mails arrivés : une notification et un push, jamais d'email ni de SMS. Coupé dans les réglages (`notifs.mails`). */
@@ -166,7 +211,7 @@ export const NotificationService = {
         const m = emailRappels(avis, u.nom, `Tu reçois cet email parce que quelque chose t'a été confié dans l'équipe « ${equipe.nom} » de Me. Tu peux couper les emails dans Mon compte › Notifications.`);
         if (await EmailService.envoyer(u.email, sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId, cle: { in: avis.map((r) => r.cle) } }, data: { parEmail: true } });
       }
-      if (smsActif && prefs.sms === true && u.telephone && aDroit(etatAbonnement(u), 'sms')) await SmsService.envoyer(userId, u.telephone, avis.length === 1 ? texteRappels(avis) : resume);
+      if (smsActif && prefs.sms === true && u.telephone && aDroit(etatAbonnement(u), 'sms')) await SmsService.envoyer(userId, u.telephone, avis.length === 1 ? composerSms([avis[0].titre, avis[0].corps.replace(/ · /g, ', ')]) : composerSms([`${resume} : ${liste.map((a) => `« ${a.titre} »`).join(', ')}.`, `Équipe ${equipe.nom}.`]));
     }
   },
 
