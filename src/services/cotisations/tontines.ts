@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { CAGNOTTE_MAX, COMMISSION_BPS, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesPartielles, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
+import { CAGNOTTE_MAX, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, reglesDansLeCadre, REGLES_PLATEFORME_DEFAUT, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesPartielles, type ReglesPlateforme, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -22,7 +22,7 @@ export function smsInvitation(qui: string, nom: string, montant: string, lien: s
 }
 
 /** À changer avec la section « Tontines » de cgv.html. */
-export const VERSION_CONDITIONS_TONTINE = '2026-11-06';
+export const VERSION_CONDITIONS_TONTINE = '2026-11-09';
 const REVERIFIABLES = ['en_attente', 'expire', 'abandonne'];
 const ENTREES = ['caution', 'cotisation'];
 const ATTENTE_MS = 86400000;
@@ -80,6 +80,8 @@ export type DepsTontines = {
   limites(): Promise<LimitesCotisation>;
   /** Une invitation envoyée par Me, selon les canaux du système. */
   envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string; sms?: string }): Promise<{ mail: boolean; sms: boolean }>;
+  /** Les règles de la plateforme pour chaque sorte de groupe (admin). Par défaut : REGLES_PLATEFORME_DEFAUT. */
+  reglesPlateforme?: () => Promise<ReglesPlateforme>;
   /** Ceux qui valident les versements (admins, commerciaux du module « versements »). */
   responsablesVersements?: () => Promise<string[]>;
   maintenant?: () => number;
@@ -127,6 +129,9 @@ export function creerTontines(d: DepsTontines) {
   const mouvementsDe = (tontineId: string) => d.db.tontineMouvement.findMany({ where: { tontineId } });
   const aCotise = (mvts: Mouvement[], membreId: string, tourId: string) => mvts.some((x) => x.membreId === membreId && x.tourId === tourId && x.statut === 'paye' && (x.genre === 'cotisation' || x.genre === 'caution_utilisee'));
   const reglesDuGroupe = (t: Pick<TontineComplete, 'regles' | 'visibilite' | 'montant'>) => reglesDe(t.regles, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant });
+  const plateforme = async () => (await d.reglesPlateforme?.()) ?? REGLES_PLATEFORME_DEFAUT;
+  /** Les demandes de paiement sont-elles réservées à l'initiateur pour ce groupe ? (règle de la plateforme, lue à chaque fois) */
+  const demandesParInitiateur = async (t: Pick<TontineComplete, 'visibilite'>) => (await plateforme())[t.visibilite as 'public' | 'prive'].demandes === 'initiateur';
 
   /** Les retards d'un membre dans ce groupe : payé après l'échéance, couvert par la caution, ou toujours dû après l'échéance. */
   function retardsDe(t: TontineComplete, m: Pick<Membre, 'id' | 'createdAt'>, mvts: Mouvement[]) {
@@ -212,7 +217,7 @@ export function creerTontines(d: DepsTontines) {
     lien: t.visibilite === 'public' && d.adresseApp() ? `${d.adresseApp()}${cheminGroupe(t)}` : null,
   });
 
-  function vue(t: TontineComplete, userId: string, mvts: Mouvement[]) {
+  function vue(t: TontineComplete, userId: string, mvts: Mouvement[], cadre: ReglesPlateforme = REGLES_PLATEFORME_DEFAUT) {
     const moi = t.membres.find((m) => m.userId === userId);
     const orga = estOrganisateur(t, userId);
     const tour = tourActuel(t);
@@ -223,6 +228,9 @@ export function creerTontines(d: DepsTontines) {
     return {
       ...carte(t, userId),
       paiementOuvert: ouvertPour(t),
+      commissionBps: t.commissionBps,
+      /** Règle de la plateforme : seul l'initiateur lance les demandes de paiement. */
+      demandesParInitiateur: cadre[t.visibilite as 'public' | 'prive'].demandes === 'initiateur',
       suisOrganisateur: orga,
       lienInvitation: orga ? lienInvitation(t) : null,
       rappels: rappelsDe(t.rappels),
@@ -261,7 +269,7 @@ export function creerTontines(d: DepsTontines) {
 
   const relire = async (id: string, userId: string) => {
     const t = await charger(id);
-    return { groupe: vue(t, userId, await mouvementsDe(id)) };
+    return { groupe: vue(t, userId, await mouvementsDe(id), await plateforme()) };
   };
 
   const prevenirTous = (t: TontineComplete, cle: string, avis: Omit<AvisGroupe, 'cle'>, sauf?: string) =>
@@ -601,7 +609,7 @@ export function creerTontines(d: DepsTontines) {
 
   return {
     /** Les groupes qui cherchent des membres. */
-    limites: () => d.limites(),
+    limites: async () => ({ ...(await d.limites()), plateforme: await plateforme() }),
 
     async annuaire(userId: string | null, f: FiltresAnnuaire = {}) {
       const where: Prisma.TontineWhereInput = {
@@ -684,7 +692,8 @@ export function creerTontines(d: DepsTontines) {
 
     async mesGroupes(userId: string) {
       const liens = await d.db.tontineMembre.findMany({ where: { userId, etat: { in: ['demande', 'accepte'] } }, select: { tontineId: true } });
-      const groupes = await Promise.all(liens.map(async (l) => vue(await charger(l.tontineId), userId, await mouvementsDe(l.tontineId))));
+      const cadre = await plateforme();
+      const groupes = await Promise.all(liens.map(async (l) => vue(await charger(l.tontineId), userId, await mouvementsDe(l.tontineId), cadre)));
       return { groupes: groupes.sort((a, b) => a.nom.localeCompare(b.nom)), versementApi: d.versementApi() };
     },
 
@@ -724,15 +733,16 @@ export function creerTontines(d: DepsTontines) {
         if (dates.length > MAX_TOURS_OBJECTIF) throw new HttpError(400, 'Cette cotisation compte trop de périodes : choisis un autre rythme ou une date plus proche.');
       } else if (c.rythme === 'unique') throw new HttpError(400, 'Choisis un rythme.');
       if (c.montant * c.places * Math.max(1, dates.length) > CAGNOTTE_MAX) throw new HttpError(400, 'La cagnotte serait trop élevée : réduis le montant, le nombre de membres ou de périodes.');
-      const cautionRequise = objectif ? false : publique ? true : c.cautionRequise !== false;
+      const cadre = (await plateforme())[c.visibilite];
+      const cautionRequise = objectif ? false : publique || cadre.cautionObligatoire ? true : c.cautionRequise !== false;
       const t = await d.db.tontine.create({
         data: {
-          organisateurId: u.id, nom: c.nom, description: c.description || null, montant: c.montant, devise: c.devise, rythme: c.rythme, places: c.places, commissionBps: COMMISSION_BPS, fuseau: u.fuseau,
+          organisateurId: u.id, nom: c.nom, description: c.description || null, montant: c.montant, devise: c.devise, rythme: c.rythme, places: c.places, commissionBps: cadre.commissionBps, fuseau: u.fuseau,
           mode: c.mode, visibilite: c.visibilite, cautionRequise, codeInvitation: publique ? null : randomBytes(9).toString('base64url'),
           raison: objectif ? (c.raison ?? null) : null, dateFin: objectif ? c.dateFin : null, ...(beneficiaire ? { beneficiaire: enCoffre(beneficiaire) } : {}),
           etat: objectif ? 'en_cours' : 'ouvert', tourCourant: objectif ? 1 : 0,
           rappels: rappelsDe(c.rappels),
-          regles: reglesDe(c.regles, { visibilite: c.visibilite, montant: c.montant }),
+          regles: reglesDansLeCadre(reglesDe(c.regles, { visibilite: c.visibilite, montant: c.montant }), cadre, c.montant),
         },
       });
       await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, etat: 'accepte', cautionStatut: cautionRequise ? 'due' : 'dispense', contact: enCoffre({ nom: u.nom, telephone }), conditionsVersion: VERSION_CONDITIONS_TONTINE } });
@@ -895,6 +905,8 @@ export function creerTontines(d: DepsTontines) {
     async payer(userId: string, id: string, genre: 'caution' | 'cotisation') {
       await avancerObjectif(id);
       const t = await charger(id);
+      // Règle de la plateforme : seul l'initiateur lance les demandes (il peut toujours payer pour lui-même).
+      if (!estOrganisateur(t, userId) && (await demandesParInitiateur(t))) throw new HttpError(403, `${prenomDe(t.organisateur?.nom ?? '') || 'L’initiateur'} t’enverra la demande de paiement : tu la valideras sur ton téléphone.`, 'DEMANDE_PAR_INITIATEUR');
       if (!ouvertPour(t)) throw new HttpError(503, 'Le paiement n’est pas encore ouvert.');
       if (!d.adresseServeur().startsWith('https://')) throw new HttpError(503, 'Le paiement est momentanément indisponible.');
       const moi = t.membres.find((m) => m.userId === userId);
@@ -1027,7 +1039,7 @@ export function creerTontines(d: DepsTontines) {
       const mvts = await mouvementsDe(id);
       const ouvert = estObjectif(t) ? !mvts.some((x) => x.genre === 'cotisation' && x.statut === 'paye') : t.etat === 'ouvert';
       if (!ouvert) throw new HttpError(409, 'Le groupe a démarré : ses règles ne changent plus.');
-      const regles = reglesDe(brut, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant });
+      const regles = reglesDansLeCadre(reglesDe(brut, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant }), (await plateforme())[t.visibilite as 'public' | 'prive'], t.montant);
       if (JSON.stringify(regles) === JSON.stringify(reglesDuGroupe(t))) return relire(id, userId);
       await d.db.tontine.update({ where: { id }, data: { regles } });
       await prevenirTous(t, `tontine:regles:${id}:${maintenant()}`, { titre: 'Règles du groupe modifiées', corps: `« ${t.nom} » : ${texteRegles(regles, t.devise).join(' ')}` }, t.membres.find((m) => m.userId === userId)?.id);

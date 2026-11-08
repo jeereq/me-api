@@ -78,7 +78,7 @@ export function numeroMasque(telephone: string) {
 
 export type RythmeTontine = 'quotidien' | 'hebdomadaire' | 'mensuel';
 export type RythmeObjectif = RythmeTontine | 'unique';
-/** Commission de la plateforme : 5 %, retenus sur la cagnotte. */
+/** Commission par défaut (5 %) : chaque groupe prend celle des règles de la plateforme pour sa sorte (REGLES_PLATEFORME_DEFAUT). */
 export const COMMISSION_BPS = 500;
 
 /** Pour 10 membres à 10 $ : 100 $ collectés, 5 $ de commission, 95 $ versés. Le tout en centimes. */
@@ -214,3 +214,65 @@ export function texteRegles(r: ReglesGroupe, devise: string): string[] {
   if (r.entree.retardsMax >= 0) l.push(r.entree.retardsMax ? `Au plus ${r.entree.retardsMax} retard${r.entree.retardsMax > 1 ? 's' : ''} dans d’autres groupes pour entrer.` : 'Aucun retard dans d’autres groupes pour entrer.');
   return l;
 }
+
+/* Règles de la plateforme, fixées par l'admin pour chaque sorte de groupe : sur invitation ou dans l'annuaire. */
+
+export type Visibilite = 'public' | 'prive';
+export type ReglesPlateformeType = {
+  /** Commission de Me en points de base (500 = 5 %), figée à la création de chaque groupe. */
+  commissionBps: number;
+  /** Qui lance les demandes de paiement mobile money : l'initiateur seul, ou aussi chaque membre. */
+  demandes: 'initiateur' | 'tous';
+  /** Caution obligatoire pour une rotation. */
+  cautionObligatoire: boolean;
+  /** L'initiateur peut accepter les espèces (groupes sur invitation seulement). */
+  especes: boolean;
+  /** Compte approuvé par Me exigé pour entrer (toujours vrai dans l'annuaire). */
+  compteApprouve: boolean;
+  /** Pénalité de retard au plus, en pourcentage de la cotisation. */
+  penaliteMaxPct: number;
+  /** Retards permis dans d'autres groupes pour entrer, imposé à tous les groupes (-1 : pas de limite imposée). */
+  retardsMax: number;
+};
+export type ReglesPlateforme = Record<Visibilite, ReglesPlateformeType>;
+export const REGLES_PLATEFORME_DEFAUT: ReglesPlateforme = {
+  prive: { commissionBps: 500, demandes: 'initiateur', cautionObligatoire: false, especes: true, compteApprouve: false, penaliteMaxPct: 100, retardsMax: -1 },
+  public: { commissionBps: 1000, demandes: 'initiateur', cautionObligatoire: true, especes: false, compteApprouve: true, penaliteMaxPct: 100, retardsMax: -1 },
+};
+/** 20 % au plus : au-delà, la cagnotte ne vaut plus la peine. */
+export const COMMISSION_MAX_BPS = 2000;
+export const PENALITES_MAX_PCT = [0, 10, 25, 50, 100];
+
+/** Les règles enregistrées par l'admin, ramenées à ce qui est permis. Dans l'annuaire : jamais d'espèces, compte toujours approuvé. */
+export function reglesPlateformeDe(brut: unknown): ReglesPlateforme {
+  const b = (brut ?? {}) as Partial<Record<Visibilite, Partial<ReglesPlateformeType>>>;
+  const un = (v: Visibilite): ReglesPlateformeType => {
+    const x = b[v] ?? {};
+    const d = REGLES_PLATEFORME_DEFAUT[v];
+    return {
+      commissionBps: entier(x.commissionBps, 0, COMMISSION_MAX_BPS, d.commissionBps),
+      demandes: x.demandes === 'tous' || x.demandes === 'initiateur' ? x.demandes : d.demandes,
+      cautionObligatoire: v === 'public' ? x.cautionObligatoire !== false : x.cautionObligatoire === true,
+      especes: v === 'prive' && (x.especes ?? d.especes) === true,
+      compteApprouve: v === 'public' || x.compteApprouve === true,
+      penaliteMaxPct: PENALITES_MAX_PCT.includes(x.penaliteMaxPct as number) ? (x.penaliteMaxPct as number) : d.penaliteMaxPct,
+      retardsMax: RETARDS_MAX.includes(x.retardsMax as number) ? (x.retardsMax as number) : d.retardsMax,
+    };
+  };
+  return { prive: un('prive'), public: un('public') };
+}
+
+/** Les règles d'un groupe, dans le cadre fixé par la plateforme pour sa sorte. */
+export function reglesDansLeCadre(r: ReglesGroupe, p: ReglesPlateformeType, montant: number): ReglesGroupe {
+  const penaliteMax = Math.floor((montant * p.penaliteMaxPct) / 100);
+  const retardsMax = p.retardsMax < 0 ? r.entree.retardsMax : r.entree.retardsMax < 0 ? p.retardsMax : Math.min(r.entree.retardsMax, p.retardsMax);
+  return {
+    ...r,
+    especes: r.especes && p.especes,
+    penalite: { ...r.penalite, montant: Math.min(r.penalite.montant, penaliteMax) },
+    entree: { ...r.entree, compteApprouve: r.entree.compteApprouve || p.compteApprouve, retardsMax },
+  };
+}
+
+/** « 5 % », « 7,5 % ». */
+export const tauxCommission = (bps: number) => `${String(bps / 100).replace('.', ',')} %`;
