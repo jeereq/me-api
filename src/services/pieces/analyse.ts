@@ -87,9 +87,9 @@ type Partie = { type: 'text'; text: string } | { type: 'image_url'; image_url: {
 /** Les messages envoyés au modèle : l'image, le PDF ou le texte du fichier. */
 export function messagesPiece(c: ContextePiece, contenu: { genre: 'image' | 'pdf'; nom: string; type: string; base64: string } | { genre: 'tableur' | 'texte'; nom: string; texte: string }) {
   const parties: Partie[] = [{ type: 'text', text: `Voici la pièce jointe « ${contenu.nom.slice(0, 120)} ».` }];
-  if (contenu.genre === 'image') parties.push({ type: 'image_url', image_url: { url: `data:${contenu.type};base64,${contenu.base64}`, detail: 'high' } });
-  else if (contenu.genre === 'pdf') parties.push({ type: 'file', file: { filename: contenu.nom.slice(0, 120) || 'piece.pdf', file_data: `data:application/pdf;base64,${contenu.base64}` } });
-  else parties.push({ type: 'text', text: `Contenu du fichier :\n${contenu.texte.slice(0, 20_000)}` });
+  if ('texte' in contenu) parties.push({ type: 'text', text: `Contenu du fichier :\n${contenu.texte.slice(0, 20_000)}` });
+  else if (contenu.genre === 'image') parties.push({ type: 'image_url', image_url: { url: `data:${contenu.type};base64,${contenu.base64}`, detail: 'high' } });
+  else parties.push({ type: 'file', file: { filename: contenu.nom.slice(0, 120) || 'piece.pdf', file_data: `data:application/pdf;base64,${contenu.base64}` } });
   return [
     { role: 'system' as const, content: consignesPiece(c, contenu.genre === 'image' || contenu.genre === 'pdf') },
     { role: 'user' as const, content: parties },
