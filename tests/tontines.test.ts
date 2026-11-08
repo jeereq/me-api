@@ -70,14 +70,17 @@ function baseMemoire() {
     ...t,
     organisateur: roles[t.organisateurId] ?? null,
     membres: membres.lignes.filter((m) => m.tontineId === t.id).map((m) => ({ etat: 'demande', cautionStatut: 'due', rang: null, user: null, ...m })),
-    tours: tours.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => a.numero - b.numero),
+    tours: tours.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => a.numero - b.numero).map((x) => ({ especes: 0, ...x })),
+    invitations: invitations.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => b.envoyeLe - a.envoyeLe),
   });
   const brut = (l: Ligne) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...l });
   const alertes = table();
   const signalements = table();
+  const invitations = table();
   const db = {
     alerteAnnuaire: alertes,
     signalementTontine: signalements,
+    tontineInvitation: invitations,
     tontine: {
       ...tontines,
       create: async ({ data }: Ligne) => tontines.create({ data: { etat: 'ouvert', tourCourant: 0, mode: 'rotation', visibilite: 'public', cautionRequise: true, beneficiaire: null, retireAnnuaireLe: null, ...data } }),
@@ -110,7 +113,7 @@ function baseMemoire() {
       findFirst: async ({ where }: Ligne) => mvts.lignes.find((m) => mvts.correspond(m, where)) ?? null,
     },
   };
-  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles, alertes, signalements };
+  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles, alertes, signalements, invitations };
 }
 
 describe('calculs des tontines', () => {
@@ -832,6 +835,129 @@ describe('une tontine de bout en bout', () => {
     await s.rendreCaution(ADMIN, b.membres.lignes.find((x) => x.userId === 'paul')!.id, 'REF777');
     assert.equal((await s.adherer(paul, groupe.id)).groupe.monEtat, 'demande');
     assert.equal(b.membres.lignes.find((x) => x.userId === 'paul')!.cautionStatut, 'due');
+  });
+
+  const prive = (regles?: Ligne) => s.creer(orga, { nom: 'Amis', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 2, mode: 'rotation', visibilite: 'prive', cautionRequise: false, telephone: '0812345670', regles });
+
+  it('invitations envoyées : visibles par l’organisateur, numéro masqué, rejointes', async () => {
+    const { groupe } = await prive();
+    await s.inviter('orga', groupe.id, '0812345673');
+    await s.inviter('orga', groupe.id, '0812345673');
+    let g = (await s.detail('orga', groupe.id)).groupe;
+    assert.equal(g.invitations.length, 1);
+    assert.equal(g.invitations[0].envois, 2);
+    assert.equal(g.invitations[0].rejointLe, null);
+    assert.doesNotMatch(JSON.stringify(b.invitations.lignes), /812345673/);
+    await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673');
+    g = (await s.detail('orga', groupe.id)).groupe;
+    assert.ok(g.invitations[0].rejointLe);
+    assert.deepEqual((await s.detail('invite', groupe.id)).groupe.invitations, []);
+  });
+
+  it('espèces : notées par l’organisateur, hors du versement et de la commission', async () => {
+    await assert.rejects(async () => {
+      const { groupe } = await prive();
+      await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673');
+      await s.demarrer('orga', groupe.id);
+      await s.noterEspeces('orga', b.membres.lignes.find((x) => x.userId === 'invite')!.id);
+    }, /n’accepte pas les espèces/);
+    b = baseMemoire();
+  });
+
+  it('espèces acceptées : le membre est prévenu, Me ne verse que la part mobile', async () => {
+    const { groupe } = await prive({ especes: true });
+    assert.equal(groupe.regles.especes, true);
+    await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673');
+    await s.demarrer('orga', groupe.id);
+    const m = b.membres.lignes.find((x) => x.userId === 'invite')!;
+    await assert.rejects(s.noterEspeces('invite', m.id), /organisateur/);
+    await s.noterEspeces('orga', m.id);
+    assert.ok(avis.some((a) => a.userId === 'invite' && /espèces/.test(a.titre)));
+    // Une deuxième fois : rien n'est dû.
+    await assert.rejects(s.noterEspeces('orga', m.id), /pas de cotisation/);
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    const t = b.tours.lignes.find((x) => x.numero === 1)!;
+    assert.equal(t.etat, 'a_verser');
+    assert.deepEqual([t.brut, t.commission, t.net, t.especes], [1000, 50, 950, 1000]);
+    // Une rotation publique n'accepte jamais les espèces.
+    const pub = await s.creer(orga, { nom: 'Public', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, mode: 'rotation', visibilite: 'public', regles: { especes: true } });
+    assert.equal(pub.groupe.regles.especes, false);
+  });
+
+  it('pénalité de retard : ajoutée après la grâce, versée au bénéficiaire', async () => {
+    const { groupe } = await prive({ penalite: { montant: 200, grace: 2 } });
+    await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673');
+    await s.demarrer('orga', groupe.id);
+    const echeance = b.tours.lignes.find((x) => x.numero === 1)!.echeance;
+    instant = Date.parse(`${echeance}T12:00:00Z`) + 2 * JOUR;
+    assert.equal((await s.detail('orga', groupe.id)).groupe.aPayer?.montant, 1000);
+    instant += JOUR;
+    const g = (await s.detail('orga', groupe.id)).groupe;
+    assert.deepEqual([g.aPayer?.montant, g.aPayer?.penalite], [1200, 200]);
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider('12.00');
+    await s.payerPourMembre('orga', b.membres.lignes.find((x) => x.userId === 'invite')!.id);
+    await valider('12.00');
+    const t = b.tours.lignes.find((x) => x.numero === 1)!;
+    assert.equal(t.brut, 2400);
+    const vu = (await s.detail('orga', groupe.id)).groupe;
+    assert.ok(vu.membres.every((x) => x.retards === 1));
+    assert.match(vu.texteRegles.join(' '), /pénalité après 2 jours de grâce/);
+  });
+
+  it('ordre des tours : d’arrivée, ou choisi par l’organisateur avant le démarrage', async () => {
+    const { groupe } = await prive({ ordre: 'organisateur' });
+    await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673');
+    await assert.rejects(s.demarrer('orga', groupe.id), /ordre des tours/);
+    const ids = b.membres.lignes.map((x) => x.id);
+    await assert.rejects(s.ordonner('orga', groupe.id, [ids[0]]), /chaque membre/);
+    await s.ordonner('orga', groupe.id, [ids[1], ids[0]]);
+    const g = (await s.demarrer('orga', groupe.id)).groupe;
+    assert.deepEqual(g.tours.map((x) => x.beneficiaire), ['Sarah Tshibanda', 'Jeereq Takango']);
+    await assert.rejects(s.reglerRegles('orga', groupe.id, { ordre: 'tirage' }), /a démarré/);
+  });
+
+  it('règles : modifiables avant le démarrage, les membres sont prévenus', async () => {
+    const { groupe } = await prive();
+    await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673');
+    const g = (await s.reglerRegles('orga', groupe.id, { ordre: 'arrivee', exclusion: { retards: 3 }, penalite: { montant: 999999, grace: 5 } })).groupe;
+    assert.equal(g.regles.ordre, 'arrivee');
+    // Pénalité ramenée à zéro si elle dépasse une cotisation, grâce non proposée ignorée.
+    assert.deepEqual(g.regles.penalite, { montant: 0, grace: 0 });
+    assert.ok(avis.some((a) => a.userId === 'invite' && a.titre === 'Règles du groupe modifiées'));
+    await assert.rejects(s.reglerRegles('invite', groupe.id, { ordre: 'tirage' }), /organisateur/);
+    const d = (await s.demarrer('orga', groupe.id)).groupe;
+    assert.deepEqual(d.tours.map((x) => x.beneficiaire), ['Jeereq Takango', 'Sarah Tshibanda']);
+  });
+
+  it('conditions d’entrée : compte approuvé, et pas trop de retards ailleurs', async () => {
+    const { groupe } = await prive({ entree: { compteApprouve: true } });
+    await assert.rejects(s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673'), /compte approuvé/);
+    approuves.add('invite');
+    assert.equal((await s.rejoindreParInvitation(invite, b.tontines.lignes[0].codeInvitation, '0812345673')).groupe.monEtat, 'accepte');
+    // Paul a un retard dans un autre groupe.
+    const autre = await s.creer(paul, { nom: 'Autre', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 2, mode: 'rotation', visibilite: 'prive', cautionRequise: false, telephone: '0812345671' });
+    await s.rejoindreParInvitation(marie, b.tontines.lignes.find((x) => x.id === autre.groupe.id)!.codeInvitation, '0812345672');
+    await s.demarrer('paul', autre.groupe.id);
+    instant = Date.parse(`${b.tours.lignes.find((x) => x.tontineId === autre.groupe.id && x.numero === 1)!.echeance}T12:00:00Z`) + 2 * JOUR;
+    const strict = await s.creer(orga, { nom: 'Strict', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'public', regles: { entree: { retardsMax: 0, automatique: true } } });
+    await assert.rejects(s.adherer(paul, strict.groupe.id), /sans retard/);
+    // Entrée d'office : Marie a payé ? Non plus : elle aussi est en retard dans « Autre ».
+    await assert.rejects(s.adherer(marie, strict.groupe.id), /sans retard/);
+  });
+
+  it('exclusion : après le seuil de retards, pour une raison précise seulement', async () => {
+    const o = await s.creer(orga, { nom: 'Mariage', montant: 1000, devise: 'USD', rythme: 'hebdomadaire', places: 5, mode: 'objectif', visibilite: 'prive', telephone: '0812345670', raison: 'Mariage', beneficiaire: { nom: 'Jean', telephone: '0812345679' }, dateFin: '2027-01-30', regles: { exclusion: { retards: 2 } } });
+    await s.rejoindreParInvitation(invite, b.tontines.lignes.find((x) => x.id === o.groupe.id)!.codeInvitation, '0812345673');
+    const m = b.membres.lignes.find((x) => x.userId === 'invite')!;
+    await assert.rejects(s.exclure('orga', m.id), /2 retards/);
+    instant += 20 * JOUR;
+    await s.rattraper(instant);
+    assert.ok((await s.detail('orga', o.groupe.id)).groupe.membres.find((x) => x.id === m.id)!.retards >= 2);
+    await s.exclure('orga', m.id);
+    assert.equal(b.membres.lignes.find((x) => x.id === m.id)!.etat, 'exclu');
+    assert.ok(avis.some((a) => a.userId === 'invite' && a.titre === 'Exclu du groupe'));
   });
 });
 

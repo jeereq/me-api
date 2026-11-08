@@ -6,7 +6,7 @@ import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.j
 import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter, signalementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
+import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
@@ -48,10 +48,14 @@ router.post('/membres/:membreId/payer-pour', payerTontineLimiter, validateReques
 router.post('/membres/:membreId/retirer', validateRequest(tontineMembreIdSchema), asyncHandler(C.retirer));
 router.post('/membres/:membreId/rappel', envoiCotisationLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.rappeler));
 router.post('/membres/:membreId/caution', validateRequest(tontineMembreIdSchema), asyncHandler(C.utiliserCaution));
+router.post('/membres/:membreId/especes', payerTontineLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.noterEspeces));
+router.post('/membres/:membreId/exclure', validateRequest(tontineMembreIdSchema), asyncHandler(C.exclure));
 router.get('/:id', validateRequest(tontineIdSchema), asyncHandler(C.detail));
 router.post('/:id/adherer', requireFonction('cotisations'), validateRequest(tontineAdhererSchema), asyncHandler(C.adherer));
 router.post('/:id/inviter', envoiCotisationLimiter, validateRequest(tontineInviterSchema), asyncHandler(C.inviter));
 router.post('/:id/rappels', validateRequest(tontineRappelsSchema), asyncHandler(C.reglerRappels));
+router.post('/:id/regles', validateRequest(tontineReglesSchema), asyncHandler(C.reglerRegles));
+router.post('/:id/ordre', validateRequest(tontineOrdreSchema), asyncHandler(C.ordonner));
 router.post('/:id/quitter', validateRequest(tontineIdSchema), asyncHandler(C.quitter));
 router.post('/:id/annuler', validateRequest(tontineIdSchema), asyncHandler(C.annuler));
 router.post('/:id/demarrer', validateRequest(tontineIdSchema), asyncHandler(C.demarrer));

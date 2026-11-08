@@ -518,10 +518,13 @@ model Tontine {
   tourCourant    Int      @default(0)
   /// Retiré de l'annuaire par l'équipe après des signalements : le groupe continue pour ses membres.
   retireAnnuaireLe DateTime?
+  /// Règles choisies par l'organisateur (espèces, pénalités, ordre des tours, exclusion, entrée) : voir commun/cotisations.ts.
+  regles         Json?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   membres        TontineMembre[]
   tours          TontineTour[]
+  invitations    TontineInvitation[]
   mouvements     TontineMouvement[]
   signalements   SignalementTontine[]
 
@@ -537,7 +540,7 @@ model TontineMembre {
   user              User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   /// Nom et numéro mobile money chiffrés.
   contact           Json
-  /// demande, accepte, refuse ou parti
+  /// demande, accepte, refuse, parti ou exclu
   etat              String   @default("demande")
   /// Position dans l'ordre de réception, tirée au sort au démarrage.
   rang              Int?
@@ -567,6 +570,8 @@ model TontineTour {
   brut           Int
   commission     Int
   net            Int
+  /// Part payée en espèces, remise par l'organisateur : ni versée par Me, ni soumise à la commission.
+  especes        Int      @default(0)
   valideParNom   String?
   valideLe       DateTime?
   createdAt      DateTime @default(now())
@@ -591,7 +596,7 @@ model TontineMouvement {
   genre     String
   montant   Int
   devise    String
-  /// mobile (FlexPaie), main (fait hors de Me, preuve dans message) ou interne
+  /// mobile (FlexPaie), main (sortie faite hors de Me, preuve dans message), especes (cotisation remise en main propre à l'organisateur) ou interne
   mode      String
   /// en_attente, paye, echoue, expire ou abandonne
   statut    String
@@ -606,6 +611,23 @@ model TontineMouvement {
   @@index([membreId, createdAt])
   @@index([tourId, genre])
   @@index([statut, createdAt])
+}
+
+/// Une invitation envoyée par Me pour un groupe privé : le numéro n'est gardé que masqué, avec une empreinte pour reconnaître la personne qui rejoint.
+model TontineInvitation {
+  id         String    @id @default(cuid())
+  tontineId  String
+  tontine    Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  empreinte  String
+  numero     String
+  mail       Boolean   @default(false)
+  sms        Boolean   @default(false)
+  envois     Int       @default(1)
+  envoyeLe   DateTime  @default(now())
+  rejointLe  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([tontineId, empreinte])
 }
 
 /// Approbation d'un compte pour l'annuaire des cotisations.

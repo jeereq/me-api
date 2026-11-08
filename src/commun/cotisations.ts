@@ -151,3 +151,66 @@ export function montantTontine(centimes: number, devise: string, rythme: RythmeO
   const quand = { mensuel: 'par mois', hebdomadaire: 'par semaine', quotidien: 'par jour', unique: 'une fois' }[rythme];
   return `${montantCotisation(centimes, devise)} ${quand}`;
 }
+
+/* Règles d'un groupe, choisies par l'organisateur avant le démarrage. */
+
+export type OrdreTours = 'tirage' | 'arrivee' | 'organisateur';
+export type ReglesGroupe = {
+  /** L'organisateur peut noter une cotisation payée en espèces (groupe privé seulement). */
+  especes: boolean;
+  /** Pénalité par cotisation payée en retard, en centimes ; `grace` : jours de tolérance après l'échéance. */
+  penalite: { montant: number; grace: number };
+  /** Ordre de réception : tirage au sort, ordre d'arrivée dans le groupe, ou choisi par l'organisateur. */
+  ordre: OrdreTours;
+  /** Retards au-delà desquels l'organisateur est prévenu et peut exclure (0 : jamais). */
+  exclusion: { retards: number };
+  /** Entrée : acceptée d'office (annuaire), compte approuvé exigé (invitation), retards permis dans les autres groupes (-1 : sans limite). */
+  entree: { automatique: boolean; compteApprouve: boolean; retardsMax: number };
+};
+/** Des règles reçues ou en cours de saisie : chaque partie peut manquer. */
+export type ReglesPartielles = { especes?: boolean; penalite?: Partial<ReglesGroupe['penalite']>; ordre?: OrdreTours; exclusion?: Partial<ReglesGroupe['exclusion']>; entree?: Partial<ReglesGroupe['entree']> };
+export const REGLES_DEFAUT: ReglesGroupe = { especes: false, penalite: { montant: 0, grace: 0 }, ordre: 'tirage', exclusion: { retards: 0 }, entree: { automatique: false, compteApprouve: false, retardsMax: -1 } };
+export const GRACES = [0, 1, 2, 3, 7];
+export const SEUILS_EXCLUSION = [0, 2, 3, 5];
+export const RETARDS_MAX = [-1, 0, 1, 3];
+const entier = (v: unknown, min: number, max: number, defaut: number) => (typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : defaut);
+
+/**
+ * Des règles reçues, ramenées à ce qui est permis : les espèces seulement dans un groupe privé (dans l'annuaire, Me garantit
+ * les paiements), l'entrée d'office seulement dans l'annuaire, une pénalité d'au plus une cotisation.
+ */
+export function reglesDe(brut: unknown, g: { visibilite: 'public' | 'prive'; montant: number }): ReglesGroupe {
+  const b = (brut ?? {}) as ReglesPartielles;
+  const prive = g.visibilite === 'prive';
+  return {
+    especes: prive && b.especes === true,
+    penalite: { montant: entier(b.penalite?.montant, 0, Math.max(0, g.montant), 0), grace: GRACES.includes(b.penalite?.grace as number) ? (b.penalite!.grace as number) : 0 },
+    ordre: b.ordre === 'arrivee' || b.ordre === 'organisateur' ? b.ordre : 'tirage',
+    exclusion: { retards: SEUILS_EXCLUSION.includes(b.exclusion?.retards as number) ? (b.exclusion!.retards as number) : 0 },
+    entree: {
+      automatique: !prive && b.entree?.automatique === true,
+      compteApprouve: prive && b.entree?.compteApprouve === true,
+      retardsMax: RETARDS_MAX.includes(b.entree?.retardsMax as number) ? (b.entree!.retardsMax as number) : -1,
+    },
+  };
+}
+
+/** La pénalité due pour une cotisation payée le `jour` : après l'échéance et les jours de grâce. */
+export function penaliteDue(r: ReglesGroupe, echeance: string, jour: string) {
+  if (!r.penalite.montant) return 0;
+  const limite = enJour(new Date(enDate(echeance).getTime() + r.penalite.grace * JOUR_MS));
+  return jour > limite ? r.penalite.montant : 0;
+}
+
+/** Les règles en phrases courtes, pour les membres et l'annuaire. */
+export function texteRegles(r: ReglesGroupe, devise: string): string[] {
+  const l: string[] = [];
+  l.push(r.ordre === 'arrivee' ? 'Ordre des tours : ordre d’arrivée dans le groupe.' : r.ordre === 'organisateur' ? 'Ordre des tours : choisi par l’organisateur.' : 'Ordre des tours : tiré au sort au démarrage.');
+  if (r.penalite.montant) l.push(`Retard : ${montantCotisation(r.penalite.montant, devise)} de pénalité${r.penalite.grace ? ` après ${r.penalite.grace} jour${r.penalite.grace > 1 ? 's' : ''} de grâce` : ''}, versés au bénéficiaire du tour.`);
+  if (r.exclusion.retards) l.push(`Après ${r.exclusion.retards} retards, l’organisateur peut exclure le membre.`);
+  if (r.especes) l.push('Paiement en espèces accepté, noté par l’organisateur.');
+  if (r.entree.automatique) l.push('Demandes acceptées d’office.');
+  if (r.entree.compteApprouve) l.push('Compte approuvé par Me exigé pour entrer.');
+  if (r.entree.retardsMax >= 0) l.push(r.entree.retardsMax ? `Au plus ${r.entree.retardsMax} retard${r.entree.retardsMax > 1 ? 's' : ''} dans d’autres groupes pour entrer.` : 'Aucun retard dans d’autres groupes pour entrer.');
+  return l;
+}
