@@ -419,6 +419,33 @@ export function creerTontines(d: DepsTontines) {
     if (!(await d.comptesApprouves([userId])).has(userId)) throw new HttpError(403, 'Fais approuver ton compte pour utiliser l’annuaire.', COMPTE_A_APPROUVER);
   }
 
+  /** La demande de paiement qu'un initiateur envoie au numéro d'un membre. */
+  async function demanderA(t: TontineComplete, membreId: string): Promise<'envoyee' | 'rien' | 'en_cours' | 'limite'> {
+    if (!ouvertPour(t)) throw new HttpError(503, 'Le paiement n’est pas encore ouvert.');
+    if (!d.adresseServeur().startsWith('https://')) throw new HttpError(503, 'Le paiement est momentanément indisponible.');
+    const m = t.membres.find((x) => x.id === membreId);
+    if (!m || m.etat !== 'accepte') throw new HttpError(404, 'Ce membre n’est pas dans le groupe.');
+    let mvts = await mouvementsDe(t.id);
+    const siens = () => mvts.filter((x) => x.membreId === m.id);
+    if (siens().some((x) => x.statut === 'en_attente' && ENTREES.includes(x.genre))) return 'en_cours';
+    if (siens().filter((x) => x.mode === 'mobile' && x.createdAt.getTime() > maintenant() - 86400000).length >= DEMANDES_PAR_JOUR) return 'limite';
+    // Une demande abandonnée a pu être validée entre-temps : ne pas faire payer deux fois.
+    for (const a of siens().filter((x) => x.mode === 'mobile' && ENTREES.includes(x.genre) && REVERIFIABLES.includes(x.statut)).slice(-3)) await verifier(a);
+    mvts = await mouvementsDe(t.id);
+    const frais = await charger(t.id);
+    const du = aPayer(frais, frais.membres.find((x) => x.id === m.id)!, mvts);
+    if (!du) return 'rien';
+    const { telephone } = contactDe(m);
+    if (!telephone) throw new HttpError(409, 'Ce membre n’a pas de numéro.');
+    await d.exigerNumero(telephone);
+    await lancerDemande(t, m.id, telephone, du);
+    if (m.userId)
+      await d
+        .avertir(m.userId, null, { cle: `tontine:demande-paiement:${m.id}:${maintenant()}`, titre: `${du.genre === 'caution' ? 'Caution' : 'Cotisation'} à valider : ${montantCotisation(du.montant, t.devise)}`, corps: `${prenomDe(t.organisateur?.nom ?? '') || 'L’organisateur'} t’envoie la demande de paiement de « ${t.nom} ». Valide-la sur ton téléphone avec ton code mobile money.` }, true)
+        .catch((e) => console.error('Avis de tontine', e));
+    return 'envoyee';
+  }
+
   /** Envoie la demande de paiement. Un double clic n'en crée qu'une. */
   async function lancerDemande(t: TontineComplete, membreId: string, telephone: string, du: { genre: 'caution' | 'cotisation'; montant: number; tourId: string | null }) {
     let m: Mouvement;
@@ -885,6 +912,40 @@ export function creerTontines(d: DepsTontines) {
 
       await lancerDemande(t, moi.id, telephone, du);
       return relire(id, userId);
+    },
+
+    /**
+     * L'initiateur déclenche la demande de paiement sur le téléphone d'un membre : la même demande que si le membre
+     * appuyait sur « Payer » (cotisation, pénalité comprise, ou caution). Le membre valide avec son code mobile money.
+     */
+    async demanderPaiement(userId: string, membreId: string) {
+      const m = await d.db.tontineMembre.findUnique({ where: { id: membreId } });
+      if (!m) throw new HttpError(404, 'Membre introuvable.');
+      await avancerObjectif(m.tontineId);
+      const t = await charger(m.tontineId);
+      exigerOrganisateur(t, userId);
+      const envoi = await demanderA(t, membreId);
+      if (envoi === 'rien') throw new HttpError(409, 'Ce membre n’a rien à payer.');
+      if (envoi === 'en_cours') throw new HttpError(409, 'Une demande est déjà en cours pour ce membre.');
+      if (envoi === 'limite') throw new HttpError(429, 'Trop de demandes aujourd’hui pour ce membre. Réessaie demain.');
+      return relire(t.id, userId);
+    },
+
+    /** L'initiateur demande le paiement à tous ceux qui doivent encore payer (sauf lui-même), en une fois. */
+    async demanderATous(userId: string, id: string) {
+      await avancerObjectif(id);
+      const t = await charger(id);
+      exigerOrganisateur(t, userId);
+      const bilan = { envoyees: 0, enCours: 0, limite: 0 };
+      for (const m of acceptes(t)) {
+        if (m.userId === userId) continue;
+        const r = await demanderA(t, m.id).catch(() => 'erreur' as const);
+        if (r === 'envoyee') bilan.envoyees++;
+        else if (r === 'en_cours') bilan.enCours++;
+        else if (r === 'limite') bilan.limite++;
+      }
+      if (!bilan.envoyees && !bilan.enCours) throw new HttpError(409, bilan.limite ? 'Trop de demandes aujourd’hui. Réessaie demain.' : 'Personne n’a de paiement à faire.');
+      return { ...bilan, ...(await relire(id, userId)) };
     },
 
     /** Groupe privé : l'initiateur, responsable du groupe, paie à la place d'un membre pour débloquer le tour. */

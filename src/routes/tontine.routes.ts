@@ -48,6 +48,8 @@ router.post('/membres/:membreId/payer-pour', payerTontineLimiter, validateReques
 router.post('/membres/:membreId/retirer', validateRequest(tontineMembreIdSchema), asyncHandler(C.retirer));
 router.post('/membres/:membreId/rappel', envoiCotisationLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.rappeler));
 router.post('/membres/:membreId/caution', validateRequest(tontineMembreIdSchema), asyncHandler(C.utiliserCaution));
+router.post('/membres/:membreId/demander', payerTontineLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.demanderPaiement));
+router.post('/:id/demander-tous', payerTontineLimiter, validateRequest(tontineIdSchema), asyncHandler(C.demanderATous));
 router.post('/membres/:membreId/especes', payerTontineLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.noterEspeces));
 router.post('/membres/:membreId/exclure', validateRequest(tontineMembreIdSchema), asyncHandler(C.exclure));
 router.get('/:id', validateRequest(tontineIdSchema), asyncHandler(C.detail));
