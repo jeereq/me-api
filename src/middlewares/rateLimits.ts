@@ -101,6 +101,16 @@ export const liensJustificatifsLimiter = rateLimit({
 /** Ouverture d'un justificatif : chaque vignette d'une liste en est une. */
 export const ouvrirJustificatifLimiter = rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Trop de demandes, réessaie dans un moment.' } });
 
+/** Analyse des pièces jointes par l'IA : 30 / heure par compte. */
+export const analysePieceLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  keyGenerator: cleCompte,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Beaucoup de pièces jointes analysées d’un coup, réessaie dans un moment.', code: 'LIMITE_ANALYSE' },
+});
+
 /** Lecture des factures par l'IA : 40 lectures / heure par compte (une image en haute définition coûte plus qu'une question). */
 export const analyseJustificatifLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

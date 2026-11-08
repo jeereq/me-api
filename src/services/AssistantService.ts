@@ -5,6 +5,7 @@ import { consignesPropres, mailsImportants, preparerMails, reglesAnalyse, REGLES
 import { ConfigService } from './ConfigService.js';
 import { nomApp } from '../commun/nom-app.js';
 import type { SCHEMA_FACTURE } from './justificatifs/lecture-ia.js';
+import type { SCHEMA_PIECE } from './pieces/analyse.js';
 
 const MAX_DONNEES = 60_000;
 const DELAI_MS = 60_000;
@@ -35,9 +36,9 @@ const nomIA = (b: Pick<AssistantBody, 'nom'>) => nomApp(b.nom);
 
 export type MessageIA = { role: 'system' | 'user'; content: string };
 /** Un message qui peut porter une image (lecture d'une facture) : texte et image en morceaux. */
-export type MessageVision = { role: 'system' | 'user'; content: string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } })[] };
+export type MessageVision = { role: 'system' | 'user'; content: string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } } | { type: 'file'; file: { filename: string; file_data: string } })[] };
 /** Forme de réponse imposée : `schema` (Structured Outputs, JSON validé champ par champ) ou simple objet JSON. */
-export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_CONVERSATION | typeof SCHEMA_MAILS | typeof SCHEMA_LOT | typeof SCHEMA_SYNTHESE | typeof SCHEMA_BOUCLE | typeof SCHEMA_RELECTURE | typeof SCHEMA_TRADUCTION | typeof SCHEMA_AJUSTEMENT | typeof SCHEMA_REDACTION | typeof SCHEMA_ETIQUETTES | typeof SCHEMA_FACTURE } | { type: 'json_object' };
+export type FormatJson = { type: 'json_schema'; json_schema: typeof SCHEMA_CONVERSATION | typeof SCHEMA_MAILS | typeof SCHEMA_LOT | typeof SCHEMA_SYNTHESE | typeof SCHEMA_BOUCLE | typeof SCHEMA_RELECTURE | typeof SCHEMA_TRADUCTION | typeof SCHEMA_AJUSTEMENT | typeof SCHEMA_REDACTION | typeof SCHEMA_ETIQUETTES | typeof SCHEMA_FACTURE | typeof SCHEMA_PIECE } | { type: 'json_object' };
 
 /** La forme stricte attendue pour l'analyse des mails et d'un lot ; les autres réponses JSON restent libres. */
 export const schemaDe = (type: AssistantBody['type']): FormatJson | null =>
@@ -293,7 +294,8 @@ export const AssistantService = {
    * Une demande en JSON imposé qui porte une image (lecture d'une facture). Mêmes modèles que l'assistant, dans le même
    * ordre ; un modèle qui ne lit pas les images (ou ne connaît pas la forme imposée) laisse sa place au suivant.
    */
-  async lireImage(messages: MessageVision[], format: FormatJson): Promise<{ texte: string; modele: string }> {
+  /** `objet` : ce que dit l'erreur quand la lecture échoue (« ce justificatif », « cette pièce jointe »). */
+  async lireImage(messages: MessageVision[], format: FormatJson, objet = 'ce justificatif'): Promise<{ texte: string; modele: string }> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.", 'IA_INDISPONIBLE');
     const choisi = ((await ConfigService.get()).assistant as { modele?: unknown } | undefined)?.modele;
     const candidats = modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL);
@@ -311,10 +313,10 @@ export const AssistantService = {
       console.error('OpenAI (image)', res.status, m, data?.error?.message);
       if ((modeleIndisponible(res.status, data) || imageRefusee(res.status, data?.error?.message)) && i < candidats.length - 1) continue;
       if (imageRefusee(res.status, data?.error?.message)) throw new HttpError(502, `Le modèle « ${m} » ne lit pas les images. Choisis-en un autre dans Configuration (gpt-4o-mini, par exemple).`, 'IMAGE_REFUSEE');
-      throw new HttpError(502, "L'IA n'a pas pu lire ce justificatif, réessaie dans un instant.");
+      throw new HttpError(502, `L'IA n'a pas pu lire ${objet}, réessaie dans un instant.`);
     }
     const texte = (data.choices?.[0]?.message?.content ?? '').trim();
-    if (!texte) throw new HttpError(502, "L'IA n'a rien pu lire sur ce justificatif. Réessaie, ou remplis la dépense à la main.");
+    if (!texte) throw new HttpError(502, objet === 'ce justificatif' ? "L'IA n'a rien pu lire sur ce justificatif. Réessaie, ou remplis la dépense à la main." : `L'IA n'a rien pu lire dans ${objet}. Réessaie dans un instant.`);
     return { texte, modele };
   },
 
