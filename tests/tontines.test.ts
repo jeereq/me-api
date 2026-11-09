@@ -1154,7 +1154,8 @@ describe('une tontine de bout en bout', () => {
     const vu = await s.invitation(code, 'invite');
     assert.equal(vu.remplacement?.place, 'Paul');
     assert.equal(vu.remplacement?.caution, true);
-    const r = await s.rejoindreParInvitation(invite, code, '243812345679');
+    // Une invitation ordinaire ne renvoie pas de remplacement : le type le dit.
+    const r = (await s.rejoindreParInvitation(invite, code, '243812345679')) as { remplacement?: { attenteInitiateur: boolean } };
     assert.equal(r.remplacement?.attenteInitiateur, true);
     assert.equal(b.membres.lignes.find((m) => m.id === idPaul)!.userId, 'paul');
     await s.repondreChangement('orga', b.changements.lignes[0].id, true);
