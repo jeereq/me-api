@@ -6,7 +6,7 @@ import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.j
 import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter, signalementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
+import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineAdjointSchema, tontineChangementSchema, tontineChangementIdSchema, tontineReponseChangementSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
@@ -49,6 +49,11 @@ router.post('/membres/:membreId/retirer', validateRequest(tontineMembreIdSchema)
 router.post('/membres/:membreId/rappel', envoiCotisationLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.rappeler));
 router.post('/membres/:membreId/caution', validateRequest(tontineMembreIdSchema), asyncHandler(C.utiliserCaution));
 router.post('/membres/:membreId/demander', payerTontineLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.demanderPaiement));
+router.post('/membres/:membreId/adjoint', validateRequest(tontineAdjointSchema), asyncHandler(C.adjoint));
+router.post('/:id/changements', envoiCotisationLimiter, validateRequest(tontineChangementSchema), asyncHandler(C.proposerChangement));
+router.post('/changements/:changementId/reponse', validateRequest(tontineReponseChangementSchema), asyncHandler(C.repondreChangement));
+router.post('/changements/:changementId/annuler', validateRequest(tontineChangementIdSchema), asyncHandler(C.annulerChangement));
+router.post('/:id/cloturer', validateRequest(tontineIdSchema), asyncHandler(C.cloturer));
 router.post('/:id/demander-versement', validateRequest(tontineIdSchema), asyncHandler(C.demanderVersement));
 router.post('/:id/demander-tous', payerTontineLimiter, validateRequest(tontineIdSchema), asyncHandler(C.demanderATous));
 router.post('/membres/:membreId/especes', payerTontineLimiter, validateRequest(tontineMembreIdSchema), asyncHandler(C.noterEspeces));
