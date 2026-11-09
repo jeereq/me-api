@@ -176,13 +176,13 @@ describe('rappels de groupe', () => {
 });
 
 describe('accès aux cotisations', () => {
-  it('créer, rejoindre et demander l’approbation exigent au moins Finances ; payer reste ouvert', () => {
+  it('créer, rejoindre l’annuaire et demander l’approbation exigent au moins Finances ; une invitation et payer restent ouverts', () => {
     const routes = readFileSync(new URL('../src/routes/tontine.routes.ts', import.meta.url), 'utf8');
-    for (const r of ["post('/',", "post('/:id/adherer',", "post('/invitation/:code',", "post('/eligibilite',", "post('/eligibilite/code',", "post('/eligibilite/confirmer',"]) {
+    for (const r of ["post('/',", "post('/:id/adherer',", "post('/eligibilite',", "post('/eligibilite/code',", "post('/eligibilite/confirmer',"]) {
       const ligne = routes.split('\n').find((l) => l.includes(r));
       assert.ok(ligne?.includes("requireFonction('cotisations')"), r);
     }
-    assert.equal(routes.split('\n').find((l) => l.includes("post('/:id/payer',"))?.includes('requireFonction'), false);
+    for (const r of ["post('/:id/payer',", "post('/invitation/:code',"]) assert.equal(routes.split('\n').find((l) => l.includes(r))?.includes('requireFonction'), false, r);
   });
   it('les options de Finances demandent une photo de profil, sauf pour les admins', () => {
     assert.equal(photoManquante({ role: 'UTILISATEUR', photoUrl: null }, 'cotisations'), true);

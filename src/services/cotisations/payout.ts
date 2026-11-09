@@ -6,10 +6,11 @@
  * du compte marchand (balance). Me ne croit jamais un retour sur parole : chaque versement est revérifié.
  *
  * Variables (Render) :
- * - FLEXPAIE_PAYOUT_URL : l'adresse du service Payout donnée par FlexPaie (ex. https://hote:port), sans chemin.
+ * - FLEXPAIE_PAYOUT_URL : l'adresse du service Payout, sans chemin (par défaut https://payout.flexpaie.com).
  * - FLEXPAIE_PAYOUT_USERNAME, FLEXPAIE_PAYOUT_PASSWORD : l'identifiant du module PayoutService du marchand.
  * - FLEXPAIE_PAYOUT_MARCHAND : le code marchand (par défaut FLEXPAIE_MARCHAND).
- * - FLEXPAIE_PAYOUT_CHEMIN_PAY : chemin de l'envoi si FlexPaie en donne un autre (par défaut /api/rest/v1/pay).
+ * Chemins (donnés par FlexPaie) : /api/v1/merchant/pay, /api/v1/merchant/check/{orderNumber},
+ * /api/v1/merchant/balance/{merchant}. FLEXPAIE_PAYOUT_CHEMIN_PAY remplace celui de l'envoi si FlexPaie le change.
  */
 
 import { delai, estDelai } from '../../utils/delai.js';
@@ -17,17 +18,17 @@ import { ErreurFlexpaie, montantTexte } from '../abonnements/flexpaie.js';
 
 type Env = Record<string, string | undefined>;
 const propre = (v?: string) => (v ?? '').trim().replace(/^(['"])(.*)\1$/s, '$2').trim();
-const base = (env: Env = process.env) => propre(env.FLEXPAIE_PAYOUT_URL).replace(/\/+$/, '');
+export const PAYOUT_URL_DEFAUT = 'https://payout.flexpaie.com';
+const base = (env: Env = process.env) => (propre(env.FLEXPAIE_PAYOUT_URL) || PAYOUT_URL_DEFAUT).replace(/\/+$/, '');
 const marchand = (env: Env = process.env) => propre(env.FLEXPAIE_PAYOUT_MARCHAND) || propre(env.FLEXPAIE_MARCHAND);
-const cheminPay = (env: Env = process.env) => `/${(propre(env.FLEXPAIE_PAYOUT_CHEMIN_PAY) || 'api/rest/v1/pay').replace(/^\/+/, '')}`;
+const cheminPay = (env: Env = process.env) => `/${(propre(env.FLEXPAIE_PAYOUT_CHEMIN_PAY) || 'api/v1/merchant/pay').replace(/^\/+/, '')}`;
 
 /** Le service Payout a tout ce qu'il faut pour envoyer de l'argent. */
-export const payoutConfigure = (env: Env = process.env) => !!(base(env) && propre(env.FLEXPAIE_PAYOUT_USERNAME) && propre(env.FLEXPAIE_PAYOUT_PASSWORD) && marchand(env));
+export const payoutConfigure = (env: Env = process.env) => !!(propre(env.FLEXPAIE_PAYOUT_USERNAME) && propre(env.FLEXPAIE_PAYOUT_PASSWORD) && marchand(env));
 
 /** Ce qui manque pour activer les versements automatiques : les noms des variables, jamais leurs valeurs. */
 export function manquePayout(env: Env = process.env): string[] {
   return [
-    !base(env) ? 'FLEXPAIE_PAYOUT_URL' : '',
     !propre(env.FLEXPAIE_PAYOUT_USERNAME) ? 'FLEXPAIE_PAYOUT_USERNAME' : '',
     !propre(env.FLEXPAIE_PAYOUT_PASSWORD) ? 'FLEXPAIE_PAYOUT_PASSWORD' : '',
     !marchand(env) ? 'FLEXPAIE_PAYOUT_MARCHAND' : '',
@@ -118,13 +119,13 @@ export const Payout = {
 
   /** Revérifie un versement auprès de FlexPaie. */
   async verifier(commande: string) {
-    const r = await appel<{ code?: string | number; status?: string | number; reference?: string; providerReference?: string }>(`/api/rest/v1/check/${encodeURIComponent(commande)}`, { method: 'GET' });
+    const r = await appel<{ code?: string | number; status?: string | number; reference?: string; providerReference?: string }>(`/api/v1/merchant/check/${encodeURIComponent(commande)}`, { method: 'GET' });
     return { etat: etatPayout(r), message: r.message ?? '', operateur: r.providerReference ?? null, reference: r.reference ?? null };
   },
 
   /** Le solde du compte marchand, par devise, en centimes. */
   async solde() {
-    const r = await appel<{ code?: string | number; balances?: { currency?: string; amount?: string | number }[] }>(`/api/rest/v1/balance/${encodeURIComponent(marchand())}`, { method: 'GET' });
+    const r = await appel<{ code?: string | number; balances?: { currency?: string; amount?: string | number }[] }>(`/api/v1/merchant/balance/${encodeURIComponent(marchand())}`, { method: 'GET' });
     if (String(r.code ?? '') !== '0') throw new ErreurFlexpaie(r.message?.trim() || 'Solde FlexPaie indisponible.');
     return (r.balances ?? []).filter((b) => b.currency).map((b) => ({ devise: String(b.currency), montant: Math.round(Number(b.amount ?? 0) * 100) }));
   },

@@ -35,7 +35,8 @@ router.get('/eligibilite', asyncHandler(C.eligibilite));
 router.post('/eligibilite/code', requireFonction('cotisations'), codeTontineLimiter, validateRequest(tontineSmsSchema), asyncHandler(C.demanderCode));
 router.post('/eligibilite/confirmer', requireFonction('cotisations'), confirmerTontineLimiter, validateRequest(tontineCodeSchema), asyncHandler(C.confirmerCode));
 router.post('/eligibilite', requireFonction('cotisations'), pieceIdentiteLimiter, asyncHandler(C.soumettre));
-router.post('/invitation/:code', requireFonction('cotisations'), validateRequest(tontineRejoindreSchema), asyncHandler(C.rejoindre));
+// Une invitation fait entrer sans abonnement (l'initiateur répond de son groupe) ; créer un groupe ou rejoindre l'annuaire demande Finances.
+router.post('/invitation/:code', validateRequest(tontineRejoindreSchema), asyncHandler(C.rejoindre));
 
 router.get('/', asyncHandler(C.mesGroupes));
 router.get('/annuaire', asyncHandler(C.annuaire));

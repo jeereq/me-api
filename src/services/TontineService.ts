@@ -1,6 +1,6 @@
 import { limitesDe, reglesPlateformeDe } from '../commun/cotisations.js';
 import { prisma } from '../utils/prisma.js';
-import { etatAbonnement, SELECT_ABONNEMENT } from './abonnements/offres.js';
+import { aDroit, etatAbonnement, photoManquante, SELECT_ABONNEMENT } from './abonnements/offres.js';
 import { Flexpaie, flexpaieConfigure } from './abonnements/flexpaie.js';
 import { adresseApp } from './comptes/emails.js';
 import { creerApprobations } from './cotisations/approbations.js';
@@ -44,6 +44,10 @@ export const TontineService = creerTontines({
   reglesPlateforme: async () => {
     const c = (await prisma.config.findUnique({ where: { id: 1 } }))?.data as { reglesPlateforme?: unknown; limitesCotisations?: unknown } | null;
     return reglesPlateformeDe(c?.reglesPlateforme, limitesDe(c?.limitesCotisations));
+  },
+  aFinances: async (userId) => {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { ...SELECT_ABONNEMENT, photoUrl: true } });
+    return !!u && aDroit(etatAbonnement(u), 'cotisations') && !photoManquante(u, 'cotisations');
   },
   // Niveau du compte pour les limites : abonné Pro (payé), sinon approuvé, sinon non approuvé.
   niveau: async (userId) => {

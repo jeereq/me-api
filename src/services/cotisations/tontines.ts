@@ -85,6 +85,8 @@ export type DepsTontines = {
   adresseApp(): string | null;
   /** Les anciennes limites réglées par l'admin (montant max par devise, membres) : valeurs par défaut des règles de la plateforme. */
   limites(): Promise<LimitesCotisation>;
+  /** Le compte a au moins Finances (avec sa photo de profil) : exigé pour l'annuaire, pas pour une invitation. Par défaut : oui. */
+  aFinances?: (userId: string) => Promise<boolean>;
   /** Le niveau d'un compte pour les limites : abonné Pro, approuvé, ou non approuvé. Par défaut : selon l'approbation. */
   niveau?: (userId: string) => Promise<NiveauCompte>;
   /** Une invitation envoyée par Me, selon les canaux du système. */
@@ -446,7 +448,11 @@ export function creerTontines(d: DepsTontines) {
     const telephone = normaliserTelephone(brut);
     if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
     await d.exigerNumero(telephone);
-    if (t.visibilite === 'public') await exigerApprobation(u.id);
+    // Reprendre une place de l'annuaire, c'est rejoindre l'annuaire : compte approuvé et Finances, comme pour adhérer.
+    if (t.visibilite === 'public') {
+      if (d.aFinances && !(await d.aFinances(u.id))) throw new HttpError(402, 'Les groupes de l’annuaire demandent au moins l’abonnement Finances.', 'ABONNEMENT_REQUIS');
+      await exigerApprobation(u.id);
+    }
     await exigerEntree(t, u.id);
     await exigerNiveau(u.id, { visibilite: t.visibilite as 'public' | 'prive', rythme: t.rythme as RythmeObjectif, devise: t.devise, montant: t.montant });
     await d.db.tontineChangement.update({ where: { id: c.id }, data: { nouveauUserId: u.id, nouveauContact: enCoffre({ nom: u.nom, telephone }), accordAutre: true } });

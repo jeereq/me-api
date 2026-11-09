@@ -30,7 +30,7 @@ describe('FlexPaie Payout', () => {
 
   it('dit ce qui manque, sans valeur', () => {
     assert.equal(payoutConfigure(ENV), true);
-    assert.deepEqual(manquePayout({ FLEXPAIE_MARCHAND: 'X' }), ['FLEXPAIE_PAYOUT_URL', 'FLEXPAIE_PAYOUT_USERNAME', 'FLEXPAIE_PAYOUT_PASSWORD']);
+    assert.deepEqual(manquePayout({ FLEXPAIE_MARCHAND: 'X' }), ['FLEXPAIE_PAYOUT_USERNAME', 'FLEXPAIE_PAYOUT_PASSWORD']);
   });
 
   it('lit les statuts de FlexPaie', () => {
@@ -49,7 +49,7 @@ describe('FlexPaie Payout', () => {
     const r = await Payout.verser({ telephone: '243812345678', reference: 'TO1', montant: 1050, devise: 'USD', retour: 'https://api.test/retour' });
     assert.equal(r.commande, 'ORD1');
     assert.equal(appels[0].url, 'https://payout.test:8443/api/v1/auth/authenticate');
-    assert.equal(appels[1].url, 'https://payout.test:8443/api/rest/v1/pay');
+    assert.equal(appels[1].url, 'https://payout.test:8443/api/v1/merchant/pay');
     const corps = JSON.parse(String(appels[1].init.body));
     assert.deepEqual({ ...corps, description: undefined }, { merchant: 'ME', type: '1', reference: 'TO1', amount: '10.50', currency: 'USD', customer: '243812345678', callback_url: 'https://api.test/retour', description: undefined });
     assert.equal((appels[1].init.headers as Record<string, string>).Authorization, 'Bearer abc');
@@ -75,6 +75,11 @@ describe('FlexPaie Payout', () => {
       { devise: 'USD', montant: 1000 },
       { devise: 'CDF', montant: 500000 },
     ]);
-    assert.equal(appels[1].url, 'https://payout.test:8443/api/rest/v1/balance/ME');
+    assert.equal(appels[1].url, 'https://payout.test:8443/api/v1/merchant/balance/ME');
+    // Sans adresse, celle de FlexPaie.
+    delete process.env.FLEXPAIE_PAYOUT_URL;
+    reponses.push(() => ({ body: { code: '0', balances: [] } }));
+    await Payout.solde();
+    assert.equal(appels[2].url, 'https://payout.flexpaie.com/api/v1/merchant/balance/ME');
   });
 });
