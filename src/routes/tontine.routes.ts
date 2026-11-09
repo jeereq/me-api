@@ -6,7 +6,7 @@ import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.j
 import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter, signalementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineAdjointSchema, tontineChangementSchema, tontineChangementIdSchema, tontineReponseChangementSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema, tontineVerserSchema, referencePaiementSchema } from '../validators/schemas.js';
+import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineAdjointSchema, tontineChangementSchema, tontineChangementIdSchema, tontineReponseChangementSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema, tontineVerserSchema, referencePaiementSchema, tontineBeneficiaireSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
@@ -57,6 +57,7 @@ router.post('/membres/:membreId/adjoint', validateRequest(tontineAdjointSchema),
 router.post('/:id/changements', envoiCotisationLimiter, validateRequest(tontineChangementSchema), asyncHandler(C.proposerChangement));
 router.post('/changements/:changementId/reponse', validateRequest(tontineReponseChangementSchema), asyncHandler(C.repondreChangement));
 router.post('/changements/:changementId/annuler', validateRequest(tontineChangementIdSchema), asyncHandler(C.annulerChangement));
+router.post('/:id/beneficiaire', validateRequest(tontineBeneficiaireSchema), asyncHandler(C.changerBeneficiaire));
 router.post('/:id/cloturer', validateRequest(tontineIdSchema), asyncHandler(C.cloturer));
 router.post('/:id/demander-versement', validateRequest(tontineIdSchema), asyncHandler(C.demanderVersement));
 router.post('/:id/demander-tous', payerTontineLimiter, validateRequest(tontineIdSchema), asyncHandler(C.demanderATous));
