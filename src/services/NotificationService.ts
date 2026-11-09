@@ -12,7 +12,7 @@ import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
 import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
 import { aDesFinances, type FinancesRapport, type NomsCategories, rapportDepenses, rapportsDuSoir } from '../commun/rapport.js';
-import { avisRapport, emailRapport, smsRapport } from './rapport-email.js';
+import { avisRapport, emailRapport, SEGMENTS_RAPPORT, smsRapportComplet } from './rapport-email.js';
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
 const RATTRAPAGE_MIN = 45;
@@ -127,9 +127,10 @@ export const NotificationService = {
       const m = emailRapport(nouveaux.map((n) => n.rapport), u.nom, lien);
       if (await EmailService.envoyer(u.email, m.sujet, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: { in: nouveaux.map((n) => n.cle) } }, data: { parEmail: true } });
     }
-    // Un SMS par soir, et seulement s'il y a quelque chose à dire : le rapport le plus long, sinon celui du jour.
+    // Un SMS par soir, et seulement s'il y a quelque chose à dire : le rapport le plus long, sinon celui du jour. Le
+    // même contenu que l'email, en un SMS long (quelques SMS facturés).
     const pourSms = [...nouveaux].reverse().find((n) => n.rapport.nombre > 0 || n.rapport.budgets.length > 0);
-    if (o.sms && reglages.sms !== false && pourSms && u.telephone) await SmsService.envoyer(u.id, u.telephone, smsRapport(pourSms.rapport, lien), true);
+    if (o.sms && reglages.sms !== false && pourSms && u.telephone) await SmsService.envoyer(u.id, u.telephone, smsRapportComplet(pourSms.rapport, u.nom, lien), true, SEGMENTS_RAPPORT);
   },
 
   /** Prévient de mails arrivés : une notification et un push, jamais d'email ni de SMS. Coupé dans les réglages (`notifs.mails`). */

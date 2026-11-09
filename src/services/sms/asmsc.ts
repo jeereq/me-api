@@ -46,7 +46,8 @@ const poidsGsm = (c: string) => (GSM_DOUBLE.includes(c) ? 2 : 1);
  * l'alphabet GSM sont simplifiés (un SMS en Unicode tient en 70 caractères au lieu de 160). Unicode ne sert que si
  * le texte contient autre chose (emoji, autre alphabet).
  */
-export function preparerTexte(brut: string): { texte: string; encodage: Encodage; coupe?: boolean } {
+export function preparerTexte(brut: string, o: { /** SMS long : jusqu'à ce nombre de SMS facturés, retours à la ligne gardés. */ segments?: number } = {}): { texte: string; encodage: Encodage; coupe?: boolean; segments: number } {
+  const long = (o.segments ?? 1) > 1;
   const propre = brut
     .replace(/[’‘ʼ]/g, "'")
     .replace(/«\s*/g, '"')
@@ -55,16 +56,22 @@ export function preparerTexte(brut: string): { texte: string; encodage: Encodage
     .replace(/…/g, '...')
     .replace(/[–—·•]/g, '-')
     .replace(/[   ]/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(long ? /[^\S\n]+/g : /\s+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
   // Un accent absent de l'alphabet GSM perd son accent (ê → e) ; é, è, à, ù, ì, ò restent.
   const replie = [...propre].map((c) => (estGsm(c) ? c : c.normalize('NFD').replace(/\p{M}/gu, ''))).join('');
   const gsm = [...replie].every(estGsm);
-  const limite = gsm ? 160 : 70;
+  // Un SMS long est découpé par le réseau en parties de 153 caractères (67 en Unicode), facturées chacune.
+  const max = Math.max(1, Math.floor(o.segments ?? 1));
+  const parSegment = (n: number) => (n === 1 ? (gsm ? 160 : 70) : gsm ? 153 : 67);
+  const limite = max === 1 ? parSegment(1) : max * parSegment(2);
   const poids = gsm ? poidsGsm : () => 1;
   let total = 0;
   for (const c of replie) total += poids(c);
-  if (total <= limite) return { texte: replie, encodage: gsm ? 'T' : 'U' };
+  const nombre = (t: number) => (t <= parSegment(1) ? 1 : Math.ceil(t / parSegment(2)));
+  if (total <= limite) return { texte: replie, encodage: gsm ? 'T' : 'U', segments: nombre(total) };
   let garde = '';
   total = 3;
   for (const c of replie) {
@@ -75,7 +82,7 @@ export function preparerTexte(brut: string): { texte: string; encodage: Encodage
   // On coupe entre deux mots plutôt qu'au milieu d'un mot (sauf si le dernier espace est trop loin).
   const espace = garde.lastIndexOf(' ');
   if (espace > garde.length - 25 && espace > 0) garde = garde.slice(0, espace);
-  return { texte: `${garde.trimEnd().replace(/[\s,;:.-]+$/, '')}...`, encodage: gsm ? 'T' : 'U', coupe: true };
+  return { texte: `${garde.trimEnd().replace(/[\s,;:.-]+$/, '')}...`, encodage: gsm ? 'T' : 'U', coupe: true, segments: max };
 }
 
 /** Le texte tient-il en un seul SMS, sans rien couper ? */
@@ -245,8 +252,8 @@ const identifiants = (cfg: ConfigSms) => ({ api_id: cfg.id, api_password: cfg.mo
 
 export const Asmsc = {
   /** Envoie un SMS transactionnel. `uid` revient sur l'adresse de retour. */
-  async envoyer(cfg: ConfigSms, m: { telephone: string; texte: string; uid: string; retour?: string }) {
-    const { texte, encodage } = preparerTexte(m.texte);
+  async envoyer(cfg: ConfigSms, m: { telephone: string; texte: string; uid: string; retour?: string; segments?: number }) {
+    const { texte, encodage } = preparerTexte(m.texte, { segments: m.segments });
     // Pas de durée de vie : le service garde sa valeur par défaut (2 jours). Il refuse au-delà de 2880, alors que sa documentation parle de secondes.
     const r = await appeler<{ message_id?: unknown; status?: string; remarks?: string }>(cfg, 'SendSms', {
       ...identifiants(cfg),

@@ -102,7 +102,7 @@ export const SmsService = {
    * Envoie un SMS à un compte, dans la limite du jour. Ne lève jamais : un SMS perdu ne doit pas arrêter les rappels.
    * Le texte et le numéro ne sont pas gardés dans l'historique : seulement la date et l'état.
    */
-  async envoyer(userId: string, telephone: string, texte: string, secondaire = false): Promise<boolean> {
+  async envoyer(userId: string, telephone: string, texte: string, secondaire = false, segments = 1): Promise<boolean> {
     const cfg = configSms();
     if (!cfg) return false;
     const depuis = new Date(Date.now() - JOUR_MS);
@@ -110,7 +110,7 @@ export const SmsService = {
     if (!placeSms(await prisma.envoiSms.count({ where: { userId, genre: 'compte', createdAt: { gte: depuis }, NOT: { statut: 'echec', messageId: null } } }), maxParJour(), secondaire)) return false;
     const envoi = await prisma.envoiSms.create({ data: { userId } });
     try {
-      const r = await Asmsc.envoyer(cfg, { telephone, texte, uid: envoi.id, retour: adresseRetour() });
+      const r = await Asmsc.envoyer(cfg, { telephone, texte, uid: envoi.id, retour: adresseRetour(), segments });
       await prisma.envoiSms.update({ where: { id: envoi.id }, data: { messageId: r.messageId } });
       return true;
     } catch (e) {

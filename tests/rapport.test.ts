@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { aDesFinances, periodeCourte, periodeDite, rapportDepenses, rapportsDuSoir, somme } from '../src/commun/rapport.js';
-import { avisRapport, emailRapport, smsRapport } from '../src/services/rapport-email.js';
+import { avisRapport, emailRapport, SEGMENTS_RAPPORT, smsRapport, smsRapportComplet } from '../src/services/rapport-email.js';
 import { preparerTexte, tientEnUnSms } from '../src/services/sms/asmsc.js';
 
 /** Les montants ont des espaces insécables. */
@@ -96,5 +96,24 @@ describe('rapport des dépenses', () => {
     assert.equal(e.sujet, 'Tes dépenses du 8 novembre et de la semaine du 2 au 8 novembre');
     assert.match(e.html, /Conseils/);
     assert.doesNotMatch(e.html, /<script/);
+  });
+
+  it('le SMS du soir dit tout comme l’email, en un SMS long sans emoji', () => {
+    const r = rapportDepenses(f, 'jour', '2026-11-08', '2026-11-08', noms);
+    const s = smsRapportComplet(r, 'Jeereq Takango', 'https://me.neevo.app/finances');
+    const p = preparerTexte(s, { segments: SEGMENTS_RAPPORT });
+    assert.ok(!p.coupe, s);
+    assert.equal(p.encodage, 'T');
+    assert.ok(p.segments > 1 && p.segments <= SEGMENTS_RAPPORT);
+    const t = n(p.texte);
+    assert.match(t, /^Me\. Bonjour Jeereq,\nTes dépenses du 8 novembre : 28 000 FC\.\n3 dépenses \(d'habitude/);
+    assert.match(t, /\n\nConseils :\n- /);
+    assert.match(t, /\n\nOù est parti l'argent :\n- Repas : 20 000 FC\n- Transport : 8 000 FC/);
+    assert.match(t, /\n\nBudgets :\n- Repas : 20 000 FC \/ 10 000 FC \(dépassé\)/);
+    assert.ok(t.endsWith('\n\nhttps://me.neevo.app/finances'));
+    // Trop long : des lignes entières tombent, jamais un texte coupé.
+    const long = smsRapportComplet({ ...r, conseils: Array.from({ length: 12 }, (_, i) => ({ ton: 'conseil' as const, texte: `Conseil numéro ${i} assez long pour remplir la place disponible`, court: 'x' })) }, 'Jeereq');
+    assert.ok(!preparerTexte(long, { segments: SEGMENTS_RAPPORT }).coupe);
+    assert.doesNotMatch(long, /\.\.\.$/);
   });
 });
