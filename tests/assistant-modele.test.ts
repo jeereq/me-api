@@ -27,3 +27,22 @@ describe('modèles à essayer', () => {
     assert.deepEqual(modelesAEssayer('', 'gpt-4.1-mini'), ['gpt-4.1-mini', MODELE_DEFAUT]);
   });
 });
+
+describe('modèles écartés et proposés', () => {
+  it('écarte quelques heures un modèle refusé, sans jamais tout vider', async () => {
+    const { ecarterModele, sansEcartes, modelesEcartes, oublierEcartes, DUREE_ECART_MS } = await import('../src/services/assistant-modele.js');
+    oublierEcartes();
+    const t = 1_000_000;
+    assert.equal(ecarterModele('gpt-live-1', t), true);
+    assert.equal(ecarterModele('gpt-live-1', t + 1), false);
+    assert.deepEqual(sansEcartes(['gpt-live-1', 'gpt-4.1-mini', MODELE_DEFAUT], t + 2), ['gpt-4.1-mini', MODELE_DEFAUT]);
+    assert.deepEqual(modelesEcartes(t + 2), ['gpt-live-1']);
+    assert.deepEqual(sansEcartes(['gpt-live-1'], t + 2), ['gpt-live-1']);
+    assert.deepEqual(sansEcartes(['gpt-live-1', MODELE_DEFAUT], t + DUREE_ECART_MS + 1), ['gpt-live-1', MODELE_DEFAUT]);
+    oublierEcartes();
+  });
+  it('ne propose que des modèles de chat, les conseillés d’abord', async () => {
+    const { modelesProposes } = await import('../src/services/assistant-modele.js');
+    assert.deepEqual(modelesProposes(['gpt-live-1', 'gpt-realtime', 'gpt-4o-mini-tts', 'text-embedding-3', 'gpt-5.1', 'gpt-4.1-mini', 'gpt-4o-mini', 'dall-e-3']), ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5.1']);
+  });
+});

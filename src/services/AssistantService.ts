@@ -1,6 +1,6 @@
 import { HttpError } from '../utils/http.js';
 import type { AssistantBody } from '../validators/schemas.js';
-import { MODELE_DEFAUT, modeleFortChoisi, modeleIndisponible, modelesAEssayer } from './assistant-modele.js';
+import { ecarterModele, MODELE_DEFAUT, modeleFortChoisi, modeleIndisponible, modelesAEssayer, modelesEcartes, modelesProposes, sansEcartes } from './assistant-modele.js';
 import { consignesPropres, mailsImportants, preparerMails, reglesAnalyse, REGLES_CONVERSATION, reglesAjustement, reglesBoucle, reglesRedaction, reglesRelectureNouveau, reglesEtiquettes, reglesRelecture, reglesTraduction, remplacerAnalyses, SCHEMA_AJUSTEMENT, SCHEMA_REDACTION, SCHEMA_CONVERSATION, SCHEMA_BOUCLE, SCHEMA_ETIQUETTES, SCHEMA_RELECTURE, SCHEMA_TRADUCTION, sansBalises, SCHEMA_LOT, SCHEMA_MAILS, SCHEMA_SYNTHESE, seulementCes } from './analyse-mails.js';
 import { ConfigService } from './ConfigService.js';
 import { nomApp } from '../commun/nom-app.js';
@@ -64,7 +64,6 @@ export function corpsRequete(modele: string, contenu: string | MessageIA[] | Mes
 export const formatRefuse = (status: number, message?: string) => status === 400 && /response_format|json_schema|structured|schema/i.test(message ?? '');
 
 // Modèles qui ne répondent pas à une conversation texte (audio, image, recherche…).
-const NON_CHAT = /audio|realtime|transcribe|tts|image|search|embedding|instruct|moderation/;
 
 export const MAX_CONSIGNES = 600;
 
@@ -276,8 +275,8 @@ export const AssistantService = {
       console.error('OpenAI', res.status, data?.error?.message);
       throw new HttpError(502, "Impossible de lire la liste des modèles OpenAI.");
     }
-    const ids = (data.data ?? []).map((m) => m.id).filter((id) => /^(gpt-|o\d|chatgpt-)/.test(id) && !NON_CHAT.test(id));
-    return { modeles: ids.sort().reverse(), actuel: await this.modele(), fort: await this.modeleFort() };
+    // Les modèles refusés depuis peu (retirés, ou pas des modèles de chat) : l'écran le dit à l'admin.
+    return { modeles: modelesProposes((data.data ?? []).map((m) => m.id)), actuel: await this.modele(), fort: await this.modeleFort(), ecartes: modelesEcartes() };
   },
 
   /** Le modèle fort choisi par l'admin pour les mails importants et les synthèses ; sans choix, celui du serveur (`OPENAI_MODEL_FORT`), puis `MODELE_FORT_DEFAUT`. « aucun » : un seul modèle pour tout. */
@@ -298,7 +297,7 @@ export const AssistantService = {
   async lireImage(messages: MessageVision[], format: FormatJson, objet = 'ce justificatif'): Promise<{ texte: string; modele: string }> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.", 'IA_INDISPONIBLE');
     const choisi = ((await ConfigService.get()).assistant as { modele?: unknown } | undefined)?.modele;
-    const candidats = modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL);
+    const candidats = sansEcartes(modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL));
     let data: Reponse = {};
     let modele = candidats[0];
     for (const [i, m] of candidats.entries()) {
@@ -310,8 +309,12 @@ export const AssistantService = {
         data = (await res.json().catch(() => ({}))) as Reponse;
       }
       if (res.ok) break;
+      if (modeleIndisponible(res.status, data) && i < candidats.length - 1) {
+        if (ecarterModele(m)) console.error(`OpenAI (image) : « ${m} » écarté 6 h (${res.status} ${data?.error?.message ?? ''}), relais : ${candidats[i + 1]}`);
+        continue;
+      }
       console.error('OpenAI (image)', res.status, m, data?.error?.message);
-      if ((modeleIndisponible(res.status, data) || imageRefusee(res.status, data?.error?.message)) && i < candidats.length - 1) continue;
+      if (imageRefusee(res.status, data?.error?.message) && i < candidats.length - 1) continue;
       if (imageRefusee(res.status, data?.error?.message)) throw new HttpError(502, `Le modèle « ${m} » ne lit pas les images. Choisis-en un autre dans Configuration (gpt-4o-mini, par exemple).`, 'IMAGE_REFUSEE');
       throw new HttpError(502, `L'IA n'a pas pu lire ${objet}, réessaie dans un instant.`);
     }
@@ -325,8 +328,9 @@ export const AssistantService = {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
     // Un modèle retiré par OpenAI ne doit pas couper l'assistant : on essaie le suivant (serveur, puis modèle par défaut).
     const choisi = ((await ConfigService.get()).assistant as { modele?: unknown } | undefined)?.modele;
-    const candidats = modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL);
-    const fort = pourModeleFort(body.type) ? await this.modeleFort() : '';
+    const candidats = sansEcartes(modelesAEssayer(typeof choisi === 'string' ? choisi : undefined, process.env.OPENAI_MODEL));
+    const fortChoisi = pourModeleFort(body.type) ? await this.modeleFort() : '';
+    const fort = fortChoisi && sansEcartes([fortChoisi, '']).includes(fortChoisi) ? fortChoisi : '';
     if (!fort || fort === candidats[0]) {
       const r = await appeler(candidats, body);
       return { texte: r.texte, modeles: [r.modele] };
@@ -376,11 +380,17 @@ async function appeler(candidats: string[], body: AssistantBody): Promise<{ text
       data = (await res.json().catch(() => ({}))) as Reponse;
     }
     if (res.ok) break;
-    console.error('OpenAI', res.status, m, data?.error?.message);
     if (modeleIndisponible(res.status, data)) {
-      if (i < candidats.length - 1) continue;
+      // Écarté quelques heures : les demandes suivantes vont droit au modèle qui répond, et le journal ne le répète pas.
+      const nouveau = ecarterModele(m);
+      if (i < candidats.length - 1) {
+        if (nouveau) console.error(`OpenAI : « ${m} » écarté 6 h (${res.status} ${data?.error?.message ?? ''}), relais : ${candidats[i + 1]}`);
+        continue;
+      }
+      console.error('OpenAI', res.status, m, data?.error?.message);
       throw new HttpError(502, `Le modèle « ${candidats[0]} » n'est plus disponible chez OpenAI. Choisis-en un autre dans Configuration.`);
     }
+    console.error('OpenAI', res.status, m, data?.error?.message);
     throw new HttpError(502, "L'IA n'a pas pu répondre, réessaie dans un instant.");
   }
   const choix = data.choices?.[0];

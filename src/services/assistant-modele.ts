@@ -27,3 +27,39 @@ export function modeleFortChoisi(admin: string | undefined, serveur: string | un
   const m = [admin, serveur, MODELE_FORT_DEFAUT].map((x) => x?.trim()).find((x): x is string => !!x) ?? '';
   return m.toLowerCase() === SANS_MODELE_FORT ? '' : m;
 }
+
+/** Les identifiants qui ne sont pas des modèles de chat (voix, temps réel, images, recherche…) : jamais proposés à l'admin. */
+export const NON_CHAT = /audio|realtime|live|transcribe|tts|image|search|embedding|instruct|moderation|codex|computer-use|deep-research/;
+
+/** Les modèles proposés d'abord à l'admin : ceux qui marchent bien avec l'app. */
+export const CONSEILLES = ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o', 'gpt-5-mini', 'gpt-5'];
+
+/** La liste pour l'admin : seulement des modèles de chat, les conseillés d'abord, puis les plus récents. */
+export function modelesProposes(ids: string[]): string[] {
+  const chat = ids.filter((id) => /^(gpt-|o\d|chatgpt-)/.test(id) && !NON_CHAT.test(id));
+  const conseilles = CONSEILLES.filter((m) => chat.includes(m));
+  return [...conseilles, ...chat.filter((m) => !conseilles.includes(m)).sort().reverse()];
+}
+
+/** Combien de temps un modèle refusé par OpenAI est laissé de côté avant un nouvel essai. */
+export const DUREE_ECART_MS = 6 * 3600_000;
+const ecartes = new Map<string, number>();
+
+/** Laisse de côté un modèle refusé (inconnu, retiré, pas de chat). Vrai la première fois : on ne le dit qu'une fois. */
+export function ecarterModele(m: string, maintenant = Date.now()): boolean {
+  const nouveau = !((ecartes.get(m) ?? 0) > maintenant);
+  ecartes.set(m, maintenant + DUREE_ECART_MS);
+  return nouveau;
+}
+
+/** Les modèles écartés en ce moment. */
+export const modelesEcartes = (maintenant = Date.now()) => [...ecartes].filter(([, jusqua]) => jusqua > maintenant).map(([m]) => m);
+
+/** Les candidats sans ceux qui viennent d'être refusés ; s'il n'en reste aucun, le dernier (le modèle par défaut) reste. */
+export function sansEcartes(candidats: string[], maintenant = Date.now()): string[] {
+  const restent = candidats.filter((m) => !((ecartes.get(m) ?? 0) > maintenant));
+  return restent.length ? restent : candidats.slice(-1);
+}
+
+/** Pour les tests. */
+export const oublierEcartes = () => ecartes.clear();
