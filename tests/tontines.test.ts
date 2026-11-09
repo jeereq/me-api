@@ -61,7 +61,7 @@ function baseMemoire() {
   const mvts = table((l, t) => {
     const entree = ['caution', 'cotisation'].includes(l.genre);
     if (entree && l.statut === 'en_attente' && t.some((x) => x.membreId === l.membreId && x.statut === 'en_attente' && ['caution', 'cotisation'].includes(x.genre))) return true;
-    if (l.genre === 'versement' && t.some((x) => x.genre === 'versement' && x.tourId === l.tourId && ['en_attente', 'paye'].includes(x.statut))) return true;
+    if (l.genre === 'versement' && t.some((x) => x.genre === 'versement' && x.tourId === l.tourId && x.statut === 'en_attente' && l.statut === 'en_attente')) return true;
     if (l.genre === 'caution_rendue' && t.some((x) => x.genre === 'caution_rendue' && x.membreId === l.membreId && ['en_attente', 'paye'].includes(x.statut))) return true;
     return false;
   });
@@ -315,9 +315,9 @@ describe('une tontine de bout en bout', () => {
       assert.equal(g.aPayer?.genre, 'cotisation');
       await s.payer('orga', id, 'cotisation');
       await valider();
-      // Tant que tout le monde n'a pas payé, rien ne peut être versé.
+      // Tant que tout le monde n'a pas payé, seule une tranche de ce qui est arrivé peut partir, pas plus.
       const t = b.tours.lignes.find((x) => x.numero === tour)!;
-      await assert.rejects(s.verserTour(ADMIN, t.id, 'REF123'), /n’attend pas/);
+      await assert.rejects(s.verserTour(ADMIN, t.id, 'REF123', 2000), /Disponible : 9,50 USD au plus/);
       await s.payer('paul', id, 'cotisation');
       await valider();
       await s.payer('marie', id, 'cotisation');
@@ -328,7 +328,7 @@ describe('une tontine de bout en bout', () => {
       await s.verserTour(ADMIN, t.id, 'REF123');
       assert.equal(t.etat, 'verse');
       assert.equal(t.valideParNom, 'Admin');
-      await assert.rejects(s.verserTour(ADMIN, t.id, 'REF123'), /n’attend pas/);
+      await assert.rejects(s.verserTour(ADMIN, t.id, 'REF123'), /Rien n’attend de versement/);
     }
 
     assert.equal(b.tontines.lignes[0].etat, 'termine');
@@ -458,7 +458,7 @@ describe('une tontine de bout en bout', () => {
     instant += 3 * JOUR;
     await assert.rejects(s.utiliserCaution('orga', m.id), /plus de caution/);
     assert.equal(b.tours.lignes[2].etat, 'collecte');
-    await assert.rejects(s.verserTour(ADMIN, b.tours.lignes[2].id, 'REF125'), /n’attend pas/);
+    await assert.rejects(s.verserTour(ADMIN, b.tours.lignes[2].id, 'REF125'), /Rien de disponible/);
   });
 
   it('quitter ou annuler avant le démarrage rend la caution ; après, non', async () => {
@@ -1018,7 +1018,7 @@ describe('une tontine de bout en bout', () => {
   it('cagnotte complète : l’initiateur demande le versement, l’équipe est prévenue', async () => {
     const id = await complet();
     await s.demarrer('orga', id);
-    await assert.rejects(s.demanderVersement('orga', id), /pas encore complète/);
+    await assert.rejects(s.demanderVersement('orga', id), /Rien à verser pour l’instant/);
     await cotiserTous(id);
     // L'équipe est prévenue dès que la cagnotte est complète, avec le lien vers l'écran des versements.
     assert.ok(avis.some((a) => a.userId === 'admin' && /^À verser : 28,50 USD/.test(a.titre) && a.url === '/utilisateurs?page=cotisations'));
@@ -1164,6 +1164,55 @@ describe('une tontine de bout en bout', () => {
     assert.equal((await s.detail('invite', id)).groupe.moi?.id, idPaul);
     assert.ok(avis.some((a) => a.userId === 'paul' && a.titre === 'Place cédée'));
     await assert.rejects(s.invitation(code, 'paul'), /plus valable/);
+  });
+
+  it('verse en tranches ce qui est déjà arrivé, puis le reste', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const t = b.tours.lignes.find((x) => x.numero === 1)!;
+    await s.payer('orga', id, 'cotisation');
+    await valider();
+    // 10 USD arrivés : 9,50 USD nets disponibles. L'initiateur demande une tranche, l'équipe en verse 5.
+    const g = (await s.detail('orga', id)).groupe;
+    assert.equal(g.versement?.disponible, 950);
+    await s.demanderVersement('orga', id);
+    assert.ok(avis.some((a) => a.userId === 'admin' && /^Tranche demandée : 9,50 USD/.test(a.titre)));
+    const r = await s.resumeAdmin();
+    const ligne = r.versements.find((x) => x.tourId === t.id)!;
+    assert.equal(ligne.complet, false);
+    assert.equal(ligne.disponible, 950);
+    await s.verser(ADMIN, ligne.cle, 'TR1', 500);
+    assert.equal(t.etat, 'collecte');
+    assert.ok(avis.some((a) => /^Tranche reçue : 5 USD/.test(a.titre)));
+    assert.equal((await s.detail('orga', id)).groupe.versement?.disponible, 450);
+    await assert.rejects(s.verser(ADMIN, ligne.cle, 'TR2', 451), /Disponible : 4,50 USD/);
+    await s.payer('paul', id, 'cotisation');
+    await valider();
+    await s.payer('marie', id, 'cotisation');
+    await valider();
+    // Complète : il reste 28,50 − 5 = 23,50 USD, puis le tour est versé et le suivant s'ouvre.
+    assert.equal(t.etat, 'a_verser');
+    const reste = (await s.resumeAdmin()).versements.find((x) => x.tourId === t.id)!;
+    assert.equal(reste.disponible, 2350);
+    assert.equal(reste.dejaVerse, 500);
+    await s.verserTour(ADMIN, t.id, 'TR3');
+    assert.equal(t.etat, 'verse');
+    assert.equal(b.mvts.lignes.filter((x) => x.genre === 'versement' && x.tourId === t.id).reduce((n, x) => n + x.montant, 0), 2850);
+    assert.equal(b.tours.lignes.find((x) => x.numero === 2)!.etat, 'collecte');
+  });
+
+  it('raison précise : tranches avant la date de fin, le reste à la clôture', async () => {
+    const { groupe } = await s.creer(orga, { nom: 'Mariage', montant: 1000, devise: 'USD', rythme: 'hebdomadaire', places: 3, mode: 'objectif', visibilite: 'prive', telephone: '0812345670', raison: 'Mariage', beneficiaire: { nom: 'Jean Mbuyi', telephone: '0812345679' }, dateFin: '2026-12-20' });
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    await s.verser(ADMIN, `g:${groupe.id}`, 'TR1', 300);
+    assert.equal((await s.detail('orga', groupe.id)).groupe.versement?.verse, 300);
+    await s.cloturer('orga', groupe.id);
+    const r = (await s.resumeAdmin()).versements.find((x) => x.cle === `g:${groupe.id}`)!;
+    assert.equal(r.complet, true);
+    assert.equal(r.disponible, 950 - 300);
+    await s.verser(ADMIN, r.cle, 'TR2');
+    assert.equal(b.tontines.lignes.find((x) => x.id === groupe.id)!.etat, 'termine');
   });
 
   it('clôture une raison précise avant sa date pour demander le versement', async () => {

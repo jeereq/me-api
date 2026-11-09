@@ -520,6 +520,8 @@ model Tontine {
   retireAnnuaireLe DateTime?
   /// Règles choisies par l'organisateur (espèces, pénalités, ordre des tours, exclusion, entrée) : voir commun/cotisations.ts.
   regles         Json?
+  /// Raison précise : l'initiateur a demandé de verser une tranche de ce qui est déjà arrivé.
+  trancheDemandeLe DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   membres        TontineMembre[]

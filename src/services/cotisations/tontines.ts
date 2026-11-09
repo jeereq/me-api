@@ -297,6 +297,11 @@ export function creerTontines(d: DepsTontines) {
       changements: changementsVus(t, userId, orga),
       /** Raison précise : l'initiateur peut clôturer avant la date de fin pour demander le versement. */
       cloturable: orga && estObjectif(t) && t.etat === 'en_cours' && !tourFinal(t),
+      /** Pour l'organisateur : ce qui peut être versé maintenant au bénéficiaire, et ce qui l'a déjà été. */
+      versement: orga ? (() => {
+        const v = versementDe(t, mvts);
+        return v ? { complet: v.complet, net: v.net, verse: v.paye, enCours: v.enCours, disponible: v.disponible, trancheDemandeLe: estObjectif(t) ? (t.trancheDemandeLe ?? null) : (t.tours.find((x) => x.id === v.tourId)?.versementDemandeLe ?? null) } : null;
+      })() : null,
       lienInvitation: orga ? lienInvitation(t) : null,
       rappels: rappelsDe(t.rappels),
       regles: reglesDuGroupe(t),
@@ -333,6 +338,33 @@ export function creerTontines(d: DepsTontines) {
       tours: (orga || estAccepte) && !estObjectif(t) ? t.tours.map((x) => ({ numero: x.numero, beneficiaire: x.beneficiaireId ? (parMembre.get(x.beneficiaireId)?.nom ?? '') : '', pourMoi: x.beneficiaireId === moi?.id, echeance: x.echeance, etat: x.etat, net: x.net, especes: x.especes, versementDemandeLe: x.versementDemandeLe })) : [],
     };
   }
+
+  /*
+   * Versement en plusieurs tranches : le bénéficiaire peut recevoir, au fil des paiements, ce qui est déjà arrivé (net de
+   * la commission), sans attendre la cagnotte complète. Le reste part quand tout est réuni.
+   */
+  const SORTIES = ['en_attente', 'paye'];
+  const verseSur = (mvts: Mouvement[], garder: (x: Mouvement) => boolean, statuts = SORTIES) => mvts.filter((x) => x.genre === 'versement' && statuts.includes(x.statut) && garder(x)).reduce((n, x) => n + x.montant, 0);
+  /** Ce qui peut partir maintenant vers le bénéficiaire d'un tour (rotation) ou d'une raison précise (`tour` absent). */
+  function etatVersement(t: TontineComplete, mvts: Mouvement[], tour?: TontineComplete['tours'][number] | null) {
+    if (estObjectif(t)) {
+      const final = tourFinal(t);
+      const recu = mvts.filter((x) => x.genre === 'cotisation' && x.statut === 'paye' && x.mode !== 'especes').reduce((n, x) => n + x.montant, 0);
+      const net = final ? final.net : repartitionCagnotte(recu, 1, t.commissionBps).net;
+      const verse = verseSur(mvts, () => true);
+      return { cle: `g:${t.id}`, tourId: final?.id ?? null, complet: final?.etat === 'a_verser', net, verse, paye: verseSur(mvts, () => true, ['paye']), disponible: Math.max(0, net - verse), enCours: mvts.some((x) => x.genre === 'versement' && x.statut === 'en_attente') };
+    }
+    if (!tour) return null;
+    const recu = mvts.filter((x) => x.tourId === tour.id && x.statut === 'paye' && x.mode !== 'especes' && (x.genre === 'cotisation' || x.genre === 'caution_utilisee')).reduce((n, x) => n + x.montant, 0);
+    const net = tour.etat === 'a_verser' || tour.etat === 'verse' ? tour.net : repartitionCagnotte(recu, 1, t.commissionBps).net;
+    const verse = verseSur(mvts, (x) => x.tourId === tour.id);
+    return { cle: `t:${tour.id}`, tourId: tour.id, complet: tour.etat === 'a_verser', net, verse, paye: verseSur(mvts, (x) => x.tourId === tour.id, ['paye']), disponible: tour.etat === 'verse' ? 0 : Math.max(0, net - verse), enCours: mvts.some((x) => x.genre === 'versement' && x.tourId === tour.id && x.statut === 'en_attente') };
+  }
+  /** Le versement en cours d'un groupe : le tour à verser, sinon le tour en collecte, ou la raison précise. */
+  const versementDe = (t: TontineComplete, mvts: Mouvement[]) => {
+    if (t.etat !== 'en_cours' || (estObjectif(t) ? tourFinal(t)?.etat === 'verse' : false)) return null;
+    return estObjectif(t) ? etatVersement(t, mvts) : etatVersement(t, mvts, t.tours.find((x) => x.etat === 'a_verser') ?? (tourActuel(t)?.etat === 'collecte' ? tourActuel(t) : null));
+  };
 
   /** Qui est cette personne pour ce changement : le membre qui cède ou propose, l'autre membre d'un échange, un organisateur. */
   function rolesChangement(t: TontineComplete, c: Pick<Changement, 'membreId' | 'avecMembreId' | 'genre'>, userId: string) {
@@ -417,6 +449,26 @@ export function creerTontines(d: DepsTontines) {
     return { ...(await relire(t.id, u.id)), remplacement: carteRemplacement(frais, apres ?? c, await mouvementsDe(t.id)) };
   }
 
+  /**
+   * L'initiateur demande à l'équipe de verser au bénéficiaire ce qui est déjà arrivé, sans attendre la cagnotte complète.
+   * Une relance est possible après un jour.
+   */
+  async function demanderTranche(t: TontineComplete, userId: string) {
+    const v = versementDe(t, await mouvementsDe(t.id));
+    if (!v || !v.disponible) throw new HttpError(409, 'Rien à verser pour l’instant : l’argent n’est pas encore arrivé.');
+    const tour = estObjectif(t) ? null : t.tours.find((x) => x.id === v.tourId)!;
+    const deja = estObjectif(t) ? t.trancheDemandeLe : tour?.versementDemandeLe;
+    if (deja && deja.getTime() > maintenant() - 86400000) throw new HttpError(409, 'Tranche déjà demandée : tu pourras relancer demain.');
+    if (estObjectif(t)) await d.db.tontine.update({ where: { id: t.id }, data: { trancheDemandeLe: new Date(maintenant()) } });
+    else await d.db.tontineTour.update({ where: { id: tour!.id }, data: { versementDemandeLe: new Date(maintenant()), versementDemandes: (tour!.versementDemandes ?? 0) + 1 } });
+    const b = tour ? t.membres.find((m) => m.id === tour.beneficiaireId) : null;
+    const pour = estObjectif(t) ? (beneficiaireDe(t)?.nom ?? 'le bénéficiaire') : b ? contactDe(b).nom : 'le bénéficiaire';
+    const qui = prenomDe(t.organisateur?.nom ?? '') || 'L’initiateur';
+    for (const admin of (await d.responsablesVersements?.()) ?? [])
+      await d.avertir(admin, null, { cle: `tontine:tranche-demande:${v.cle}:${maintenant()}`, titre: `Tranche demandée : ${montantCotisation(v.disponible, t.devise)}`, corps: `${qui} demande de verser à ${pour} ce qui est déjà arrivé dans « ${t.nom} ». À verser dans Utilisateurs › Cotisations.`, url: '/utilisateurs?page=cotisations' }, true).catch((e) => console.error('Avis de tontine', e));
+    return relire(t.id, userId);
+  }
+
   /** Ce que voit la personne invitée à reprendre une place. */
   function carteRemplacement(t: TontineComplete, c: Changement, mvts: Mouvement[]) {
     const m = t.membres.find((x) => x.id === c.membreId);
@@ -463,6 +515,12 @@ export function creerTontines(d: DepsTontines) {
     const fait = await d.db.tontineTour.updateMany({ where: { id: tourId, etat: 'collecte' }, data: { etat: 'a_verser', ...part, especes } });
     if (!fait.count) return;
     const b = t.membres.find((m) => m.id === tour.beneficiaireId);
+    // Des tranches sont déjà parties : il ne reste que la différence (ou rien).
+    const dejaVerse = verseSur(mvts, (x) => x.tourId === tourId);
+    if (dejaVerse && dejaVerse >= part.net && part.net) {
+      if (verseSur(mvts, (x) => x.tourId === tourId, ['paye']) >= part.net) await apresVersement(tourId);
+      return;
+    }
     const enEspeces = especes ? ` ${montantCotisation(especes, t.devise)} en espèces te seront remis par l’organisateur.` : '';
     // Tout en espèces : rien à verser par Me.
     if (!part.net) {
@@ -471,7 +529,7 @@ export function creerTontines(d: DepsTontines) {
       return;
     }
     if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:complet:${tourId}`, titre: 'Ta cagnotte est complète', corps: `${montantCotisation(part.net, t.devise)} réunis dans « ${t.nom} », en cours de validation. Tu seras prévenu au versement.${enEspeces}` }).catch((e) => console.error('Avis de tontine', e));
-    await prevenirEquipe(`tontine:a-verser:${tourId}`, `À verser : ${montantCotisation(part.net, t.devise)}`, `« ${t.nom} », tour ${tour.numero} : la cagnotte de ${b ? contactDe(b).nom : 'ce tour'} est complète.`);
+    await prevenirEquipe(`tontine:a-verser:${tourId}`, `À verser : ${montantCotisation(part.net - dejaVerse, t.devise)}`, `« ${t.nom} », tour ${tour.numero} : la cagnotte de ${b ? contactDe(b).nom : 'ce tour'} est complète${dejaVerse ? `, ${montantCotisation(dejaVerse, t.devise)} déjà versés en tranches` : ''}.`);
   }
 
   /** Argent reçu et vérifié. */
@@ -527,7 +585,14 @@ export function creerTontines(d: DepsTontines) {
     const part = repartitionCagnotte(total, 1, t.commissionBps);
     try {
       await d.db.tontineTour.create({ data: { tontineId: id, numero: 0, echeance: t.dateFin, etat: 'a_verser', ...part, especes } });
-      await prevenirEquipe(`tontine:a-verser:${id}:final`, `À verser : ${montantCotisation(part.net, t.devise)}`, `« ${t.nom} » est clôturée : ${montantCotisation(part.net, t.devise)} pour ${beneficiaireDe(t)?.nom ?? 'le bénéficiaire'}.`);
+      const dejaVerse = verseSur(mvts, () => true);
+      await prevenirEquipe(`tontine:a-verser:${id}:final`, `À verser : ${montantCotisation(Math.max(0, part.net - dejaVerse), t.devise)}`, `« ${t.nom} » est clôturée : ${montantCotisation(part.net, t.devise)} pour ${beneficiaireDe(t)?.nom ?? 'le bénéficiaire'}${dejaVerse ? `, dont ${montantCotisation(dejaVerse, t.devise)} déjà versés en tranches` : ''}.`);
+      // Tout est déjà parti en tranches : la cotisation est terminée.
+      if (dejaVerse >= part.net && verseSur(mvts, () => true, ['paye']) >= part.net) {
+        const final = await d.db.tontineTour.findFirst({ where: { tontineId: id, numero: 0 } });
+        if (final) await apresVersement(final.id);
+        return;
+      }
     } catch (e) {
       if (estDoublon(e)) return;
       throw e;
@@ -561,8 +626,20 @@ export function creerTontines(d: DepsTontines) {
     await prevenirTous(t, `tontine:tour:${suivant.id}`, { titre: `Cotisation à payer : ${montantCotisation(t.montant, t.devise)}`, corps: `« ${t.nom} », tour ${suivant.numero} sur ${t.places}, pour ${nom}.` });
   }
 
+  /** Une tranche ou le solde est parti : le tour est versé quand tout l'est, sinon le bénéficiaire est prévenu de la tranche. */
   async function apresSortie(m: Mouvement) {
-    if (m.genre === 'versement' && m.tourId) await apresVersement(m.tourId);
+    if (m.genre === 'versement' && m.tontineId) {
+      const t = await charger(m.tontineId);
+      const mvts = await mouvementsDe(t.id);
+      const tour = estObjectif(t) ? tourFinal(t) : t.tours.find((x) => x.id === m.tourId);
+      const v = etatVersement(t, mvts, tour);
+      if (tour?.etat === 'a_verser' && v && v.paye >= tour.net) await apresVersement(tour.id);
+      else if (v) {
+        const b = estObjectif(t) ? null : t.membres.find((x) => x.id === tour?.beneficiaireId);
+        if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:tranche:${m.id}`, titre: `Tranche reçue : ${montantCotisation(m.montant, t.devise)}`, corps: `« ${t.nom} » : ${montantCotisation(v.paye, t.devise)} versés jusqu’ici. Le reste suit quand l’argent arrive.` }).catch((e) => console.error('Avis de tontine', e));
+        await prevenirOrganisateur(t, `tontine:tranche-orga:${m.id}`, { titre: `Tranche versée : ${montantCotisation(m.montant, t.devise)}`, corps: `« ${t.nom} » : ${montantCotisation(v.paye, t.devise)} versés à ${estObjectif(t) ? (beneficiaireDe(t)?.nom ?? 'le bénéficiaire') : b ? prenomDe(contactDe(b).nom) : 'le bénéficiaire'}.` });
+      }
+    }
     if (m.genre === 'caution_rendue' && m.membreId) {
       await d.db.tontineMembre.updateMany({ where: { id: m.membreId, cautionStatut: 'a_rendre' }, data: { cautionStatut: 'rendue' } });
     }
@@ -771,23 +848,79 @@ export function creerTontines(d: DepsTontines) {
     for (const x of verses) ligne(x.tontine.devise).commission += x.commission;
     const groupes = new Map<string, TontineComplete>();
     for (const id of new Set([...tours.map((x) => x.tontineId), ...cautions.map((m) => m.tontineId)])) groupes.set(id, await charger(id));
-    // Les versements demandés par l'initiateur d'abord, le plus ancien en tête.
-    tours.sort((a, b) => Number(!a.versementDemandeLe) - Number(!b.versementDemandeLe) || (a.versementDemandeLe?.getTime() ?? 0) - (b.versementDemandeLe?.getTime() ?? 0));
+    // Les groupes en cours où de l'argent est déjà arrivé : une tranche peut partir sans attendre la cagnotte complète.
+    const enCours = await d.db.tontine.findMany({ where: { etat: 'en_cours' }, include: INCLUS });
+    const mvtsDe = new Map<string, Mouvement[]>();
+    for (const t of [...enCours, ...groupes.values()]) if (!mvtsDe.has(t.id)) mvtsDe.set(t.id, await mouvementsDe(t.id));
+    const ligneVersement = (t: TontineComplete, x: TontineComplete['tours'][number] | null) => {
+      const b = x ? t.membres.find((m) => m.id === x.beneficiaireId) : null;
+      const contact = estObjectif(t) ? beneficiaireDe(t) : b ? contactDe(b) : null;
+      const v = estObjectif(t) ? etatVersement(t, mvtsDe.get(t.id)!) : etatVersement(t, mvtsDe.get(t.id)!, x);
+      const demandeLe = estObjectif(t) && !x ? (t.trancheDemandeLe ?? null) : (x?.versementDemandeLe ?? null);
+      return { cle: v?.cle ?? `t:${x?.id}`, tourId: x?.id ?? null, complet: x?.etat === 'a_verser', raison: t.raison, groupe: t.nom, numero: x?.numero ?? 0, places: t.places, beneficiaire: contact?.nom ?? '', telephone: contact?.telephone ?? '', brut: x?.brut ?? 0, commission: x?.commission ?? 0, net: v?.net ?? x?.net ?? 0, especes: x?.especes ?? 0, devise: t.devise, demandeLe, demandes: x?.versementDemandes ?? 0, dejaVerse: v?.paye ?? 0, disponible: v?.disponible ?? 0, enCours: v?.enCours ?? false };
+    };
+    const complets = tours.map((x) => ligneVersement(groupes.get(x.tontineId)!, x));
+    const tranches = enCours
+      .map((t) => {
+        if (estObjectif(t)) return tourFinal(t) ? null : ligneVersement(t, null);
+        const x = tourActuel(t);
+        return x?.etat === 'collecte' ? ligneVersement(t, x) : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x && x.disponible > 0);
+    // Les versements demandés par l'initiateur d'abord, le plus ancien en tête ; les cagnottes complètes avant les tranches.
+    const ordre = (a: { demandeLe: Date | null; complet: boolean }, b: { demandeLe: Date | null; complet: boolean }) => Number(!a.demandeLe) - Number(!b.demandeLe) || Number(!a.complet) - Number(!b.complet) || (a.demandeLe?.getTime() ?? 0) - (b.demandeLe?.getTime() ?? 0);
     return {
       versementApi: d.versementApi(),
       totaux: [...parDevise].map(([devise, v]) => ({ devise, ...v })),
-      versements: tours.map((x) => {
-        const t = groupes.get(x.tontineId)!;
-        const b = t.membres.find((m) => m.id === x.beneficiaireId);
-        const contact = estObjectif(t) ? beneficiaireDe(t) : b ? contactDe(b) : null;
-        return { tourId: x.id, raison: t.raison, groupe: t.nom, numero: x.numero, places: t.places, beneficiaire: contact?.nom ?? '', telephone: contact?.telephone ?? '', brut: x.brut, commission: x.commission, net: x.net, especes: x.especes, devise: t.devise, demandeLe: x.versementDemandeLe, demandes: x.versementDemandes };
-      }),
+      versements: [...complets, ...tranches].sort(ordre),
       cautions: cautions.map((m) => {
         const t = groupes.get(m.tontineId)!;
         const contact = contactDe(m);
         return { membreId: m.id, groupe: t.nom, nom: contact.nom, telephone: contact.telephone, montant: t.montant, devise: t.devise };
       }),
     };
+  }
+
+  /**
+   * Validation de l'admin : seul ce geste fait sortir l'argent. `montant` : une tranche de ce qui est déjà arrivé (net de
+   * la commission) ; sans montant, tout ce qui est disponible. `cle` : « t:<tour> » pour une rotation, « g:<groupe> » pour
+   * une raison précise (un identifiant de tour seul reste accepté).
+   */
+  async function verserCle(acteur: Acteur, cle: string, preuve?: string, montant?: number) {
+    const [genre, id] = cle.startsWith('g:') || cle.startsWith('t:') ? [cle.slice(0, 1), cle.slice(2)] : ['t', cle];
+    let t: TontineComplete;
+    let tour: TontineComplete['tours'][number] | null = null;
+    if (genre === 'g') {
+      t = await charger(id);
+      if (!estObjectif(t)) throw new HttpError(400, 'Ce groupe verse tour par tour.');
+      tour = tourFinal(t);
+    } else {
+      const x = await d.db.tontineTour.findUnique({ where: { id } });
+      if (!x) throw new HttpError(404, 'Tour introuvable.');
+      t = await charger(x.tontineId);
+      tour = t.tours.find((y) => y.id === id) ?? null;
+      if (estObjectif(t)) tour = tourFinal(t);
+    }
+    if (estObjectif(t) ? t.etat !== 'en_cours' || (tour && tour.etat !== 'a_verser') : !tour || (tour.etat !== 'a_verser' && tour.etat !== 'collecte')) throw new HttpError(409, 'Rien n’attend de versement ici.');
+    const mvts = await mouvementsDe(t.id);
+    const v = etatVersement(t, mvts, tour)!;
+    if (v.enCours) throw new HttpError(409, 'Un versement est déjà en cours : attends sa réponse.');
+    const somme = montant ?? v.disponible;
+    if (!v.disponible) throw new HttpError(409, 'Rien de disponible pour l’instant : l’argent n’est pas encore arrivé.');
+    if (!Number.isInteger(somme) || somme < 1 || somme > v.disponible) throw new HttpError(400, `Disponible : ${montantCotisation(v.disponible, t.devise)} au plus.`);
+    const b = estObjectif(t) ? null : t.membres.find((m) => m.id === tour!.beneficiaireId);
+    const telephone = estObjectif(t) ? (beneficiaireDe(t)?.telephone ?? '') : b ? contactDe(b).telephone : '';
+    if (!telephone) throw new HttpError(409, 'Le bénéficiaire n’a plus de numéro.');
+    // Pas de validation pour soi-même : ni sa propre cagnotte, ni celle d'un groupe qu'on organise pour une raison précise.
+    if (!acteur.admin && (b?.userId === acteur.id || (estObjectif(t) && t.organisateurId === acteur.id))) throw new HttpError(403, AUTRE_RESPONSABLE);
+    if (tour) await d.db.tontineTour.update({ where: { id: tour.id }, data: { valideParNom: acteur.nom, valideLe: new Date(maintenant()) } });
+    await sortie({ acteur: acteur.nom, genre: 'versement', tontineId: t.id, membreId: b?.id ?? null, tourId: tour?.id ?? null, montant: somme, devise: t.devise, telephone, preuve });
+    // La demande de tranche est servie.
+    if (!v.complet) {
+      if (estObjectif(t)) await d.db.tontine.update({ where: { id: t.id }, data: { trancheDemandeLe: null } });
+      else if (tour) await d.db.tontineTour.update({ where: { id: tour.id }, data: { versementDemandeLe: null } });
+    }
+    return resumeAdmin();
   }
 
   return {
@@ -1445,7 +1578,7 @@ export function creerTontines(d: DepsTontines) {
       const t = await charger(id);
       exigerOrganisateur(t, userId);
       const tour = estObjectif(t) ? tourFinal(t) : t.tours.find((x) => x.etat === 'a_verser');
-      if (!tour || tour.etat !== 'a_verser') throw new HttpError(409, estObjectif(t) ? 'La cotisation n’est pas encore clôturée.' : 'La cagnotte n’est pas encore complète.');
+      if (!tour || tour.etat !== 'a_verser') return demanderTranche(t, userId);
       if (tour.versementDemandeLe && tour.versementDemandeLe.getTime() > maintenant() - 86400000) throw new HttpError(409, 'Versement déjà demandé : tu pourras relancer demain.');
       await d.db.tontineTour.update({ where: { id: tour.id }, data: { versementDemandeLe: new Date(maintenant()), versementDemandes: (tour.versementDemandes ?? 0) + 1 } });
       const b = t.membres.find((m) => m.id === tour.beneficiaireId);
@@ -1460,21 +1593,9 @@ export function creerTontines(d: DepsTontines) {
       return relire(id, userId);
     },
 
-    /** Validation de l'admin : seul ce geste fait sortir l'argent d'un tour. */
-    async verserTour(acteur: Acteur, tourId: string, preuve?: string) {
-      const tour = await d.db.tontineTour.findUnique({ where: { id: tourId } });
-      if (!tour) throw new HttpError(404, 'Tour introuvable.');
-      if (tour.etat !== 'a_verser') throw new HttpError(409, 'Ce tour n’attend pas de versement.');
-      const t = await charger(tour.tontineId);
-      const b = t.membres.find((m) => m.id === tour.beneficiaireId);
-      const telephone = estObjectif(t) ? (beneficiaireDe(t)?.telephone ?? '') : b ? contactDe(b).telephone : '';
-      if (!telephone) throw new HttpError(409, 'Le bénéficiaire n’a plus de numéro.');
-      // Pas de validation pour soi-même : ni sa propre cagnotte, ni celle d'un groupe qu'on organise pour une raison précise.
-      if (!acteur.admin && (b?.userId === acteur.id || (estObjectif(t) && t.organisateurId === acteur.id))) throw new HttpError(403, AUTRE_RESPONSABLE);
-      await d.db.tontineTour.update({ where: { id: tourId }, data: { valideParNom: acteur.nom, valideLe: new Date(maintenant()) } });
-      await sortie({ acteur: acteur.nom, genre: 'versement', tontineId: t.id, membreId: b?.id ?? null, tourId, montant: tour.net, devise: t.devise, telephone, preuve });
-      return resumeAdmin();
-    },
+    verser: verserCle,
+    /** L'ancien chemin : un tour, versé en entier ou par tranche. */
+    verserTour: (acteur: Acteur, tourId: string, preuve?: string, montant?: number) => verserCle(acteur, `t:${tourId}`, preuve, montant),
 
     async rendreCaution(acteur: Acteur, membreId: string, preuve?: string) {
       const m = await d.db.tontineMembre.findUnique({ where: { id: membreId } });
