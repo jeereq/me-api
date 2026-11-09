@@ -187,7 +187,10 @@ export const TontineController = {
     res.json(await S.resumeAdmin());
   },
   adminVerser: async (req: Request, res: Response) => {
-    res.json(await S.verserTour(acteur(req), p(req.params.tourId), req.body.preuve));
+    res.json(await S.verserTour(acteur(req), p(req.params.tourId), req.body.preuve, req.body.montant));
+  },
+  adminVerserTranche: async (req: Request, res: Response) => {
+    res.json(await S.verser(acteur(req), p(req.params.cle), req.body.preuve, req.body.montant));
   },
   adminRendre: async (req: Request, res: Response) => {
     res.json(await S.rendreCaution(acteur(req), p(req.params.membreId), req.body.preuve));
