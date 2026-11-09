@@ -198,7 +198,7 @@ describe('une tontine de bout en bout', () => {
   let etats: Map<string, { etat: 'paye' | 'echoue' | 'en_attente'; montant?: string; devise?: string }>;
   let ouvert: (role: string | null) => boolean;
   let api: boolean;
-  let avis: { userId: string; telephone: string | null; cle: string; titre: string; seul?: boolean; mode?: unknown }[];
+  let avis: { userId: string; telephone: string | null; cle: string; titre: string; url?: string; seul?: boolean; mode?: unknown }[];
   let vus: Set<string>;
   let instant: number;
   let approuves: Set<string>;
@@ -251,7 +251,7 @@ describe('une tontine de bout en bout', () => {
       avertir: async (userId, telephone, a, mode) => {
         const nouveau = !vus.has(`${userId}|${a.cle}`);
         vus.add(`${userId}|${a.cle}`);
-        if (nouveau) avis.push({ userId, telephone, cle: a.cle, titre: a.titre, seul: mode === true, mode });
+        if (nouveau) avis.push({ userId, telephone, cle: a.cle, titre: a.titre, url: a.url, seul: mode === true, mode });
         return { nouveau, mail: nouveau, sms: nouveau };
       },
       comptesApprouves: async (ids) => new Set(ids.filter((x) => approuves.has(x))),
@@ -990,6 +990,8 @@ describe('une tontine de bout en bout', () => {
     await s.demarrer('orga', id);
     await assert.rejects(s.demanderVersement('orga', id), /pas encore complète/);
     await cotiserTous(id);
+    // L'équipe est prévenue dès que la cagnotte est complète, avec le lien vers l'écran des versements.
+    assert.ok(avis.some((a) => a.userId === 'admin' && /^À verser : 28,50 USD/.test(a.titre) && a.url === '/utilisateurs?page=cotisations'));
     await assert.rejects(s.demanderVersement('paul', id), /organisateur/);
     const g = (await s.demanderVersement('orga', id)).groupe;
     assert.ok(g.tours[0].versementDemandeLe);
