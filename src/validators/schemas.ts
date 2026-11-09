@@ -369,6 +369,7 @@ export const tontineAdhererSchema = z.object({ params: idTontine, body: z.object
 const codeInvitation = z.object({ code: z.string().regex(/^[A-Za-z0-9_-]{12}$/, 'Cette invitation n’est plus valable.') });
 export const tontineInvitationSchema = z.object({ params: codeInvitation });
 export const tontineRejoindreSchema = z.object({ params: codeInvitation, body: z.object({ telephone: telephoneTontine, accepte: accepteConditions }) });
+export const tontineBeneficiaireSchema = z.object({ params: idTontine, body: z.object({ nom: z.string({ required_error: 'Nom requis' }).trim().min(2, 'Nom trop court').max(80, 'Nom trop long'), telephone: telephoneTontine }) });
 export const tontineInviterSchema = z.object({ params: idTontine, body: z.object({ telephone: telephoneTontine }) });
 export const tontineSmsSchema = z.object({ body: z.object({ telephone: telephoneTontine }) });
 export const tontineCodeSchema = z.object({ body: z.object({ code: z.string().trim().regex(/^\d{4,8}$/, 'Code invalide') }) });

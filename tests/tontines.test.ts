@@ -1220,6 +1220,24 @@ describe('une tontine de bout en bout', () => {
     assert.equal(b.tontines.lignes.find((x) => x.id === groupe.id)!.etat, 'termine');
   });
 
+  it('change le bénéficiaire d’une raison précise ; ce qui est versé reste à l’ancien', async () => {
+    const { groupe } = await s.creer(orga, { nom: 'Mariage', montant: 1000, devise: 'USD', rythme: 'hebdomadaire', places: 3, mode: 'objectif', visibilite: 'prive', telephone: '0812345670', raison: 'Mariage', beneficiaire: { nom: 'Jean Mbuyi', telephone: '0812345679' }, dateFin: '2026-12-20' });
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    await s.verser(ADMIN, `g:${groupe.id}`, 'TR1', 300);
+    await assert.rejects(s.changerBeneficiaire('paul', groupe.id, { nom: 'Ruth', telephone: '0812345678' }), /Réservé/);
+    const g = (await s.changerBeneficiaire('orga', groupe.id, { nom: 'Ruth Ilunga', telephone: '0812345678' })).groupe;
+    assert.equal(g.beneficiaireNom, 'Ruth Ilunga');
+    assert.ok(avis.some((a) => a.userId === 'admin' && /Bénéficiaire changé/.test(a.titre)));
+    // Le reste part vers le nouveau numéro.
+    await s.cloturer('orga', groupe.id);
+    await s.verser(ADMIN, `g:${groupe.id}`, 'TR2');
+    assert.equal(b.mvts.lignes.filter((x) => x.genre === 'versement').at(-1)!.telephone, '243•••••5678');
+    // Une rotation n'a pas un seul bénéficiaire.
+    const id = await complet();
+    await assert.rejects(s.changerBeneficiaire('orga', id, { nom: 'X Y', telephone: '0812345678' }), /chacun reçoit à son tour/);
+  });
+
   it('clôture une raison précise avant sa date pour demander le versement', async () => {
     const { groupe } = await s.creer(orga, { nom: 'Mariage', montant: 1000, devise: 'USD', rythme: 'hebdomadaire', places: 3, mode: 'objectif', visibilite: 'prive', telephone: '0812345670', raison: 'Mariage', beneficiaire: { nom: 'Jean Mbuyi', telephone: '0812345679' }, dateFin: '2026-12-20' });
     assert.equal(groupe.cloturable, true);

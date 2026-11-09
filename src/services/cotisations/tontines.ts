@@ -1625,6 +1625,34 @@ export function creerTontines(d: DepsTontines) {
       return relire(t.id, userId);
     },
 
+    /**
+     * Raison précise : l'initiateur (ou un adjoint) change le bénéficiaire, tant que tout n'est pas versé et qu'aucun
+     * versement n'est en cours. Ce qui est déjà versé reste à l'ancien ; les membres et l'équipe sont prévenus.
+     */
+    async changerBeneficiaire(userId: string, id: string, b: { nom: string; telephone: string }) {
+      const t = await charger(id);
+      exigerOrganisateur(t, userId);
+      if (!estObjectif(t)) throw new HttpError(409, 'Dans une rotation, chacun reçoit à son tour : échange les tours ou cède une place.');
+      if (t.etat !== 'en_cours' || tourFinal(t)?.etat === 'verse') throw new HttpError(409, 'Cette cotisation est terminée.');
+      const mvts = await mouvementsDe(id);
+      if (mvts.some((x) => x.genre === 'versement' && x.statut === 'en_attente')) throw new HttpError(409, 'Un versement est en cours : attends sa réponse avant de changer de bénéficiaire.');
+      const nom = b.nom.trim();
+      if (nom.length < 2) throw new HttpError(400, 'Indique le nom du bénéficiaire.');
+      const telephone = normaliserTelephone(b.telephone);
+      if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+      await d.exigerNumero(telephone);
+      const ancien = beneficiaireDe(t);
+      if (ancien && ancien.telephone === telephone && ancien.nom === nom) return relire(id, userId);
+      await d.db.tontine.update({ where: { id }, data: { beneficiaire: enCoffre({ nom, telephone }) } });
+      const verse = verseSur(mvts, () => true, ['paye']);
+      const qui = prenomDe(t.organisateur?.nom ?? '') || 'L’initiateur';
+      const corps = `« ${t.nom} » : ${nom} reçoit désormais la cagnotte${ancien ? `, à la place de ${ancien.nom}` : ''}.${verse ? ` Ce qui est déjà versé (${montantCotisation(verse, t.devise)}) reste à ${ancien?.nom ?? 'l’ancien bénéficiaire'}.` : ''}`;
+      await prevenirTous(t, `tontine:beneficiaire:${id}:${maintenant()}`, { titre: 'Bénéficiaire changé', corps }, t.membres.find((m) => m.userId === userId)?.id);
+      // L'équipe des versements le sait avant de verser : le numéro a changé.
+      await prevenirEquipe(`tontine:beneficiaire-equipe:${id}:${maintenant()}`, `Bénéficiaire changé : « ${t.nom} »`, `${qui} a remplacé ${ancien?.nom ?? 'le bénéficiaire'} par ${nom} (${numeroMasque(telephone)}).`);
+      return relire(id, userId);
+    },
+
     /** Raison précise : l'initiateur clôture avant la date de fin pour demander le versement de ce qui est réuni. */
     async cloturer(userId: string, id: string) {
       const t = await charger(id);

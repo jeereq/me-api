@@ -138,6 +138,9 @@ export const TontineController = {
   annulerChangement: async (req: Request, res: Response) => {
     res.json(await S.annulerChangement(req.user!.id, p(req.params.changementId)));
   },
+  changerBeneficiaire: async (req: Request, res: Response) => {
+    res.json(await S.changerBeneficiaire(req.user!.id, p(req.params.id), { nom: String(req.body.nom), telephone: String(req.body.telephone) }));
+  },
   cloturer: async (req: Request, res: Response) => {
     res.json(await S.cloturer(req.user!.id, p(req.params.id)));
   },
