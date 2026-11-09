@@ -6,7 +6,7 @@ import { authenticateJWT, requireModule } from '../middlewares/authenticateJWT.j
 import { codeTontineLimiter, confirmerTontineLimiter, envoiCotisationLimiter, invitationTontineLimiter, pageAnnuaireLimiter, payerTontineLimiter, pieceIdentiteLimiter, retourPaiementLimiter, signalementLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineAdjointSchema, tontineChangementSchema, tontineChangementIdSchema, tontineReponseChangementSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema, tontineVerserSchema } from '../validators/schemas.js';
+import { alerteAnnuaireSchema, alerteIdSchema, deciderSignalementSchema, signalerTontineSchema, tontineAdhererSchema, tontineApprobationSchema, tontineCodeSchema, tontineCreerSchema, tontineInvitationSchema, tontineInviterSchema, tontineRejoindreSchema, tontineSmsSchema, tontineUserIdSchema, tontineDecisionSchema, tontineAdjointSchema, tontineChangementSchema, tontineChangementIdSchema, tontineReponseChangementSchema, tontineIdSchema, tontineMembreIdSchema, tontineRappelsSchema, tontineReglesSchema, tontineOrdreSchema, tontinePayerSchema, tontinePreuveMembreSchema, tontinePreuveTourSchema, tontineVerserSchema, referencePaiementSchema } from '../validators/schemas.js';
 
 const router = Router();
 // Appelée par FlexPaie : le mouvement est toujours revérifié auprès d'eux.
@@ -20,6 +20,8 @@ router.use(authenticateJWT);
 
 router.get('/admin/resume', requireModule('versements'), asyncHandler(C.adminResume));
 router.post('/admin/tours/:tourId/verser', requireModule('versements'), validateRequest(tontinePreuveTourSchema), asyncHandler(C.adminVerser));
+router.get('/admin/versements', requireModule('versements'), asyncHandler(C.adminVersements));
+router.post('/admin/mouvements/:reference/verifier', requireModule('versements'), validateRequest(referencePaiementSchema), asyncHandler(C.adminReverifier));
 router.post('/admin/versements/:cle/verser', requireModule('versements'), validateRequest(tontineVerserSchema), asyncHandler(C.adminVerserTranche));
 router.post('/admin/membres/:membreId/rendre', requireModule('versements'), validateRequest(tontinePreuveMembreSchema), asyncHandler(C.adminRendre));
 
@@ -33,7 +35,8 @@ router.get('/eligibilite', asyncHandler(C.eligibilite));
 router.post('/eligibilite/code', requireFonction('cotisations'), codeTontineLimiter, validateRequest(tontineSmsSchema), asyncHandler(C.demanderCode));
 router.post('/eligibilite/confirmer', requireFonction('cotisations'), confirmerTontineLimiter, validateRequest(tontineCodeSchema), asyncHandler(C.confirmerCode));
 router.post('/eligibilite', requireFonction('cotisations'), pieceIdentiteLimiter, asyncHandler(C.soumettre));
-router.post('/invitation/:code', requireFonction('cotisations'), validateRequest(tontineRejoindreSchema), asyncHandler(C.rejoindre));
+// Une invitation fait entrer sans abonnement (l'initiateur répond de son groupe) ; créer un groupe ou rejoindre l'annuaire demande Finances.
+router.post('/invitation/:code', validateRequest(tontineRejoindreSchema), asyncHandler(C.rejoindre));
 
 router.get('/', asyncHandler(C.mesGroupes));
 router.get('/annuaire', asyncHandler(C.annuaire));

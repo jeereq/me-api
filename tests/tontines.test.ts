@@ -176,13 +176,13 @@ describe('rappels de groupe', () => {
 });
 
 describe('accès aux cotisations', () => {
-  it('créer, rejoindre et demander l’approbation exigent au moins Finances ; payer reste ouvert', () => {
+  it('créer, rejoindre l’annuaire et demander l’approbation exigent au moins Finances ; une invitation et payer restent ouverts', () => {
     const routes = readFileSync(new URL('../src/routes/tontine.routes.ts', import.meta.url), 'utf8');
-    for (const r of ["post('/',", "post('/:id/adherer',", "post('/invitation/:code',", "post('/eligibilite',", "post('/eligibilite/code',", "post('/eligibilite/confirmer',"]) {
+    for (const r of ["post('/',", "post('/:id/adherer',", "post('/eligibilite',", "post('/eligibilite/code',", "post('/eligibilite/confirmer',"]) {
       const ligne = routes.split('\n').find((l) => l.includes(r));
       assert.ok(ligne?.includes("requireFonction('cotisations')"), r);
     }
-    assert.equal(routes.split('\n').find((l) => l.includes("post('/:id/payer',"))?.includes('requireFonction'), false);
+    for (const r of ["post('/:id/payer',", "post('/invitation/:code',"]) assert.equal(routes.split('\n').find((l) => l.includes(r))?.includes('requireFonction'), false, r);
   });
   it('les options de Finances demandent une photo de profil, sauf pour les admins', () => {
     assert.equal(photoManquante({ role: 'UTILISATEUR', photoUrl: null }, 'cotisations'), true);
@@ -1021,7 +1021,7 @@ describe('une tontine de bout en bout', () => {
     await assert.rejects(s.demanderVersement('orga', id), /Rien à verser pour l’instant/);
     await cotiserTous(id);
     // L'équipe est prévenue dès que la cagnotte est complète, avec le lien vers l'écran des versements.
-    assert.ok(avis.some((a) => a.userId === 'admin' && /^À verser : 28,50 USD/.test(a.titre) && a.url === '/utilisateurs?page=cotisations'));
+    assert.ok(avis.some((a) => a.userId === 'admin' && /^À verser : 28,50 USD/.test(a.titre) && a.url === '/versements'));
     await assert.rejects(s.demanderVersement('paul', id), /organisateur/);
     const g = (await s.demanderVersement('orga', id)).groupe;
     assert.ok(g.tours[0].versementDemandeLe);
@@ -1199,6 +1199,11 @@ describe('une tontine de bout en bout', () => {
     assert.equal(t.etat, 'verse');
     assert.equal(b.mvts.lignes.filter((x) => x.genre === 'versement' && x.tourId === t.id).reduce((n, x) => n + x.montant, 0), 2850);
     assert.equal(b.tours.lignes.find((x) => x.numero === 2)!.etat, 'collecte');
+    // La page des versements : l'historique des deux sorties, la plus récente en tête, et le mode manuel.
+    const page = await s.adminVersements();
+    assert.deepEqual(page.historique.map((x) => [x.montant, x.statut, x.pour]), [[2350, 'paye', page.historique[0].pour], [500, 'paye', page.historique[0].pour]]);
+    assert.equal(page.mode.automatique, false);
+    assert.equal(page.solde, null);
   });
 
   it('raison précise : tranches avant la date de fin, le reste à la clôture', async () => {

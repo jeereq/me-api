@@ -1,10 +1,11 @@
 import { limitesDe, reglesPlateformeDe } from '../commun/cotisations.js';
 import { prisma } from '../utils/prisma.js';
-import { etatAbonnement, SELECT_ABONNEMENT } from './abonnements/offres.js';
+import { aDroit, etatAbonnement, photoManquante, SELECT_ABONNEMENT } from './abonnements/offres.js';
 import { Flexpaie, flexpaieConfigure } from './abonnements/flexpaie.js';
 import { adresseApp } from './comptes/emails.js';
 import { creerApprobations } from './cotisations/approbations.js';
 import { Envois } from './cotisations/envois.js';
+import { manquePayout, Payout, payoutConfigure } from './cotisations/payout.js';
 import { creerTontines } from './cotisations/tontines.js';
 import { NumerosAutorises } from './sms/numeros.js';
 
@@ -22,9 +23,12 @@ export const ApprobationService = creerApprobations({
 
 export const TontineService = creerTontines({
   db: prisma,
-  flexpaie: Flexpaie,
+  // Les entrées passent par le paiement FlexPaie ; les sorties (versements, cautions rendues) par le service Payout.
+  flexpaie: { demander: Flexpaie.demander, verifier: Flexpaie.verifier, verser: Payout.verser, verifierSortie: Payout.verifier, solde: Payout.solde },
   paiementOuvert,
-  versementApi: () => process.env.TONTINES_VERSEMENT_API === 'true' && flexpaieConfigure(),
+  versementApi: () => process.env.TONTINES_VERSEMENT_API === 'true' && payoutConfigure(),
+  payoutPret: () => payoutConfigure(),
+  manquePayout: () => [...manquePayout(), ...(process.env.TONTINES_VERSEMENT_API === 'true' ? [] : ['TONTINES_VERSEMENT_API=true'])],
   flexpaiePret: flexpaieConfigure,
   adresseServeur: () => (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, ''),
   exigerNumero: (telephone) => NumerosAutorises.exiger(telephone),
@@ -40,6 +44,10 @@ export const TontineService = creerTontines({
   reglesPlateforme: async () => {
     const c = (await prisma.config.findUnique({ where: { id: 1 } }))?.data as { reglesPlateforme?: unknown; limitesCotisations?: unknown } | null;
     return reglesPlateformeDe(c?.reglesPlateforme, limitesDe(c?.limitesCotisations));
+  },
+  aFinances: async (userId) => {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { ...SELECT_ABONNEMENT, photoUrl: true } });
+    return !!u && aDroit(etatAbonnement(u), 'cotisations') && !photoManquante(u, 'cotisations');
   },
   // Niveau du compte pour les limites : abonné Pro (payé), sinon approuvé, sinon non approuvé.
   niveau: async (userId) => {
