@@ -1,5 +1,5 @@
 import { periodeCourte, type Rapport, resumeRapport, somme as montant } from '../commun/rapport.js';
-import { composerSms } from './sms/asmsc.js';
+import { composerSms, phrase, preparerTexte } from './sms/asmsc.js';
 
 const echapper = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const TON = { alerte: '#FF6474', conseil: '#FFCB5C', bravo: '#3EF0B0' } as const;
@@ -12,6 +12,42 @@ export function smsRapport(r: Rapport, lien?: string | null): string {
     ? `Dépenses ${quand} : ${montant(r.depenses, r.devise)} (${r.nombre} dépense${r.nombre > 1 ? 's' : ''}).`
     : `Aucune dépense notée ${quand === r.debut.slice(0, 4) ? `en ${quand}` : quand}.`;
   return composerSms([tete, ...r.conseils.map((c) => c.court)], lien);
+}
+
+/** Le rapport du soir en SMS long : au plus ce nombre de SMS facturés. */
+export const SEGMENTS_RAPPORT = 5;
+
+/** Un nom sans emoji (un seul emoji ferait passer tout le SMS en Unicode, deux fois plus cher). */
+const sansEmoji = (t: string) => t.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}]/gu, '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Le rapport du soir par SMS, comme l'email : bonjour, le total et l'habitude, les conseils, où est parti l'argent, les
+ * budgets, puis le lien. Un SMS long (jusqu'à SEGMENTS_RAPPORT SMS facturés), sans emoji. Si tout ne tient pas, les
+ * dernières lignes (budgets, puis catégories, puis conseils) tombent entières : jamais une ligne coupée au milieu.
+ */
+export function smsRapportComplet(r: Rapport, nom?: string | null, lien?: string | null): string {
+  const m = (n: number) => montant(n, r.devise);
+  const prenom = nom ? sansEmoji(nom).split(' ')[0] : '';
+  const tete = [`Me. ${prenom ? `Bonjour ${prenom},` : 'Bonjour,'}`, `${r.titre} : ${r.nombre ? `${m(r.depenses)}.` : 'aucune dépense notée.'}`];
+  if (r.nombre) tete.push(`${r.nombre} dépense${r.nombre > 1 ? 's' : ''}${r.habitude ? ` (d'habitude ${m(r.habitude)})` : ''}.`);
+  if (r.revenus > 0) tete.push(`Reçu : ${m(r.revenus)}.`);
+  const sections: [string, string[]][] = [
+    ['Conseils :', r.conseils.map((c) => `- ${phrase(c.texte)}`)],
+    ["Où est parti l'argent :", r.categories.slice(0, 4).map((c) => `- ${sansEmoji(c.nom)} : ${m(c.montant)}`)],
+    ['Budgets :', r.budgets.slice(0, 4).map((b) => `- ${sansEmoji(b.nom)} : ${m(b.depense)} / ${m(b.plafond)}${b.depasse ? ' (dépassé)' : ''}`)],
+  ];
+  const tient = (t: string) => !preparerTexte(t, { segments: SEGMENTS_RAPPORT }).coupe;
+  let texte = tete.join('\n');
+  for (const [titre, lignes] of sections) {
+    let bloc = '';
+    for (const l of lignes) {
+      if (!tient(`${texte}\n\n${titre}\n${bloc ? `${bloc}\n` : ''}${l}`)) break;
+      bloc = bloc ? `${bloc}\n${l}` : l;
+    }
+    if (bloc) texte = `${texte}\n\n${titre}\n${bloc}`;
+  }
+  if (lien && tient(`${texte}\n\n${lien}`)) texte = `${texte}\n\n${lien}`;
+  return texte;
 }
 
 /** La notification d'un rapport : le total, puis le conseil le plus utile. */
