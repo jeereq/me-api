@@ -1,5 +1,6 @@
 /**
- * FlexPaie : paiement mobile money (M-Pesa, Orange Money, Airtel Money…) des abonnements Pro.
+ * FlexPaie : paiement mobile money (M-Pesa, Orange Money, Airtel Money…) des abonnements et des cotisations.
+ * Les versements (argent qui sort vers un numéro) passent par le service Payout : voir cotisations/payout.ts.
  *
  * Déroulé : Me demande le paiement (le client reçoit une demande de validation sur son téléphone), FlexPaie
  * renvoie un numéro de commande puis appelle notre adresse de retour. Me ne croit jamais le retour sur parole :
@@ -126,24 +127,6 @@ export const Flexpaie = {
       callbackUrl: p.retour,
     });
     if (String(r.code) !== '0' || !r.orderNumber) throw erreurFlexpaie(r.message, 'Paiement refusé par FlexPaie');
-    return { commande: r.orderNumber, message: r.message ?? '' };
-  },
-
-  /**
-   * Envoie de l'argent vers un numéro. Service de versement cité par des bibliothèques tierces : champs à confirmer avec FlexPaie,
-   * d'où TONTINES_VERSEMENT_API, fermé par défaut.
-   */
-  async verser(p: { telephone: string; reference: string; montant: number; devise: string; retour: string }) {
-    const r = await appel<{ code?: string | number; message?: string; orderNumber?: string }>('/merchantPayOutService', {
-      merchant: process.env.FLEXPAIE_MARCHAND,
-      type: '1',
-      phone: p.telephone,
-      reference: p.reference,
-      amount: montantTexte(p.montant),
-      currency: p.devise,
-      callbackUrl: p.retour,
-    });
-    if (String(r.code) !== '0' || !r.orderNumber) throw erreurFlexpaie(r.message, 'Versement refusé par FlexPaie');
     return { commande: r.orderNumber, message: r.message ?? '' };
   },
 

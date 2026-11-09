@@ -1021,7 +1021,7 @@ describe('une tontine de bout en bout', () => {
     await assert.rejects(s.demanderVersement('orga', id), /Rien à verser pour l’instant/);
     await cotiserTous(id);
     // L'équipe est prévenue dès que la cagnotte est complète, avec le lien vers l'écran des versements.
-    assert.ok(avis.some((a) => a.userId === 'admin' && /^À verser : 28,50 USD/.test(a.titre) && a.url === '/utilisateurs?page=cotisations'));
+    assert.ok(avis.some((a) => a.userId === 'admin' && /^À verser : 28,50 USD/.test(a.titre) && a.url === '/versements'));
     await assert.rejects(s.demanderVersement('paul', id), /organisateur/);
     const g = (await s.demanderVersement('orga', id)).groupe;
     assert.ok(g.tours[0].versementDemandeLe);
@@ -1199,6 +1199,11 @@ describe('une tontine de bout en bout', () => {
     assert.equal(t.etat, 'verse');
     assert.equal(b.mvts.lignes.filter((x) => x.genre === 'versement' && x.tourId === t.id).reduce((n, x) => n + x.montant, 0), 2850);
     assert.equal(b.tours.lignes.find((x) => x.numero === 2)!.etat, 'collecte');
+    // La page des versements : l'historique des deux sorties, la plus récente en tête, et le mode manuel.
+    const page = await s.adminVersements();
+    assert.deepEqual(page.historique.map((x) => [x.montant, x.statut, x.pour]), [[2350, 'paye', page.historique[0].pour], [500, 'paye', page.historique[0].pour]]);
+    assert.equal(page.mode.automatique, false);
+    assert.equal(page.solde, null);
   });
 
   it('raison précise : tranches avant la date de fin, le reste à la clôture', async () => {
