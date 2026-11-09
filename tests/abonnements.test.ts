@@ -254,7 +254,7 @@ describe('paliers de réunions : Pro 0 à Pro 3', () => {
     assert.equal(prixPeriode('pro', 'annuel', 3), 16478);
     // Finances n'a pas de palier.
     assert.equal(prixPeriode('finances', 'mensuel', 3), 299);
-    assert.deepEqual([1, 2, 3].map((n) => PALIERS[n as 1 | 2 | 3].heures), [3, 10, 25]);
+    assert.deepEqual([1, 2, 3].map((n) => PALIERS[n as 1 | 2 | 3].heures), [5, 20, 40]);
   });
   it('lit tout ce qui n’est pas 1, 2 ou 3 comme Pro 0', () => {
     assert.deepEqual([null, undefined, 0, 4, -1, '2'].map(palierDe), [0, 0, 0, 0, 0, 0]);
@@ -272,7 +272,7 @@ describe('paliers de réunions : Pro 0 à Pro 3', () => {
     assert.match(messageReserve('reunions'), /Pro 1/);
   });
   it('ouvre les réunions avec Pro 1 à 3 et leurs heures du mois', () => {
-    for (const [palier, heures] of [[1, 3], [2, 10], [3, 25]] as const) {
+    for (const [palier, heures] of [[1, 5], [2, 20], [3, 40]] as const) {
       const e = etatAbonnement({ abonnementFormule: 'pro', abonnementPalier: palier, abonnementFinLe: jours(20), abonnementPeriode: 'mensuel' }, T0, true);
       assert.equal(aDroit(e, 'reunions'), true);
       assert.deepEqual(e.reunions, { cle: moisReunions(T0), secondes: heures * 3600 });
