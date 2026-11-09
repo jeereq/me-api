@@ -4,7 +4,7 @@ import { beforeEach, describe, it } from 'node:test';
 
 process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 
-const { echeancesTontine, limitesDe, LIMITES_DEFAUT, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, reglesPlateformeDe, REGLES_PLATEFORME_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
+const { apresLimite, echeancesAuJour, echeancesTontine, horsLimites, limitesDe, tropDeGroupes, LIMITES_DEFAUT, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, reglesPlateformeDe, REGLES_PLATEFORME_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
 const { tontineAdhererSchema, tontineCreerSchema, tontineRappelsSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
 const { FONCTIONS_FINANCES, formuleDe, photoManquante } = await import('../src/services/abonnements/offres.js');
@@ -72,12 +72,19 @@ function baseMemoire() {
     membres: membres.lignes.filter((m) => m.tontineId === t.id).map((m) => ({ etat: 'demande', cautionStatut: 'due', rang: null, user: null, ...m })),
     tours: tours.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => a.numero - b.numero).map((x) => ({ especes: 0, ...x })),
     invitations: invitations.lignes.filter((x) => x.tontineId === t.id).sort((a, b) => b.envoyeLe - a.envoyeLe),
+    changements: changements.lignes.filter((x) => x.tontineId === t.id),
   });
   const brut = (l: Ligne) => ({ etat: 'demande', cautionStatut: 'due', rang: null, ...l });
   const alertes = table();
   const signalements = table();
   const invitations = table();
+  const changements = table();
   const db = {
+    tontineChangement: {
+      ...changements,
+      create: async ({ data }: Ligne) => changements.create({ data: { etat: 'en_attente', accordMembre: false, accordAutre: false, accordInitiateur: false, nouveauUserId: null, nouveauContact: null, avecMembreId: null, code: null, ...data } }),
+      findUnique: async ({ where }: Ligne) => changements.lignes.find((x) => (where.code ? x.code === where.code : x.id === where.id)) ?? null,
+    },
     alerteAnnuaire: alertes,
     signalementTontine: signalements,
     tontineInvitation: invitations,
@@ -113,7 +120,7 @@ function baseMemoire() {
       findFirst: async ({ where }: Ligne) => mvts.lignes.find((m) => mvts.correspond(m, where)) ?? null,
     },
   };
-  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles, alertes, signalements, invitations };
+  return { db: db as unknown as Deps['db'], tontines, membres, tours, mvts, roles, alertes, signalements, invitations, changements };
 }
 
 describe('calculs des tontines', () => {
@@ -789,17 +796,40 @@ describe('une tontine de bout en bout', () => {
 
   it('respecte les limites de l’admin, à la création seulement', async () => {
     const base = { nom: 'G', devise: 'USD', rythme: 'mensuel' as const, mode: 'rotation' as const, visibilite: 'public' as const };
-    limites = { montantMax: { USD: 5000, CDF: 900000 }, membresMax: 4 };
-    await assert.rejects(s.creer(orga, { ...base, montant: 5001, places: 3 }), /ne peut pas dépasser 50 USD/);
-    await assert.rejects(s.creer(orga, { ...base, montant: 1000, places: 5 }), /dépasser 4 membres/);
-    await assert.rejects(s.creer(orga, { ...base, devise: 'CDF', montant: 900001, places: 3 }), /ne peut pas dépasser 9 000,01|ne peut pas dépasser 9 000 CDF/);
+    cadre = reglesPlateformeDe({ public: { commissionBps: 500, demandes: 'tous', limites: { montantMax: { mensuel: { USD: 5000, CDF: 900000 } }, membresMax: 4 } } });
+    await assert.rejects(s.creer(orga, { ...base, montant: 5001, places: 3 }), /au plus 50 USD par mois/);
+    await assert.rejects(s.creer(orga, { ...base, montant: 1000, places: 5 }), /au plus 4 membres/);
+    await assert.rejects(s.creer(orga, { ...base, devise: 'CDF', montant: 900001, places: 3 }), /au plus 9 000/);
     assert.equal((await s.creer(orga, { ...base, montant: 5000, places: 4 })).groupe.places, 4);
-    limites = { montantMax: { USD: 100, CDF: 100 }, membresMax: 2 };
+    // Le rythme compte : par jour, la limite par défaut s'applique.
+    assert.equal((await s.creer(orga, { ...base, rythme: 'quotidien', montant: 9000, places: 3 })).groupe.montant, 9000);
+    cadre = reglesPlateformeDe({ public: { limites: { membresMax: 2 } } });
     assert.equal(b.tontines.lignes[0].places, 4);
   });
 
+  it('applique les limites par sorte, devise et niveau du compte', async () => {
+    const p = reglesPlateformeDe({ prive: { limites: { montantMin: { USD: 500 } } }, niveaux: { standard: { groupesMax: 1, montantMax: { USD: 2000 } } } });
+    const c = { visibilite: 'prive' as const, rythme: 'mensuel' as const, devise: 'USD', montant: 400 };
+    assert.match(horsLimites(p, c) ?? '', /au moins 5 USD/);
+    assert.equal(horsLimites(p, { ...c, visibilite: 'public', montant: 400 }), null);
+    assert.match(horsLimites(p, { ...c, montant: 3000 }, 'standard') ?? '', /non approuvé.*20 USD/);
+    assert.equal(horsLimites(p, { ...c, montant: 3000 }, 'approuve'), null);
+    assert.match(tropDeGroupes(p, 'standard', 1) ?? '', /1 groupe en cours/);
+    assert.equal(tropDeGroupes(p, 'approuve', 1), null);
+    assert.match(horsLimites(p, { ...c, montant: 1000, dateFin: '2028-01-01', jour: '2026-11-09' }) ?? '', /12 mois/);
+    // Les anciennes limites servent de valeurs par défaut.
+    assert.equal(reglesPlateformeDe(null, { montantMax: { USD: 7000, CDF: 1 }, membresMax: 9 }).public.limites.montantMax.hebdomadaire.USD, 7000);
+    // Un membre non approuvé, avec un groupe déjà en cours, ne rejoint pas un second groupe.
+    cadre = reglesPlateformeDe({ prive: { demandes: 'tous' }, niveaux: { standard: { groupesMax: 1 } } });
+    const g1 = await s.creer(orga, { nom: 'A', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'prive', telephone: '243812345670' });
+    const g2 = await s.creer(orga, { nom: 'B', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'prive', telephone: '243812345670' });
+    const code = (x: { groupe: { lienInvitation: string | null } }) => x.groupe.lienInvitation!.split('/').pop()!;
+    await s.rejoindreParInvitation(invite, code(g1), '243812345679');
+    await assert.rejects(s.rejoindreParInvitation(invite, code(g2), '243812345679'), /1 groupe en cours/);
+  });
+
   it('refuse une cagnotte que la base ne saurait pas compter', async () => {
-    limites = { montantMax: { USD: 100000000, CDF: 100000000 }, membresMax: 200 };
+    cadre = reglesPlateformeDe({ public: { limites: { montantMax: { mensuel: { USD: 100000000, CDF: 100000000 } }, membresMax: 200 } }, niveaux: { approuve: { montantMax: { USD: 100000000, CDF: 100000000 } } } });
     await assert.rejects(s.creer(orga, { nom: 'G', devise: 'CDF', rythme: 'mensuel', mode: 'rotation', visibilite: 'public', montant: 100000000, places: 50 }), /trop élevée/);
   });
 
@@ -1032,6 +1062,120 @@ describe('une tontine de bout en bout', () => {
     // L'annuaire n'accepte jamais d'espèces et exige toujours l'approbation.
     assert.deepEqual([reglesPlateformeDe({ public: { especes: true, compteApprouve: false } }).public.especes, reglesPlateformeDe({ public: { compteApprouve: false } }).public.compteApprouve], [false, true]);
     assert.equal(reglesPlateformeDe({ prive: { commissionBps: 99999 } }).prive.commissionBps, 500);
+  });
+  it('fixe le jour et l’heure limite des échéances', async () => {
+    // Le 5 du mois, à au moins 3 jours du démarrage ; chaque mercredi.
+    assert.deepEqual(echeancesAuJour('mensuel', '2026-11-03', 3, 5), ['2026-12-05', '2027-01-05', '2027-02-05']);
+    assert.deepEqual(echeancesAuJour('mensuel', '2026-11-01', 2, 5), ['2026-11-05', '2026-12-05']);
+    assert.deepEqual(echeancesAuJour('hebdomadaire', '2026-11-09', 2, 3), ['2026-11-18', '2026-11-25']);
+    assert.deepEqual(echeancesAuJour('mensuel', '2026-11-09', 2, 0), echeancesTontine('mensuel', '2026-11-09', 2));
+    const r = { echeance: { jour: 0, heure: 18 } };
+    assert.equal(apresLimite(r, '2026-12-05', '2026-12-05', '17:59'), false);
+    assert.equal(apresLimite(r, '2026-12-05', '2026-12-05', '18:00'), true);
+    assert.equal(apresLimite({ echeance: { jour: 0, heure: -1 } }, '2026-12-05', '2026-12-05', '23:59'), false);
+    // Démarrage d'une rotation au jour fixe.
+    const { groupe } = await s.creer(orga, { nom: 'Fixe', montant: 1000, devise: 'USD', rythme: 'mensuel', places: 3, mode: 'rotation', visibilite: 'public', regles: { echeance: { jour: 10, heure: 18 } } });
+    assert.deepEqual(groupe.regles.echeance, { jour: 10, heure: 18 });
+    assert.ok(groupe.texteRegles.some((x: string) => /le 10 du mois à 18 h/.test(x)));
+    await s.adherer(paul, groupe.id);
+    await s.adherer(marie, groupe.id);
+    for (const m of (await s.detail('orga', groupe.id)).groupe.demandes) await s.decider('orga', m.id, true);
+    for (const u of ['orga', 'paul', 'marie']) {
+      await s.payer(u, groupe.id, 'caution');
+      await valider();
+    }
+    const g = (await s.demarrer('orga', groupe.id)).groupe;
+    assert.deepEqual(g.tours.map((x: { echeance: string }) => x.echeance), ['2026-11-10', '2026-12-10', '2027-01-10']);
+    // Un jour fixe n'a pas de sens pour un rythme quotidien.
+    const q = await s.creer(orga, { nom: 'Q', montant: 1000, devise: 'USD', rythme: 'quotidien', places: 3, mode: 'rotation', visibilite: 'public', regles: { echeance: { jour: 10, heure: 12 } } });
+    assert.deepEqual(q.groupe.regles.echeance, { jour: 0, heure: 12 });
+  });
+
+  it('nomme des adjoints qui gèrent le groupe avec l’initiateur', async () => {
+    const id = await complet();
+    const g = (await s.detail('orga', id)).groupe;
+    const mp = g.membres.find((m: { nom: string }) => m.nom === 'Paul Kasongo')!;
+    const mm = g.membres.find((m: { nom: string }) => m.nom === 'Marie Kabila')!;
+    await assert.rejects(s.adjoint('paul', mm.id, true), /Réservé à l’initiateur/);
+    const apres = (await s.adjoint('orga', mp.id, true)).groupe;
+    assert.deepEqual(apres.adjoints.map((x: { nom: string }) => x.nom), ['Paul Kasongo']);
+    const vuParPaul = (await s.detail('paul', id)).groupe;
+    assert.equal(vuParPaul.suisOrganisateur, true);
+    assert.equal(vuParPaul.suisInitiateur, false);
+    // Un adjoint démarre, mais n'annule pas et ne retire pas l'initiateur.
+    await assert.rejects(s.annuler('paul', id), /Réservé à l’initiateur/);
+    const morga = g.membres.find((m: { nom: string }) => m.nom === 'Jeereq Takango')!;
+    await assert.rejects(s.retirer('paul', morga.id), /L’initiateur reste/);
+    assert.equal((await s.demarrer('paul', id)).groupe.etat, 'en_cours');
+    assert.ok(avis.some((a) => a.userId === 'paul' && a.titre === 'Tu es adjoint'));
+    await s.adjoint('orga', mm.id, true);
+    // Deux au plus : un troisième membre n'existe pas ici, on retire puis renomme.
+    assert.equal((await s.adjoint('orga', mp.id, false)).groupe.adjoints.length, 1);
+  });
+
+  it('échange deux tours à venir quand tout le monde est d’accord', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const g = (await s.detail('orga', id)).groupe;
+    const idDe = (nom: string) => g.membres.find((m: { nom: string }) => m.nom === nom)!.id;
+    // Tirage fixe : l'ordre est orga, paul, marie. Le tour 1 est en collecte : seuls les tours 2 et 3 s'échangent.
+    await assert.rejects(s.proposerChangement(paul, id, { genre: 'echange', membreId: idDe('Paul Kasongo'), avecMembreId: idDe('Jeereq Takango') }), /à venir/);
+    await assert.rejects(s.proposerChangement(paul, id, { genre: 'echange', membreId: idDe('Marie Kabila'), avecMembreId: idDe('Paul Kasongo') }), /que pour ta place/);
+    const p = (await s.proposerChangement(paul, id, { genre: 'echange', membreId: idDe('Paul Kasongo'), avecMembreId: idDe('Marie Kabila') })).groupe;
+    assert.equal(p.changements.length, 1);
+    const cid = p.changements[0].id;
+    const vuMarie = (await s.detail('marie', id)).groupe.changements[0];
+    assert.equal(vuMarie.aDonner, true);
+    await s.repondreChangement('marie', cid, true);
+    // Il manque l'accord de l'initiateur.
+    assert.equal(b.tours.lignes.find((x) => x.numero === 2)!.beneficiaireId, idDe('Paul Kasongo'));
+    await s.repondreChangement('orga', cid, true);
+    assert.equal(b.tours.lignes.find((x) => x.numero === 2)!.beneficiaireId, idDe('Marie Kabila'));
+    assert.equal(b.tours.lignes.find((x) => x.numero === 3)!.beneficiaireId, idDe('Paul Kasongo'));
+    assert.equal(b.changements.lignes[0].etat, 'fait');
+    assert.ok(avis.some((a) => a.titre === 'Tours échangés'));
+    // Un refus arrête la demande.
+    const q = (await s.proposerChangement(marie, id, { genre: 'echange', membreId: idDe('Marie Kabila'), avecMembreId: idDe('Paul Kasongo') })).groupe;
+    await s.repondreChangement('paul', q.changements[0].id, false);
+    assert.equal(b.changements.lignes[1].etat, 'refuse');
+  });
+
+  it('cède une place à une autre personne, avec l’accord de l’initiateur', async () => {
+    const id = await complet();
+    await s.demarrer('orga', id);
+    const g = (await s.detail('orga', id)).groupe;
+    const idPaul = g.membres.find((m: { nom: string }) => m.nom === 'Paul Kasongo')!.id;
+    await assert.rejects(s.proposerChangement(orga, id, { genre: 'remplacement', membreId: g.membres.find((m: { nom: string }) => m.nom === 'Jeereq Takango')!.id, telephone: '243812345679' }), /garde sa place/);
+    approuves.add('invite');
+    await s.proposerChangement(paul, id, { genre: 'remplacement', membreId: idPaul, telephone: '243812345679' });
+    const lien = invitations.at(-1)!.texte as string;
+    assert.match(lien, /reprendre sa place/);
+    const code = lien.split('/g/')[1];
+    const vu = await s.invitation(code, 'invite');
+    assert.equal(vu.remplacement?.place, 'Paul');
+    assert.equal(vu.remplacement?.caution, true);
+    // Une invitation ordinaire ne renvoie pas de remplacement : le type le dit.
+    const r = (await s.rejoindreParInvitation(invite, code, '243812345679')) as { remplacement?: { attenteInitiateur: boolean } };
+    assert.equal(r.remplacement?.attenteInitiateur, true);
+    assert.equal(b.membres.lignes.find((m) => m.id === idPaul)!.userId, 'paul');
+    await s.repondreChangement('orga', b.changements.lignes[0].id, true);
+    const place = b.membres.lignes.find((m) => m.id === idPaul)!;
+    assert.equal(place.userId, 'invite');
+    assert.equal((await s.detail('invite', id)).groupe.moi?.id, idPaul);
+    assert.ok(avis.some((a) => a.userId === 'paul' && a.titre === 'Place cédée'));
+    await assert.rejects(s.invitation(code, 'paul'), /plus valable/);
+  });
+
+  it('clôture une raison précise avant sa date pour demander le versement', async () => {
+    const { groupe } = await s.creer(orga, { nom: 'Mariage', montant: 1000, devise: 'USD', rythme: 'hebdomadaire', places: 3, mode: 'objectif', visibilite: 'prive', telephone: '0812345670', raison: 'Mariage', beneficiaire: { nom: 'Jean Mbuyi', telephone: '0812345679' }, dateFin: '2026-12-20' });
+    assert.equal(groupe.cloturable, true);
+    await s.payer('orga', groupe.id, 'cotisation');
+    await valider();
+    await assert.rejects(s.cloturer('paul', groupe.id), /Réservé/);
+    const g = (await s.cloturer('orga', groupe.id)).groupe;
+    assert.equal(g.final?.etat, 'a_verser');
+    assert.equal(g.cloturable, false);
+    assert.equal((await s.demanderVersement('orga', groupe.id)).groupe.final?.versementDemandeLe != null, true);
   });
 });
 

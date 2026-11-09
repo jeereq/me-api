@@ -335,6 +335,7 @@ const reglesGroupe = z.object({
   ordre: z.enum(['tirage', 'arrivee', 'organisateur']).optional(),
   exclusion: z.object({ retards: z.number().int().min(0).max(20) }).partial().optional(),
   entree: z.object({ automatique: z.boolean(), compteApprouve: z.boolean(), retardsMax: z.number().int().min(-1).max(20) }).partial().optional(),
+  echeance: z.object({ jour: z.number().int().min(0).max(28), heure: z.number().int().min(-1).max(23) }).partial().optional(),
 });
 export const tontineCreerSchema = z.object({
   body: z
@@ -376,6 +377,17 @@ export const tontineApprobationSchema = z.object({ params: z.object({ userId: z.
 export const tontinePayerSchema = z.object({ params: idTontine, body: z.object({ genre: z.enum(['caution', 'cotisation']) }) });
 export const tontineMembreIdSchema = z.object({ params: idMembre });
 export const tontineDecisionSchema = z.object({ params: idMembre, body: z.object({ accepte: z.boolean() }) });
+export const tontineAdjointSchema = z.object({ params: idMembre, body: z.object({ adjoint: z.boolean() }) });
+export const tontineChangementSchema = z.object({
+  params: idTontine,
+  body: z.discriminatedUnion('genre', [
+    z.object({ genre: z.literal('remplacement'), membreId: z.string().min(1).max(40), telephone: telephoneTontine }),
+    z.object({ genre: z.literal('echange'), membreId: z.string().min(1).max(40), avecMembreId: z.string().min(1).max(40) }),
+  ]),
+});
+const idChangement = z.object({ changementId: z.string().min(1).max(40) });
+export const tontineChangementIdSchema = z.object({ params: idChangement });
+export const tontineReponseChangementSchema = z.object({ params: idChangement, body: z.object({ accepte: z.boolean() }) });
 export const tontinePreuveTourSchema = z.object({ params: z.object({ tourId: z.string().min(1).max(40) }), body: preuveVersement });
 export const tontinePreuveMembreSchema = z.object({ params: idMembre, body: preuveVersement });
 export const referencePaiementSchema = z.object({ params: z.object({ reference: z.string().regex(/^[A-Z0-9]{6,40}$/, 'Référence invalide') }) });

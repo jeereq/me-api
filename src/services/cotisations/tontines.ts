@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomInt } from 'node:crypto';
 
 import type { Prisma, PrismaClient } from '@prisma/client';
 
-import { CAGNOTTE_MAX, echeancesObjectif, echeancesTontine, montantCotisation, montantTontine, numeroMasque, penaliteDue, prenomDe, reglesDansLeCadre, REGLES_PLATEFORME_DEFAUT, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesPartielles, type ReglesPlateforme, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
+import { apresLimite, CAGNOTTE_MAX, echeancesAuJour, echeancesObjectif, horsLimites, montantCotisation, texteHeure, tropDeGroupes, type NiveauCompte, montantTontine, numeroMasque, penaliteDue, prenomDe, reglesDansLeCadre, REGLES_PLATEFORME_DEFAUT, rappelDuJour, rappelsDe, reglesDe, repartitionCagnotte, texteRegles, type LimitesCotisation, type RappelsGroupe, type ReglesPartielles, type ReglesPlateforme, type RythmeObjectif, type RythmeTontine } from '../../commun/cotisations.js';
 import { enCoffre, horsCoffre } from '../../utils/coffre.js';
 import { HttpError } from '../../utils/http.js';
 import { ErreurFlexpaie, normaliserTelephone, type EtatCommande } from '../abonnements/flexpaie.js';
@@ -30,7 +30,6 @@ const RATTRAPAGE_MS = 7 * 86400000;
 const RATTRAPAGE_PAS_MS = 3600000;
 /** Un numéro ne reçoit pas plus de demandes par jour. */
 const DEMANDES_PAR_JOUR = 5;
-const MAX_GROUPES = 20;
 /** Au-delà, une cotisation à raison précise compte trop de périodes. */
 const MAX_TOURS_OBJECTIF = 366;
 const COMPTE_A_APPROUVER = 'COMPTE_A_APPROUVER';
@@ -59,7 +58,7 @@ export type CreationTontine = {
   regles?: ReglesPartielles;
 };
 export type DepsTontines = {
-  db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement' | 'alerteAnnuaire' | 'signalementTontine' | 'tontineInvitation'>;
+  db: Pick<PrismaClient, 'tontine' | 'tontineMembre' | 'tontineTour' | 'tontineMouvement' | 'alerteAnnuaire' | 'signalementTontine' | 'tontineInvitation' | 'tontineChangement'>;
   flexpaie: {
     demander(p: { telephone: string; reference: string; montant: number; devise: string; retour: string }): Promise<{ commande: string }>;
     verser(p: { telephone: string; reference: string; montant: number; devise: string; retour: string }): Promise<{ commande: string }>;
@@ -76,8 +75,10 @@ export type DepsTontines = {
   /** Comptes approuvés pour l'annuaire. */
   comptesApprouves(ids: string[]): Promise<Set<string>>;
   adresseApp(): string | null;
-  /** Les limites réglées par l'admin. */
+  /** Les anciennes limites réglées par l'admin (montant max par devise, membres) : valeurs par défaut des règles de la plateforme. */
   limites(): Promise<LimitesCotisation>;
+  /** Le niveau d'un compte pour les limites : abonné Pro, approuvé, ou non approuvé. Par défaut : selon l'approbation. */
+  niveau?: (userId: string) => Promise<NiveauCompte>;
   /** Une invitation envoyée par Me, selon les canaux du système. */
   envoyerInvitation(organisateurId: string, c: { telephone: string; titre: string; texte: string; sms?: string }): Promise<{ mail: boolean; sms: boolean }>;
   /** Les règles de la plateforme pour chaque sorte de groupe (admin). Par défaut : REGLES_PLATEFORME_DEFAUT. */
@@ -89,10 +90,13 @@ export type DepsTontines = {
   tirer?: (max: number) => number;
 };
 
-const INCLUS = { organisateur: { select: { nom: true, role: true, photoUrl: true, createdAt: true } }, membres: { orderBy: { createdAt: 'asc' }, include: { user: { select: { photoUrl: true } } } }, tours: { orderBy: { numero: 'asc' } }, invitations: { orderBy: { envoyeLe: 'desc' }, take: 100 } } satisfies Prisma.TontineInclude;
+const INCLUS = { organisateur: { select: { nom: true, role: true, photoUrl: true, createdAt: true } }, membres: { orderBy: { createdAt: 'asc' }, include: { user: { select: { photoUrl: true } } } }, tours: { orderBy: { numero: 'asc' } }, invitations: { orderBy: { envoyeLe: 'desc' }, take: 100 }, changements: { orderBy: { createdAt: 'desc' }, take: 30 } } satisfies Prisma.TontineInclude;
 type TontineComplete = Prisma.TontineGetPayload<{ include: typeof INCLUS }>;
 type Membre = TontineComplete['membres'][number];
 type Mouvement = Prisma.TontineMouvementGetPayload<object>;
+type Changement = Prisma.TontineChangementGetPayload<object>;
+/** Adjoints de l'initiateur, au plus. */
+export const MAX_ADJOINTS = 2;
 
 const reference = () => `TO${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`;
 const estDoublon = (e: unknown) => (e as { code?: string })?.code === 'P2002';
@@ -119,31 +123,58 @@ export function creerTontines(d: DepsTontines) {
   const lienInvitation = (t: Pick<TontineComplete, 'codeInvitation'>) => (t.codeInvitation && d.adresseApp() ? `${d.adresseApp()}/g/${t.codeInvitation}` : null);
   /** Une rotation accueille jusqu'au démarrage, une raison précise jusqu'à sa date de fin. */
   const accueille = (t: TontineComplete) => (estObjectif(t) ? t.etat === 'en_cours' && !tourFinal(t) : t.etat === 'ouvert');
-  const estOrganisateur = (t: TontineComplete, userId: string) => t.organisateurId === userId;
+  const estInitiateur = (t: Pick<TontineComplete, 'organisateurId'>, userId: string) => t.organisateurId === userId;
+  const estAdjoint = (m: { role?: string | null; etat: string }) => m.role === 'adjoint' && m.etat === 'accepte';
+  const adjointsDe = (t: TontineComplete) => t.membres.filter(estAdjoint);
+  /** L'initiateur, ou l'un de ses adjoints : ils ont les mêmes droits sur le groupe. */
+  const estOrganisateur = (t: TontineComplete, userId: string) => estInitiateur(t, userId) || adjointsDe(t).some((m) => m.userId === userId);
   function exigerOrganisateur(t: TontineComplete, userId: string) {
     if (!estOrganisateur(t, userId)) throw new HttpError(403, 'Réservé à l’organisateur du groupe.');
+  }
+  function exigerInitiateur(t: TontineComplete, userId: string) {
+    if (!estInitiateur(t, userId)) throw new HttpError(403, 'Réservé à l’initiateur du groupe.');
   }
   const acceptes = (t: TontineComplete) => t.membres.filter((m) => m.etat === 'accepte');
   const ouvertPour = (t: TontineComplete) => d.paiementOuvert(t.organisateur?.role ?? null);
   const tourActuel = (t: TontineComplete) => t.tours.find((x) => x.numero === t.tourCourant) ?? null;
   const mouvementsDe = (tontineId: string) => d.db.tontineMouvement.findMany({ where: { tontineId } });
   const aCotise = (mvts: Mouvement[], membreId: string, tourId: string) => mvts.some((x) => x.membreId === membreId && x.tourId === tourId && x.statut === 'paye' && (x.genre === 'cotisation' || x.genre === 'caution_utilisee'));
-  const reglesDuGroupe = (t: Pick<TontineComplete, 'regles' | 'visibilite' | 'montant'>) => reglesDe(t.regles, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant });
+  const reglesDuGroupe = (t: Pick<TontineComplete, 'regles' | 'visibilite' | 'montant' | 'rythme' | 'mode'>) => reglesDe(t.regles, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant, rythme: t.rythme, mode: t.mode });
+  /** Jour et heure du groupe, maintenant. */
+  const instantDe = (t: { fuseau: string }) => local(new Date(maintenant()), t.fuseau);
+  /** L'heure limite du jour d'échéance est passée (ou le jour lui-même) ? */
+  const echu = (t: TontineComplete, echeance: string) => {
+    const { date, heure } = instantDe(t);
+    return apresLimite(reglesDuGroupe(t), echeance, date, heure);
+  };
+  const niveauDe = async (userId: string): Promise<NiveauCompte> => (d.niveau ? d.niveau(userId) : (await d.comptesApprouves([userId])).has(userId) ? 'approuve' : 'standard');
+  const groupesEnCours = (userId: string) => d.db.tontineMembre.count({ where: { userId, etat: { in: ['demande', 'accepte'] } } });
+  /** Le plafond de groupes et la cotisation au plus, selon le niveau du compte. */
+  async function exigerNiveau(userId: string, c: { visibilite: 'public' | 'prive'; rythme: RythmeObjectif; devise: string; montant: number }) {
+    const p = await plateforme();
+    const niveau = await niveauDe(userId);
+    const trop = tropDeGroupes(p, niveau, await groupesEnCours(userId));
+    if (trop) throw new HttpError(409, trop);
+    const hors = horsLimites(p, c, niveau);
+    if (hors) throw new HttpError(400, hors);
+  }
   const plateforme = async () => (await d.reglesPlateforme?.()) ?? REGLES_PLATEFORME_DEFAUT;
   /** Les demandes de paiement sont-elles réservées à l'initiateur pour ce groupe ? (règle de la plateforme, lue à chaque fois) */
   const demandesParInitiateur = async (t: Pick<TontineComplete, 'visibilite'>) => (await plateforme())[t.visibilite as 'public' | 'prive'].demandes === 'initiateur';
 
   /** Les retards d'un membre dans ce groupe : payé après l'échéance, couvert par la caution, ou toujours dû après l'échéance. */
   function retardsDe(t: TontineComplete, m: Pick<Membre, 'id' | 'createdAt'>, mvts: Mouvement[]) {
-    const jour = jourDe(t);
+    const { date: jour, heure } = instantDe(t);
+    const regles = reglesDuGroupe(t);
     const entree = local(m.createdAt, t.fuseau).date;
     let n = 0;
     for (const tour of toursCollecte(t)) {
       if (tour.etat === 'a_venir' || (estObjectif(t) && tour.echeance < entree)) continue;
       const p = mvts.find((x) => x.membreId === m.id && x.tourId === tour.id && x.statut === 'paye' && (x.genre === 'cotisation' || x.genre === 'caution_utilisee'));
       if (p) {
-        if (p.genre === 'caution_utilisee' || (p.payeLe && local(p.payeLe, t.fuseau).date > tour.echeance)) n++;
-      } else if (tour.echeance < jour && tour.etat === 'collecte') n++;
+        const quand = p.payeLe ? local(p.payeLe, t.fuseau) : null;
+        if (p.genre === 'caution_utilisee' || (quand && apresLimite(regles, tour.echeance, quand.date, quand.heure))) n++;
+      } else if (tour.etat === 'collecte' && apresLimite(regles, tour.echeance, jour, heure)) n++;
     }
     return n;
   }
@@ -178,7 +209,8 @@ export function creerTontines(d: DepsTontines) {
     if (m.etat !== 'accepte' || t.etat === 'annule' || t.etat === 'termine') return null;
     const regles = reglesDuGroupe(t);
     const cotisation = (tour: { id: string; echeance: string }) => {
-      const penalite = penaliteDue(regles, tour.echeance, jourDe(t));
+      const { date, heure } = instantDe(t);
+      const penalite = penaliteDue(regles, tour.echeance, date, heure);
       return { genre: 'cotisation' as const, montant: t.montant + penalite, penalite, tourId: tour.id as string | null };
     };
     if (estObjectif(t)) {
@@ -217,6 +249,33 @@ export function creerTontines(d: DepsTontines) {
     lien: t.visibilite === 'public' && d.adresseApp() ? `${d.adresseApp()}${cheminGroupe(t)}` : null,
   });
 
+  /** Les changements en attente que cette personne voit : ceux qui la concernent, ou tous pour l'initiateur et ses adjoints. */
+  function changementsVus(t: TontineComplete, userId: string, orga: boolean) {
+    const nomDe = (id: string | null) => {
+      const m = id ? t.membres.find((x) => x.id === id) : null;
+      return m ? contactDe(m).nom : '';
+    };
+    return (t.changements ?? [])
+      .filter((c) => c.etat === 'en_attente')
+      .map((c) => {
+        const r = rolesChangement(t, c, userId);
+        return { c, r };
+      })
+      .filter(({ r }) => orga || r.membre || r.autre)
+      .map(({ c, r }) => ({
+        id: c.id,
+        genre: c.genre as 'remplacement' | 'echange',
+        membre: nomDe(c.membreId),
+        avec: c.genre === 'echange' ? nomDe(c.avecMembreId) : c.nouveauContact ? (horsCoffre<Contact>(c.nouveauContact)?.nom ?? '') : '',
+        numero: c.numero,
+        accords: { membre: c.accordMembre, autre: c.accordAutre, initiateur: c.accordInitiateur },
+        /** Ce que cette personne peut encore accepter. */
+        aDonner: (r.membre && !c.accordMembre) || (r.autre && !c.accordAutre) || (r.initiateur && !c.accordInitiateur),
+        annulable: c.demandeParId === userId || r.membre,
+        creeLe: c.createdAt,
+      }));
+  }
+
   function vue(t: TontineComplete, userId: string, mvts: Mouvement[], cadre: ReglesPlateforme = REGLES_PLATEFORME_DEFAUT) {
     const moi = t.membres.find((m) => m.userId === userId);
     const orga = estOrganisateur(t, userId);
@@ -232,10 +291,16 @@ export function creerTontines(d: DepsTontines) {
       /** Règle de la plateforme : seul l'initiateur lance les demandes de paiement. */
       demandesParInitiateur: cadre[t.visibilite as 'public' | 'prive'].demandes === 'initiateur',
       suisOrganisateur: orga,
+      /** L'initiateur lui-même (les adjoints ont `suisOrganisateur` mais pas ce droit : nommer des adjoints, annuler). */
+      suisInitiateur: estInitiateur(t, userId),
+      adjoints: adjointsDe(t).map((m) => ({ id: m.id, nom: contactDe(m).nom })),
+      changements: changementsVus(t, userId, orga),
+      /** Raison précise : l'initiateur peut clôturer avant la date de fin pour demander le versement. */
+      cloturable: orga && estObjectif(t) && t.etat === 'en_cours' && !tourFinal(t),
       lienInvitation: orga ? lienInvitation(t) : null,
       rappels: rappelsDe(t.rappels),
       regles: reglesDuGroupe(t),
-      texteRegles: texteRegles(reglesDuGroupe(t), t.devise),
+      texteRegles: texteRegles(reglesDuGroupe(t), t.devise, t.rythme),
       /** Les règles se changent avant le démarrage, et tant qu'aucune cotisation n'est payée pour une raison précise. */
       reglesModifiables: orga && (estObjectif(t) ? !mvts.some((x) => x.genre === 'cotisation' && x.statut === 'paye') : t.etat === 'ouvert'),
       invitations: orga ? t.invitations.map((x) => ({ id: x.id, numero: x.numero, mail: x.mail, sms: x.sms, envois: x.envois, envoyeLe: x.envoyeLe, rejointLe: x.rejointLe })) : [],
@@ -259,11 +324,113 @@ export function creerTontines(d: DepsTontines) {
             aCotise: estObjectif(t) ? !toursDus(t, m, mvts).length : tour ? aCotise(mvts, m.id, tour.id) : false,
             enCours: mvts.some((x) => x.membreId === m.id && x.statut === 'en_attente' && ENTREES.includes(x.genre)),
             retards: retardsDe(t, m, mvts),
+            adjoint: estAdjoint(m),
+            initiateur: m.userId === t.organisateurId,
             ...(orga ? { du: aPayer(t, m, mvts)?.genre === 'cotisation' ? (aPayer(t, m, mvts)?.montant ?? null) : null, especes: mvts.filter((x) => x.membreId === m.id && x.mode === 'especes' && x.statut === 'paye').reduce((n, x) => n + x.montant, 0) } : {}),
           }))
         : [],
       demandes: orga ? t.membres.filter((m) => m.etat === 'demande').map((m) => ({ id: m.id, nom: contactDe(m).nom })) : [],
       tours: (orga || estAccepte) && !estObjectif(t) ? t.tours.map((x) => ({ numero: x.numero, beneficiaire: x.beneficiaireId ? (parMembre.get(x.beneficiaireId)?.nom ?? '') : '', pourMoi: x.beneficiaireId === moi?.id, echeance: x.echeance, etat: x.etat, net: x.net, especes: x.especes, versementDemandeLe: x.versementDemandeLe })) : [],
+    };
+  }
+
+  /** Qui est cette personne pour ce changement : le membre qui cède ou propose, l'autre membre d'un échange, un organisateur. */
+  function rolesChangement(t: TontineComplete, c: Pick<Changement, 'membreId' | 'avecMembreId' | 'genre'>, userId: string) {
+    const userDe = (id: string | null) => (id ? (t.membres.find((m) => m.id === id)?.userId ?? null) : null);
+    return { membre: userDe(c.membreId) === userId, autre: c.genre === 'echange' && userDe(c.avecMembreId) === userId, initiateur: estOrganisateur(t, userId) };
+  }
+
+  /** Une place peut changer de main tant que son titulaire n'a pas reçu, sans paiement en cours. */
+  async function exigerPlaceLibre(t: TontineComplete, m: Membre) {
+    if (m.etat !== 'accepte') throw new HttpError(409, 'Ce membre n’est plus dans le groupe.');
+    if (t.etat === 'termine' || t.etat === 'annule' || (estObjectif(t) && tourFinal(t))) throw new HttpError(409, 'Ce groupe est terminé.');
+    if (!estObjectif(t) && t.tours.some((x) => x.beneficiaireId === m.id && (x.etat === 'verse' || x.etat === 'a_verser'))) throw new HttpError(409, 'Ce membre a déjà reçu sa cagnotte : il reste jusqu’au bout.');
+    if ((await mouvementsDe(t.id)).some((x) => x.membreId === m.id && x.statut === 'en_attente')) throw new HttpError(409, 'Un paiement est en cours pour ce membre.');
+    if ((t.changements ?? []).some((c) => c.etat === 'en_attente' && (c.membreId === m.id || c.avecMembreId === m.id))) throw new HttpError(409, 'Un changement est déjà en attente pour ce membre.');
+  }
+
+  /** Tout le monde est d'accord : la place change de main, ou les deux tours sont échangés. */
+  async function appliquerSiPret(changementId: string) {
+    const c = await d.db.tontineChangement.findUnique({ where: { id: changementId } });
+    if (!c || c.etat !== 'en_attente' || !c.accordMembre || !c.accordAutre || !c.accordInitiateur) return;
+    const t = await charger(c.tontineId);
+    const m = t.membres.find((x) => x.id === c.membreId);
+    if (!m || m.etat !== 'accepte') {
+      await d.db.tontineChangement.update({ where: { id: c.id }, data: { etat: 'annule' } });
+      return;
+    }
+    if (c.genre === 'echange') {
+      const a = t.tours.find((x) => x.beneficiaireId === c.membreId);
+      const b = t.tours.find((x) => x.beneficiaireId === c.avecMembreId);
+      const autre = t.membres.find((x) => x.id === c.avecMembreId);
+      if (!a || !b || !autre || a.etat !== 'a_venir' || b.etat !== 'a_venir') {
+        await d.db.tontineChangement.update({ where: { id: c.id }, data: { etat: 'annule' } });
+        return;
+      }
+      const fait = await d.db.tontineChangement.updateMany({ where: { id: c.id, etat: 'en_attente' }, data: { etat: 'fait', faitLe: new Date(maintenant()) } });
+      if (!fait.count) return;
+      await d.db.tontineTour.update({ where: { id: a.id }, data: { beneficiaireId: autre.id } });
+      await d.db.tontineTour.update({ where: { id: b.id }, data: { beneficiaireId: m.id } });
+      await d.db.tontineMembre.update({ where: { id: m.id }, data: { rang: b.numero } });
+      await d.db.tontineMembre.update({ where: { id: autre.id }, data: { rang: a.numero } });
+      await prevenirTous(t, `tontine:echange:${c.id}`, { titre: 'Tours échangés', corps: `« ${t.nom} » : ${prenomDe(contactDe(m).nom)} reçoit au tour ${b.numero}, ${prenomDe(contactDe(autre).nom)} au tour ${a.numero}.` });
+      return;
+    }
+    const nouveau = c.nouveauContact ? horsCoffre<Contact>(c.nouveauContact) : null;
+    if (!c.nouveauUserId || !nouveau) return;
+    if (t.membres.some((x) => x.userId === c.nouveauUserId)) {
+      await d.db.tontineChangement.update({ where: { id: c.id }, data: { etat: 'annule' } });
+      return;
+    }
+    const fait = await d.db.tontineChangement.updateMany({ where: { id: c.id, etat: 'en_attente' }, data: { etat: 'fait', faitLe: new Date(maintenant()) } });
+    if (!fait.count) return;
+    const ancien = { userId: m.userId, ...contactDe(m) };
+    // La place garde tout ce qui y est attaché : cotisations payées, caution, tour de réception.
+    await d.db.tontineMembre.update({ where: { id: m.id }, data: { userId: c.nouveauUserId, contact: enCoffre(nouveau), conditionsVersion: VERSION_CONDITIONS_TONTINE, role: 'membre' } });
+    if (ancien.userId) await d.avertir(ancien.userId, ancien.telephone, { cle: `tontine:cede:${c.id}`, titre: 'Place cédée', corps: `« ${t.nom} » : ta place est reprise par ${prenomDe(nouveau.nom)}. Tu ne dois plus rien au groupe.` }).catch((e) => console.error('Avis de tontine', e));
+    await d.avertir(c.nouveauUserId, nouveau.telephone, { cle: `tontine:reprise:${c.id}`, titre: 'Tu entres dans le groupe', corps: `Tu reprends la place de ${prenomDe(ancien.nom)} dans « ${t.nom} ».` }).catch((e) => console.error('Avis de tontine', e));
+    await prevenirOrganisateur(t, `tontine:remplacement:${c.id}`, { titre: 'Place reprise', corps: `« ${t.nom} » : ${prenomDe(nouveau.nom)} remplace ${prenomDe(ancien.nom)}.` });
+  }
+
+  /** La personne invitée accepte de reprendre la place : elle donne son numéro mobile money, puis le changement se fait si tout le monde est d'accord. */
+  async function reprendrePlace(u: Compte, c: Changement, brut: string) {
+    const t = await charger(c.tontineId);
+    if (c.etat !== 'en_attente') {
+      if (c.nouveauUserId === u.id) return { ...(await relire(t.id, u.id)), remplacement: carteRemplacement(t, c, await mouvementsDe(t.id)) };
+      throw new HttpError(404, 'Cette invitation n’est plus valable.');
+    }
+    const m = t.membres.find((x) => x.id === c.membreId);
+    if (m?.userId === u.id) throw new HttpError(409, 'C’est ta propre place.');
+    if (t.membres.some((x) => x.userId === u.id)) throw new HttpError(409, 'Tu as déjà une place dans ce groupe.');
+    if (c.nouveauUserId && c.nouveauUserId !== u.id) throw new HttpError(409, 'Quelqu’un a déjà accepté cette place.');
+    const telephone = normaliserTelephone(brut);
+    if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+    await d.exigerNumero(telephone);
+    if (t.visibilite === 'public') await exigerApprobation(u.id);
+    await exigerEntree(t, u.id);
+    await exigerNiveau(u.id, { visibilite: t.visibilite as 'public' | 'prive', rythme: t.rythme as RythmeObjectif, devise: t.devise, montant: t.montant });
+    await d.db.tontineChangement.update({ where: { id: c.id }, data: { nouveauUserId: u.id, nouveauContact: enCoffre({ nom: u.nom, telephone }), accordAutre: true } });
+    await appliquerSiPret(c.id);
+    const apres = await d.db.tontineChangement.findUnique({ where: { id: c.id } });
+    if (apres?.etat === 'en_attente') await prevenirOrganisateur(t, `tontine:reprise-acceptee:${c.id}`, { titre: 'Remplacement à valider', corps: `« ${t.nom} » : ${prenomDe(u.nom)} accepte de reprendre la place de ${m ? prenomDe(contactDe(m).nom) : 'ce membre'}.` });
+    const frais = await charger(t.id);
+    return { ...(await relire(t.id, u.id)), remplacement: carteRemplacement(frais, apres ?? c, await mouvementsDe(t.id)) };
+  }
+
+  /** Ce que voit la personne invitée à reprendre une place. */
+  function carteRemplacement(t: TontineComplete, c: Changement, mvts: Mouvement[]) {
+    const m = t.membres.find((x) => x.id === c.membreId);
+    const tour = m ? t.tours.find((x) => x.beneficiaireId === m.id) : undefined;
+    return {
+      changementId: c.id,
+      etat: c.etat,
+      place: m ? prenomDe(contactDe(m).nom) : '',
+      tour: tour ? { numero: tour.numero, echeance: tour.echeance } : null,
+      payees: m ? mvts.filter((x) => x.membreId === m.id && x.genre === 'cotisation' && x.statut === 'paye').length : 0,
+      caution: m ? m.cautionStatut === 'payee' : false,
+      accepte: c.accordAutre,
+      attenteInitiateur: !c.accordInitiateur,
+      attenteMembre: !c.accordMembre,
     };
   }
 
@@ -274,8 +441,13 @@ export function creerTontines(d: DepsTontines) {
 
   const prevenirTous = (t: TontineComplete, cle: string, avis: Omit<AvisGroupe, 'cle'>, sauf?: string) =>
     Promise.all(acceptes(t).filter((m) => m.userId && m.id !== sauf).map((m) => d.avertir(m.userId!, contactDe(m).telephone, { cle: `${cle}:${m.id}`, ...avis }).catch((e) => console.error('Avis de tontine', e))));
+  /** L'initiateur et ses adjoints. */
   const prevenirOrganisateur = (t: TontineComplete, cle: string, avis: Omit<AvisGroupe, 'cle'>, seulementApp = true) =>
-    t.organisateurId ? d.avertir(t.organisateurId, null, { cle, ...avis }, seulementApp).catch((e) => console.error('Avis de tontine', e)) : Promise.resolve();
+    Promise.all(
+      [...new Set([t.organisateurId, ...adjointsDe(t).map((m) => m.userId)].filter((x): x is string => !!x))].map((id) =>
+        d.avertir(id, null, { cle: id === t.organisateurId ? cle : `${cle}:${id}`, ...avis }, seulementApp).catch((e) => console.error('Avis de tontine', e)),
+      ),
+    );
 
   /** Tous ont cotisé : le versement attend la validation de l'admin. */
   async function fermerCollecte(tontineId: string, tourId: string) {
@@ -329,7 +501,7 @@ export function creerTontines(d: DepsTontines) {
   }
 
   /** Raison précise : ouvre les périodes échues puis, après la date de fin, prépare le versement au bénéficiaire. */
-  async function avancerObjectif(id: string) {
+  async function avancerObjectif(id: string, forcer = false) {
     const t = await charger(id);
     if (!estObjectif(t) || t.etat !== 'en_cours' || !t.dateFin) return;
     const jour = jourDe(t);
@@ -337,10 +509,13 @@ export function creerTontines(d: DepsTontines) {
     for (const [i, x] of tours.entries()) {
       if (x.etat === 'a_venir' && i > 0 && tours[i - 1].echeance < jour) await d.db.tontineTour.updateMany({ where: { id: x.id, etat: 'a_venir' }, data: { etat: 'collecte' } });
     }
-    if (jour <= t.dateFin || tourFinal(t)) return;
+    if ((jour <= t.dateFin && !forcer) || tourFinal(t)) return;
     const mvts = await mouvementsDe(id);
     // On attend la réponse des demandes en cours : elles comptent dans la cagnotte.
-    if (mvts.some((x) => x.statut === 'en_attente' && ENTREES.includes(x.genre))) return;
+    if (mvts.some((x) => x.statut === 'en_attente' && ENTREES.includes(x.genre))) {
+      if (forcer) throw new HttpError(409, 'Un paiement est en cours : attends sa réponse avant de clôturer.');
+      return;
+    }
     await d.db.tontineTour.updateMany({ where: { tontineId: id, etat: { in: ['a_venir', 'collecte'] } }, data: { etat: 'clos' } });
     const payes = mvts.filter((x) => x.genre === 'cotisation' && x.statut === 'paye');
     const total = payes.filter((x) => x.mode !== 'especes').reduce((n, x) => n + x.montant, 0);
@@ -702,7 +877,7 @@ export function creerTontines(d: DepsTontines) {
       const liens = await d.db.tontineMembre.findMany({ where: { userId, etat: { in: ['demande', 'accepte'] } }, select: { tontineId: true } });
       const cadre = await plateforme();
       const groupes = await Promise.all(liens.map(async (l) => vue(await charger(l.tontineId), userId, await mouvementsDe(l.tontineId), cadre)));
-      return { groupes: groupes.sort((a, b) => a.nom.localeCompare(b.nom)), versementApi: d.versementApi() };
+      return { groupes: groupes.sort((a, b) => a.nom.localeCompare(b.nom)), versementApi: d.versementApi(), niveau: await niveauDe(userId) };
     },
 
     /** Ouvrir un groupe revérifie mes paiements en attente : c'est ce que l'app interroge pendant la validation. */
@@ -716,11 +891,10 @@ export function creerTontines(d: DepsTontines) {
     },
 
     async creer(u: Compte, c: CreationTontine) {
-      if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
-      const limites = await d.limites();
-      const montantMax = limites.montantMax[c.devise as 'USD' | 'CDF'];
-      if (c.montant > montantMax) throw new HttpError(400, `La cotisation ne peut pas dépasser ${montantCotisation(montantMax, c.devise)}.`);
-      if (c.places > limites.membresMax) throw new HttpError(400, `Un groupe ne peut pas dépasser ${limites.membresMax} membres.`);
+      // Les limites de la plateforme pour cette sorte de groupe, ce rythme, cette devise, puis celles du niveau du compte.
+      const hors = horsLimites(await plateforme(), { ...c, jour: local(new Date(maintenant()), u.fuseau).date });
+      if (hors) throw new HttpError(400, hors);
+      await exigerNiveau(u.id, c);
       const publique = c.visibilite === 'public';
       if (publique) await exigerApprobation(u.id);
       // Dans l'annuaire, le numéro est celui confirmé par SMS ; sur invitation, l'initiateur répond de ses membres.
@@ -750,7 +924,7 @@ export function creerTontines(d: DepsTontines) {
           raison: objectif ? (c.raison ?? null) : null, dateFin: objectif ? c.dateFin : null, ...(beneficiaire ? { beneficiaire: enCoffre(beneficiaire) } : {}),
           etat: objectif ? 'en_cours' : 'ouvert', tourCourant: objectif ? 1 : 0,
           rappels: rappelsDe(c.rappels),
-          regles: reglesDansLeCadre(reglesDe(c.regles, { visibilite: c.visibilite, montant: c.montant }), cadre, c.montant),
+          regles: reglesDansLeCadre(reglesDe(c.regles, { visibilite: c.visibilite, montant: c.montant, rythme: c.rythme, mode: c.mode }), cadre, c.montant),
         },
       });
       await d.db.tontineMembre.create({ data: { tontineId: t.id, userId: u.id, etat: 'accepte', cautionStatut: cautionRequise ? 'due' : 'dispense', contact: enCoffre({ nom: u.nom, telephone }), conditionsVersion: VERSION_CONDITIONS_TONTINE } });
@@ -761,6 +935,12 @@ export function creerTontines(d: DepsTontines) {
 
     /** Ce qu'une personne invitée voit avant de rejoindre, même sans compte. */
     async invitation(code: string, userId?: string) {
+      const reprise = await d.db.tontineChangement.findUnique({ where: { code } });
+      if (reprise) {
+        const t = await charger(reprise.tontineId);
+        if (reprise.etat !== 'en_attente' && reprise.nouveauUserId !== userId) throw new HttpError(404, 'Cette invitation n’est plus valable.');
+        return { groupe: carte(t, userId ?? ''), remplacement: carteRemplacement(t, reprise, await mouvementsDe(t.id)) };
+      }
       const t = await d.db.tontine.findUnique({ where: { codeInvitation: code }, include: INCLUS });
       if (!t || !accueille(t)) throw new HttpError(404, 'Cette invitation n’est plus valable.');
       return { groupe: carte(t, userId ?? '') };
@@ -768,6 +948,8 @@ export function creerTontines(d: DepsTontines) {
 
     /** Le lien vient de l'initiateur, responsable de son groupe : pas d'approbation de Me, et entrée directe. */
     async rejoindreParInvitation(u: Compte, code: string, brut: string) {
+      const reprise = await d.db.tontineChangement.findUnique({ where: { code } });
+      if (reprise) return reprendrePlace(u, reprise, brut);
       const t = await d.db.tontine.findUnique({ where: { codeInvitation: code }, include: INCLUS });
       if (!t || !accueille(t)) throw new HttpError(404, 'Cette invitation n’est plus valable.');
       if (acceptes(t).length >= t.places) throw new HttpError(409, 'Ce groupe est complet.');
@@ -775,7 +957,7 @@ export function creerTontines(d: DepsTontines) {
       if (deja?.etat === 'accepte') return relire(t.id, u.id);
       if (deja?.etat === 'refuse') throw new HttpError(409, 'L’initiateur t’a retiré de ce groupe.');
       if (deja?.cautionStatut === 'a_rendre') throw new HttpError(409, 'Ta caution est en cours de remboursement.');
-      if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
+      await exigerNiveau(u.id, { visibilite: t.visibilite as 'public' | 'prive', rythme: t.rythme as RythmeObjectif, devise: t.devise, montant: t.montant });
       if (deja?.etat === 'exclu') throw new HttpError(409, 'Tu as été exclu de ce groupe.');
       const telephone = normaliserTelephone(brut);
       if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
@@ -825,7 +1007,7 @@ export function creerTontines(d: DepsTontines) {
       if (deja?.etat === 'refuse') throw new HttpError(409, 'L’organisateur a refusé ta demande.');
       if (deja?.etat === 'exclu') throw new HttpError(409, 'Tu as été exclu de ce groupe.');
       if (deja?.cautionStatut === 'a_rendre') throw new HttpError(409, 'Ta caution est en cours de remboursement.');
-      if ((await d.db.tontineMembre.count({ where: { userId: u.id, etat: { in: ['demande', 'accepte'] } } })) >= MAX_GROUPES) throw new HttpError(409, `${MAX_GROUPES} groupes en cours au maximum.`);
+      await exigerNiveau(u.id, { visibilite: 'public', rythme: t.rythme as RythmeObjectif, devise: t.devise, montant: t.montant });
       const telephone = u.telephone;
       if (!telephone) throw new HttpError(403, 'Confirme ton numéro par SMS d’abord.', COMPTE_A_APPROUVER);
       await d.exigerNumero(telephone);
@@ -856,7 +1038,7 @@ export function creerTontines(d: DepsTontines) {
       const moi = t.membres.find((m) => m.userId === userId);
       if (!moi || !['demande', 'accepte'].includes(moi.etat)) throw new HttpError(404, 'Tu n’es pas dans ce groupe.');
       if (!accueille(t)) throw new HttpError(409, 'Le groupe a démarré : tu ne peux plus le quitter.');
-      if (estOrganisateur(t, userId)) throw new HttpError(409, 'Annule le groupe plutôt que de le quitter.');
+      if (estInitiateur(t, userId)) throw new HttpError(409, 'Annule le groupe plutôt que de le quitter.');
       if ((await mouvementsDe(id)).some((x) => x.membreId === moi.id && x.statut === 'en_attente')) throw new HttpError(409, 'Un paiement est en cours.');
       await d.db.tontineMembre.update({ where: { id: moi.id }, data: { etat: 'parti', cautionStatut: moi.cautionStatut === 'payee' ? 'a_rendre' : moi.cautionStatut } });
       return relire(id, userId);
@@ -864,7 +1046,7 @@ export function creerTontines(d: DepsTontines) {
 
     async annuler(userId: string, id: string) {
       const t = await charger(id);
-      exigerOrganisateur(t, userId);
+      exigerInitiateur(t, userId);
       if (estObjectif(t) ? t.etat !== 'en_cours' || tourFinal(t) : t.etat !== 'ouvert') throw new HttpError(409, 'Le groupe a démarré : il ne peut plus être annulé.');
       if (estObjectif(t) && (await mouvementsDe(id)).some((x) => x.genre === 'cotisation' && ['paye', 'en_attente'].includes(x.statut))) throw new HttpError(409, 'Des paiements existent : la cotisation va jusqu’à sa date de fin.');
       await d.db.tontine.update({ where: { id }, data: { etat: 'annule' } });
@@ -899,7 +1081,7 @@ export function creerTontines(d: DepsTontines) {
         }
       // « arrivee » : les membres sont déjà dans l'ordre où ils sont entrés.
       const part = repartitionCagnotte(t.montant, t.places, t.commissionBps);
-      const dates = echeancesTontine(t.rythme as RythmeTontine, jourDe(t), t.places);
+      const dates = echeancesAuJour(t.rythme as RythmeTontine, jourDe(t), t.places, reglesDuGroupe(t).echeance.jour);
       for (const [i, m] of ordre.entries()) {
         await d.db.tontineMembre.update({ where: { id: m.id }, data: { rang: i + 1 } });
         await d.db.tontineTour.create({ data: { tontineId: id, numero: i + 1, beneficiaireId: m.id, echeance: dates[i], etat: i === 0 ? 'collecte' : 'a_venir', ...part } });
@@ -1000,6 +1182,7 @@ export function creerTontines(d: DepsTontines) {
       const t = await charger(m.tontineId);
       exigerOrganisateur(t, userId);
       if (m.userId === userId) throw new HttpError(409, 'Annule le groupe plutôt que de te retirer.');
+      if (m.userId === t.organisateurId) throw new HttpError(403, 'L’initiateur reste dans le groupe.');
       if (!accueille(t)) throw new HttpError(409, 'Le groupe a démarré : ce membre reste.');
       if ((await mouvementsDe(t.id)).some((x) => x.membreId === m.id && x.statut === 'en_attente')) throw new HttpError(409, 'Un paiement est en cours pour ce membre.');
       await d.db.tontineMembre.update({ where: { id: m.id }, data: { etat: 'refuse', cautionStatut: m.cautionStatut === 'payee' ? 'a_rendre' : m.cautionStatut } });
@@ -1047,10 +1230,10 @@ export function creerTontines(d: DepsTontines) {
       const mvts = await mouvementsDe(id);
       const ouvert = estObjectif(t) ? !mvts.some((x) => x.genre === 'cotisation' && x.statut === 'paye') : t.etat === 'ouvert';
       if (!ouvert) throw new HttpError(409, 'Le groupe a démarré : ses règles ne changent plus.');
-      const regles = reglesDansLeCadre(reglesDe(brut, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant }), (await plateforme())[t.visibilite as 'public' | 'prive'], t.montant);
+      const regles = reglesDansLeCadre(reglesDe(brut, { visibilite: t.visibilite as 'public' | 'prive', montant: t.montant, rythme: t.rythme, mode: t.mode }), (await plateforme())[t.visibilite as 'public' | 'prive'], t.montant);
       if (JSON.stringify(regles) === JSON.stringify(reglesDuGroupe(t))) return relire(id, userId);
       await d.db.tontine.update({ where: { id }, data: { regles } });
-      await prevenirTous(t, `tontine:regles:${id}:${maintenant()}`, { titre: 'Règles du groupe modifiées', corps: `« ${t.nom} » : ${texteRegles(regles, t.devise).join(' ')}` }, t.membres.find((m) => m.userId === userId)?.id);
+      await prevenirTous(t, `tontine:regles:${id}:${maintenant()}`, { titre: 'Règles du groupe modifiées', corps: `« ${t.nom} » : ${texteRegles(regles, t.devise, t.rythme).join(' ')}` }, t.membres.find((m) => m.userId === userId)?.id);
       return relire(id, userId);
     },
 
@@ -1101,6 +1284,7 @@ export function creerTontines(d: DepsTontines) {
       const t = await charger(m.tontineId);
       exigerOrganisateur(t, userId);
       if (m.userId === userId) throw new HttpError(409, 'Tu ne peux pas t’exclure toi-même.');
+      if (m.userId === t.organisateurId) throw new HttpError(403, 'L’initiateur reste dans le groupe.');
       const seuil = reglesDuGroupe(t).exclusion.retards;
       if (!seuil) throw new HttpError(409, 'Ce groupe n’a pas de règle d’exclusion.');
       const membre = t.membres.find((x) => x.id === membreId)!;
@@ -1132,7 +1316,7 @@ export function creerTontines(d: DepsTontines) {
       exigerOrganisateur(t, userId);
       const tour = tourActuel(t);
       if (estObjectif(t) || t.etat !== 'en_cours' || tour?.etat !== 'collecte') throw new HttpError(409, 'Aucune collecte en cours.');
-      if (jourDe(t) <= tour.echeance) throw new HttpError(409, 'L’échéance n’est pas encore passée.');
+      if (!echu(t, tour.echeance)) throw new HttpError(409, 'L’échéance n’est pas encore passée.');
       const mvts = await mouvementsDe(t.id);
       if (aCotise(mvts, m.id, tour.id)) throw new HttpError(409, 'Ce membre a déjà cotisé.');
       if (mvts.some((x) => x.membreId === m.id && x.statut === 'en_attente' && ENTREES.includes(x.genre))) throw new HttpError(409, 'Un paiement est en cours pour ce membre.');
@@ -1145,6 +1329,113 @@ export function creerTontines(d: DepsTontines) {
     },
 
     resumeAdmin,
+
+    /** L'initiateur nomme un adjoint (deux au plus), ou lui retire ce rôle. Un adjoint a ses droits, sauf nommer et annuler. */
+    async adjoint(userId: string, membreId: string, oui: boolean) {
+      const m = await d.db.tontineMembre.findUnique({ where: { id: membreId } });
+      if (!m) throw new HttpError(404, 'Membre introuvable.');
+      const t = await charger(m.tontineId);
+      exigerInitiateur(t, userId);
+      if (m.userId === userId) throw new HttpError(409, 'Tu es déjà l’initiateur.');
+      if (m.etat !== 'accepte') throw new HttpError(409, 'Ce membre n’est plus dans le groupe.');
+      if (oui && !estAdjoint(m) && adjointsDe(t).length >= MAX_ADJOINTS) throw new HttpError(409, `${MAX_ADJOINTS} adjoints au plus.`);
+      await d.db.tontineMembre.update({ where: { id: m.id }, data: { role: oui ? 'adjoint' : 'membre' } });
+      if (m.userId) await d.avertir(m.userId, null, oui ? { cle: `tontine:adjoint:${m.id}:${maintenant()}`, titre: 'Tu es adjoint', corps: `« ${t.nom} » : ${prenomDe(t.organisateur?.nom ?? '') || 'L’initiateur'} te confie la gestion du groupe avec lui.` } : { cle: `tontine:plus-adjoint:${m.id}:${maintenant()}`, titre: 'Tu n’es plus adjoint', corps: `« ${t.nom} » : tu restes membre du groupe.` }, true).catch((e) => console.error('Avis de tontine', e));
+      return relire(t.id, userId);
+    },
+
+    /**
+     * Un membre cède sa place (remplacement) ou propose d'échanger son tour (échange). L'initiateur ou un adjoint peut le
+     * proposer pour lui. Rien ne se fait sans l'accord du membre, de l'autre personne et d'un organisateur.
+     */
+    async proposerChangement(u: Compte, id: string, p: { genre: 'remplacement'; membreId: string; telephone: string } | { genre: 'echange'; membreId: string; avecMembreId: string }) {
+      const t = await charger(id);
+      const m = t.membres.find((x) => x.id === p.membreId);
+      if (!m) throw new HttpError(404, 'Membre introuvable.');
+      const orga = estOrganisateur(t, u.id);
+      if (m.userId !== u.id && !orga) throw new HttpError(403, 'Tu ne peux proposer un changement que pour ta place.');
+      if (p.genre === 'remplacement' && m.userId === t.organisateurId) throw new HttpError(409, 'L’initiateur garde sa place : nomme plutôt un adjoint.');
+      await exigerPlaceLibre(t, m);
+      const base = { tontineId: t.id, membreId: m.id, demandeParId: u.id, accordMembre: m.userId === u.id, accordInitiateur: orga };
+      if (p.genre === 'echange') {
+        if (estObjectif(t) || t.etat !== 'en_cours') throw new HttpError(409, 'Les tours s’échangent dans une rotation démarrée. Avant le démarrage, l’initiateur choisit l’ordre.');
+        const autre = t.membres.find((x) => x.id === p.avecMembreId);
+        if (!autre || autre.id === m.id) throw new HttpError(400, 'Choisis un autre membre.');
+        await exigerPlaceLibre(t, autre);
+        const a = t.tours.find((x) => x.beneficiaireId === m.id);
+        const b = t.tours.find((x) => x.beneficiaireId === autre.id);
+        if (a?.etat !== 'a_venir' || b?.etat !== 'a_venir') throw new HttpError(409, 'Seuls les tours à venir s’échangent.');
+        const c = await d.db.tontineChangement.create({ data: { ...base, genre: 'echange', avecMembreId: autre.id, accordAutre: autre.userId === u.id } });
+        if (autre.userId && autre.userId !== u.id) await d.avertir(autre.userId, null, { cle: `tontine:echange-demande:${c.id}`, titre: 'Échange de tour proposé', corps: `« ${t.nom} » : ${prenomDe(contactDe(m).nom)} propose de recevoir au tour ${b.numero} et toi au tour ${a.numero}. Réponds dans Me.` }, true).catch((e) => console.error('Avis de tontine', e));
+        if (m.userId && m.userId !== u.id) {
+          await d.avertir(m.userId, null, { cle: `tontine:echange-propose:${c.id}`, titre: 'Échange de tour proposé', corps: `« ${t.nom} » : recevoir au tour ${b.numero} au lieu du tour ${a.numero}. Réponds dans Me.` }, true).catch((e) => console.error('Avis de tontine', e));
+        }
+        if (!orga) await prevenirOrganisateur(t, `tontine:echange-orga:${c.id}`, { titre: 'Échange de tour à valider', corps: `« ${t.nom} » : ${prenomDe(contactDe(m).nom)} et ${prenomDe(contactDe(autre).nom)} veulent échanger les tours ${a.numero} et ${b.numero}.` });
+        await appliquerSiPret(c.id);
+        return relire(t.id, u.id);
+      }
+      const lien = d.adresseApp();
+      if (!lien) throw new HttpError(503, 'L’adresse de l’app n’est pas configurée.');
+      const telephone = normaliserTelephone(p.telephone);
+      if (!telephone) throw new HttpError(400, 'Numéro invalide. Vérifie l’indicatif et le numéro.');
+      await d.exigerNumero(telephone);
+      if (telephone === contactDe(m).telephone) throw new HttpError(400, 'C’est le numéro de ce membre.');
+      const code = randomBytes(9).toString('base64url');
+      const c = await d.db.tontineChangement.create({ data: { ...base, genre: 'remplacement', code, numero: numeroMasque(telephone) } });
+      const qui = prenomDe(contactDe(m).nom);
+      const tour = t.tours.find((x) => x.beneficiaireId === m.id);
+      const montant = montantTontine(t.montant, t.devise, t.rythme as RythmeObjectif);
+      const url = `${lien}/g/${code}`;
+      const texte = `${qui} te propose de reprendre sa place dans la cotisation « ${t.nom} » : ${montant}${tour && !estObjectif(t) ? `, tour ${tour.numero} sur ${t.places}` : ''}. Voir et accepter : ${url}`;
+      const envoi = await d.envoyerInvitation(u.id, { telephone, titre: `Reprendre une place dans « ${t.nom} »`, texte, sms: tientEnUnSms(texte) ? texte : `${qui} te cède sa place dans « ${t.nom.slice(0, 24)} » : ${url}` });
+      if (!envoi.mail && !envoi.sms) {
+        await d.db.tontineChangement.update({ where: { id: c.id }, data: { etat: 'annule' } });
+        throw new HttpError(503, 'Aucun envoi possible : vérifie la configuration ou la limite du jour.');
+      }
+      if (m.userId && m.userId !== u.id) await d.avertir(m.userId, null, { cle: `tontine:remplacement-propose:${c.id}`, titre: 'Remplacement proposé', corps: `« ${t.nom} » : l’organisateur propose qu’une autre personne reprenne ta place. Réponds dans Me.` }, true).catch((e) => console.error('Avis de tontine', e));
+      if (!orga) await prevenirOrganisateur(t, `tontine:remplacement-orga:${c.id}`, { titre: 'Remplacement à valider', corps: `« ${t.nom} » : ${qui} veut céder sa place au ${numeroMasque(telephone)}.` });
+      return { ...envoi, ...(await relire(t.id, u.id)) };
+    },
+
+    /** Accord ou refus d'une personne concernée par un changement. Un refus l'arrête. */
+    async repondreChangement(userId: string, changementId: string, oui: boolean) {
+      const c = await d.db.tontineChangement.findUnique({ where: { id: changementId } });
+      if (!c) throw new HttpError(404, 'Changement introuvable.');
+      const t = await charger(c.tontineId);
+      if (c.etat !== 'en_attente') return relire(t.id, userId);
+      const r = rolesChangement(t, c, userId);
+      if (!r.membre && !r.autre && !r.initiateur) throw new HttpError(403, 'Ce changement ne te concerne pas.');
+      if (!oui) {
+        await d.db.tontineChangement.update({ where: { id: c.id }, data: { etat: 'refuse' } });
+        const m = t.membres.find((x) => x.id === c.membreId);
+        const avertis = new Set([m?.userId, c.demandeParId, c.nouveauUserId].filter((x): x is string => !!x && x !== userId));
+        for (const id of avertis) await d.avertir(id, null, { cle: `tontine:changement-refuse:${c.id}:${id}`, titre: c.genre === 'echange' ? 'Échange refusé' : 'Remplacement refusé', corps: `« ${t.nom} » : le changement demandé n’aura pas lieu.` }, true).catch((e) => console.error('Avis de tontine', e));
+        return relire(t.id, userId);
+      }
+      await d.db.tontineChangement.update({ where: { id: c.id }, data: { ...(r.membre ? { accordMembre: true } : {}), ...(r.autre ? { accordAutre: true } : {}), ...(r.initiateur ? { accordInitiateur: true } : {}) } });
+      await appliquerSiPret(c.id);
+      return relire(t.id, userId);
+    },
+
+    /** Celui qui a proposé, ou le membre concerné, retire sa demande. */
+    async annulerChangement(userId: string, changementId: string) {
+      const c = await d.db.tontineChangement.findUnique({ where: { id: changementId } });
+      if (!c) throw new HttpError(404, 'Changement introuvable.');
+      const t = await charger(c.tontineId);
+      if (c.demandeParId !== userId && !rolesChangement(t, c, userId).membre) throw new HttpError(403, 'Seul celui qui l’a proposé peut l’annuler.');
+      await d.db.tontineChangement.updateMany({ where: { id: c.id, etat: 'en_attente' }, data: { etat: 'annule' } });
+      return relire(t.id, userId);
+    },
+
+    /** Raison précise : l'initiateur clôture avant la date de fin pour demander le versement de ce qui est réuni. */
+    async cloturer(userId: string, id: string) {
+      const t = await charger(id);
+      exigerOrganisateur(t, userId);
+      if (!estObjectif(t)) throw new HttpError(409, 'Une rotation se termine quand chacun a reçu.');
+      if (t.etat !== 'en_cours' || tourFinal(t)) throw new HttpError(409, 'Cette cotisation est déjà clôturée.');
+      await avancerObjectif(id, true);
+      return relire(id, userId);
+    },
 
     /**
      * Cagnotte complète : l'initiateur demande à l'équipe de Me de verser au bénéficiaire. Le versement reste validé par
@@ -1232,7 +1523,8 @@ export function creerTontines(d: DepsTontines) {
         const retard = moment.startsWith('apres');
         const date = `${tour.echeance.slice(8)}/${tour.echeance.slice(5, 7)}`;
         const mvts = await mouvementsDe(t.id);
-        const penalite = retard ? penaliteDue(reglesDuGroupe(t), tour.echeance, jour) : 0;
+        const penalite = retard ? penaliteDue(reglesDuGroupe(t), tour.echeance, jour, heure) : 0;
+        const aHeure = texteHeure(reglesDuGroupe(t));
         for (const m of acceptes(t)) {
           if (!m.userId || aCotise(mvts, m.id, tour.id) || (estObjectif(t) && !toursDus(t, m, mvts).some((x) => x.id === tour.id))) continue;
           await d
@@ -1241,7 +1533,7 @@ export function creerTontines(d: DepsTontines) {
               contactDe(m).telephone,
               {
                 cle: `tontine:echeance:${tour.id}:${m.id}:${moment}`,
-                titre: retard ? `Cotisation en retard : ${montantCotisation(t.montant + penalite, t.devise)}${penalite ? ' avec la pénalité' : ''}` : moment === 'avant:0' ? `Cotisation à payer aujourd’hui : ${montantCotisation(t.montant, t.devise)}` : `Cotisation de ${montantCotisation(t.montant, t.devise)} à payer avant le ${date}`,
+                titre: retard ? `Cotisation en retard : ${montantCotisation(t.montant + penalite, t.devise)}${penalite ? ' avec la pénalité' : ''}` : moment === 'avant:0' ? `Cotisation à payer aujourd’hui${aHeure ? ` avant ${aHeure.slice(3)}` : ''} : ${montantCotisation(t.montant, t.devise)}` : `Cotisation de ${montantCotisation(t.montant, t.devise)} à payer avant le ${date}${aHeure}`,
                 corps: `Groupe « ${t.nom} »${estObjectif(t) ? '' : `, tour ${tour.numero} sur ${t.places}`}. ${retard ? `L’échéance du ${date} est passée : paie dès que possible.` : 'Paie dans Me, onglet Cotisations.'}`,
               },
               { mail: reglage.mail, sms: reglage.sms },
@@ -1252,7 +1544,7 @@ export function creerTontines(d: DepsTontines) {
         const seuil = reglesDuGroupe(t).exclusion.retards;
         if (seuil)
           for (const m of acceptes(t)) {
-            if (m.userId === t.organisateurId) continue;
+            if (m.userId && estOrganisateur(t, m.userId)) continue;
             const n = retardsDe(t, m, mvts);
             if (n >= seuil) await prevenirOrganisateur(t, `tontine:exclusion:${m.id}:${seuil}`, { titre: `${prenomDe(contactDe(m).nom)} : ${n} retards`, corps: `Dans « ${t.nom} », le seuil de ${seuil} retards est atteint.${estObjectif(t) ? ' Tu peux l’exclure depuis la page du groupe.' : ' Sa caution couvre ses prochaines cotisations en retard.'}` }, false);
           }

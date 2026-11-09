@@ -530,6 +530,7 @@ model Tontine {
 
   @@index([etat, createdAt])
   @@index([organisateurId])
+  changements    TontineChangement[]
 }
 
 model TontineMembre {
@@ -548,6 +549,8 @@ model TontineMembre {
   cautionStatut     String   @default("due")
   /// Version des conditions acceptées en demandant à rejoindre.
   conditionsVersion String
+  /// membre, ou adjoint : nommé par l'initiateur (deux au plus), avec les mêmes droits que lui sauf nommer et annuler.
+  role              String   @default("membre")
   createdAt         DateTime @default(now())
   tours             TontineTour[]
   mouvements        TontineMouvement[]
@@ -631,6 +634,36 @@ model TontineInvitation {
   createdAt  DateTime  @default(now())
 
   @@unique([tontineId, empreinte])
+}
+
+/// Un changement demandé dans un groupe : une place cédée à quelqu'un d'autre, ou deux tours échangés. Il se fait quand
+/// tous les concernés sont d'accord (le membre, l'autre personne, l'initiateur).
+model TontineChangement {
+  id               String    @id @default(cuid())
+  tontineId        String
+  tontine          Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  /// remplacement ou echange
+  genre            String
+  /// La place concernée : celui qui cède sa place, ou qui propose l'échange.
+  membreId         String
+  /// Échange : l'autre membre.
+  avecMembreId     String?
+  /// Remplacement : le lien envoyé à la personne qui reprend la place, et son numéro masqué.
+  code             String?   @unique
+  numero           String?
+  /// Remplacement : le compte et le contact (chiffré) de la personne qui a accepté.
+  nouveauUserId    String?
+  nouveauContact   Json?
+  demandeParId     String?
+  accordMembre     Boolean   @default(false)
+  accordAutre      Boolean   @default(false)
+  accordInitiateur Boolean   @default(false)
+  /// en_attente, fait, refuse ou annule
+  etat             String    @default("en_attente")
+  faitLe           DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([tontineId, etat])
 }
 
 /// Approbation d'un compte pour l'annuaire des cotisations.

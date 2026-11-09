@@ -126,6 +126,21 @@ export const TontineController = {
   demanderPaiement: async (req: Request, res: Response) => {
     res.json(await S.demanderPaiement(req.user!.id, p(req.params.membreId)));
   },
+  adjoint: async (req: Request, res: Response) => {
+    res.json(await S.adjoint(req.user!.id, p(req.params.membreId), req.body.adjoint === true));
+  },
+  proposerChangement: async (req: Request, res: Response) => {
+    res.json(await S.proposerChangement(await compte(req), p(req.params.id), req.body));
+  },
+  repondreChangement: async (req: Request, res: Response) => {
+    res.json(await S.repondreChangement(req.user!.id, p(req.params.changementId), req.body.accepte === true));
+  },
+  annulerChangement: async (req: Request, res: Response) => {
+    res.json(await S.annulerChangement(req.user!.id, p(req.params.changementId)));
+  },
+  cloturer: async (req: Request, res: Response) => {
+    res.json(await S.cloturer(req.user!.id, p(req.params.id)));
+  },
   demanderVersement: async (req: Request, res: Response) => {
     res.json(await S.demanderVersement(req.user!.id, p(req.params.id)));
   },

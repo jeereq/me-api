@@ -101,6 +101,25 @@ export function echeancesTontine(rythme: RythmeTontine, debut: string, tours: nu
   });
 }
 
+/**
+ * Les échéances d'une rotation au jour fixe choisi par l'initiateur : le 5 du mois (1 à 28), ou un jour de la semaine
+ * (1 lundi … 7 dimanche). La première tombe au moins 3 jours après le démarrage. Sans jour fixe : `echeancesTontine`.
+ */
+export function echeancesAuJour(rythme: RythmeTontine, debut: string, tours: number, jourFixe: number) {
+  if (!jourFixe || rythme === 'quotidien') return echeancesTontine(rythme, debut, tours);
+  const premier = enDate(debut).getTime() + 3 * JOUR_MS;
+  if (rythme === 'hebdomadaire') {
+    let d = premier;
+    while (((new Date(d).getUTCDay() + 6) % 7) + 1 !== jourFixe) d += JOUR_MS;
+    return Array.from({ length: tours }, (_, i) => enJour(new Date(d + 7 * i * JOUR_MS)));
+  }
+  const p = new Date(premier);
+  let an = p.getUTCFullYear();
+  let mois = p.getUTCMonth();
+  if (Date.UTC(an, mois, jourFixe) < premier) mois++;
+  return Array.from({ length: tours }, (_, i) => enJour(new Date(Date.UTC(an, mois + i, jourFixe))));
+}
+
 /** Les jours limites d'une cotisation à raison précise : selon le rythme jusqu'à la date de fin, qui reste toujours le dernier. */
 export function echeancesObjectif(rythme: RythmeObjectif, debut: string, fin: string) {
   if (rythme === 'unique') return [fin];
@@ -166,22 +185,30 @@ export type ReglesGroupe = {
   exclusion: { retards: number };
   /** Entrée : acceptée d'office (annuaire), compte approuvé exigé (invitation), retards permis dans les autres groupes (-1 : sans limite). */
   entree: { automatique: boolean; compteApprouve: boolean; retardsMax: number };
+  /** Jour fixe des échéances d'une rotation (0 : selon le démarrage ; 1-28 du mois, ou 1-7 lundi-dimanche) et heure limite (-1 : fin de journée). */
+  echeance: { jour: number; heure: number };
 };
 /** Des règles reçues ou en cours de saisie : chaque partie peut manquer. */
-export type ReglesPartielles = { especes?: boolean; penalite?: Partial<ReglesGroupe['penalite']>; ordre?: OrdreTours; exclusion?: Partial<ReglesGroupe['exclusion']>; entree?: Partial<ReglesGroupe['entree']> };
-export const REGLES_DEFAUT: ReglesGroupe = { especes: false, penalite: { montant: 0, grace: 0 }, ordre: 'tirage', exclusion: { retards: 0 }, entree: { automatique: false, compteApprouve: false, retardsMax: -1 } };
+export type ReglesPartielles = { especes?: boolean; penalite?: Partial<ReglesGroupe['penalite']>; ordre?: OrdreTours; exclusion?: Partial<ReglesGroupe['exclusion']>; entree?: Partial<ReglesGroupe['entree']>; echeance?: Partial<ReglesGroupe['echeance']> };
+export const REGLES_DEFAUT: ReglesGroupe = { especes: false, penalite: { montant: 0, grace: 0 }, ordre: 'tirage', exclusion: { retards: 0 }, entree: { automatique: false, compteApprouve: false, retardsMax: -1 }, echeance: { jour: 0, heure: -1 } };
 export const GRACES = [0, 1, 2, 3, 7];
 export const SEUILS_EXCLUSION = [0, 2, 3, 5];
 export const RETARDS_MAX = [-1, 0, 1, 3];
+/** Heures limites proposées : fin de journée, midi, 15 h, 18 h, 20 h. */
+export const HEURES_LIMITE = [-1, 12, 15, 18, 20];
+export const JOURS_DU_MOIS = [0, 1, 5, 10, 15, 20, 25, 28];
+export const JOURS_SEMAINE = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 const entier = (v: unknown, min: number, max: number, defaut: number) => (typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : defaut);
 
 /**
  * Des règles reçues, ramenées à ce qui est permis : les espèces seulement dans un groupe privé (dans l'annuaire, Me garantit
  * les paiements), l'entrée d'office seulement dans l'annuaire, une pénalité d'au plus une cotisation.
  */
-export function reglesDe(brut: unknown, g: { visibilite: 'public' | 'prive'; montant: number }): ReglesGroupe {
+export function reglesDe(brut: unknown, g: { visibilite: 'public' | 'prive'; montant: number; rythme?: string; mode?: string }): ReglesGroupe {
   const b = (brut ?? {}) as ReglesPartielles;
   const prive = g.visibilite === 'prive';
+  const jour = b.echeance?.jour as number;
+  const jourPermis = g.mode === 'objectif' ? false : g.rythme === 'mensuel' ? JOURS_DU_MOIS.includes(jour) : g.rythme === 'hebdomadaire' ? Number.isInteger(jour) && jour >= 0 && jour <= 7 : false;
   return {
     especes: prive && b.especes === true,
     penalite: { montant: entier(b.penalite?.montant, 0, Math.max(0, g.montant), 0), grace: GRACES.includes(b.penalite?.grace as number) ? (b.penalite!.grace as number) : 0 },
@@ -192,18 +219,31 @@ export function reglesDe(brut: unknown, g: { visibilite: 'public' | 'prive'; mon
       compteApprouve: prive && b.entree?.compteApprouve === true,
       retardsMax: RETARDS_MAX.includes(b.entree?.retardsMax as number) ? (b.entree!.retardsMax as number) : -1,
     },
+    echeance: { jour: jourPermis ? jour : 0, heure: HEURES_LIMITE.includes(b.echeance?.heure as number) ? (b.echeance!.heure as number) : -1 },
   };
 }
 
-/** La pénalité due pour une cotisation payée le `jour` : après l'échéance et les jours de grâce. */
-export function penaliteDue(r: ReglesGroupe, echeance: string, jour: string) {
+/**
+ * Une cotisation est-elle en retard à cet instant (jour et heure du groupe) ? Après le jour limite, ou le jour même
+ * passée l'heure limite. `grace` ajoute des jours de tolérance (pénalités).
+ */
+export function apresLimite(r: Pick<ReglesGroupe, 'echeance'>, echeance: string, jour: string, heure = '00:00', grace = 0) {
+  const limite = grace ? enJour(new Date(enDate(echeance).getTime() + grace * JOUR_MS)) : echeance;
+  if (jour !== limite) return jour > limite;
+  return r.echeance.heure >= 0 && heure >= `${String(r.echeance.heure).padStart(2, '0')}:00`;
+}
+
+/** « avant le 5 décembre à 18 h », « avant 18 h ». */
+export const texteHeure = (r: Pick<ReglesGroupe, 'echeance'>) => (r.echeance.heure >= 0 ? ` à ${r.echeance.heure} h` : '');
+
+/** La pénalité due pour une cotisation payée le `jour` (à l'`heure`) : après l'échéance, l'heure limite et les jours de grâce. */
+export function penaliteDue(r: ReglesGroupe, echeance: string, jour: string, heure = '00:00') {
   if (!r.penalite.montant) return 0;
-  const limite = enJour(new Date(enDate(echeance).getTime() + r.penalite.grace * JOUR_MS));
-  return jour > limite ? r.penalite.montant : 0;
+  return apresLimite(r, echeance, jour, heure, r.penalite.grace) ? r.penalite.montant : 0;
 }
 
 /** Les règles en phrases courtes, pour les membres et l'annuaire. */
-export function texteRegles(r: ReglesGroupe, devise: string): string[] {
+export function texteRegles(r: ReglesGroupe, devise: string, rythme?: string): string[] {
   const l: string[] = [];
   l.push(r.ordre === 'arrivee' ? 'Ordre des tours : ordre d’arrivée dans le groupe.' : r.ordre === 'organisateur' ? 'Ordre des tours : choisi par l’organisateur.' : 'Ordre des tours : tiré au sort au démarrage.');
   if (r.penalite.montant) l.push(`Retard : ${montantCotisation(r.penalite.montant, devise)} de pénalité${r.penalite.grace ? ` après ${r.penalite.grace} jour${r.penalite.grace > 1 ? 's' : ''} de grâce` : ''}, versés au bénéficiaire du tour.`);
@@ -211,6 +251,8 @@ export function texteRegles(r: ReglesGroupe, devise: string): string[] {
   if (r.especes) l.push('Paiement en espèces accepté, noté par l’organisateur.');
   if (r.entree.automatique) l.push('Demandes acceptées d’office.');
   if (r.entree.compteApprouve) l.push('Compte approuvé par Me exigé pour entrer.');
+  if (r.echeance.jour) l.push(`Échéance fixe : ${rythme !== 'hebdomadaire' ? `le ${r.echeance.jour === 1 ? '1er' : r.echeance.jour} du mois` : `chaque ${JOURS_SEMAINE[r.echeance.jour - 1]}`}${texteHeure(r)}.`);
+  else if (r.echeance.heure >= 0) l.push(`Paiement avant ${r.echeance.heure} h le jour de l’échéance.`);
   if (r.entree.retardsMax >= 0) l.push(r.entree.retardsMax ? `Au plus ${r.entree.retardsMax} retard${r.entree.retardsMax > 1 ? 's' : ''} dans d’autres groupes pour entrer.` : 'Aucun retard dans d’autres groupes pour entrer.');
   return l;
 }
@@ -234,19 +276,65 @@ export type ReglesPlateformeType = {
   /** Retards permis dans d'autres groupes pour entrer, imposé à tous les groupes (-1 : pas de limite imposée). */
   retardsMax: number;
 };
-export type ReglesPlateforme = Record<Visibilite, ReglesPlateformeType>;
+export type Devise = 'USD' | 'CDF';
+export const DEVISES: Devise[] = ['USD', 'CDF'];
+export type ParDevise = Record<Devise, number>;
+export const RYTHMES: RythmeObjectif[] = ['quotidien', 'hebdomadaire', 'mensuel', 'unique'];
+/** Limites d'une sorte de groupe : cotisation au moins et au plus (par rythme et par devise), membres, durée d'une raison précise. */
+export type LimitesType = { montantMin: ParDevise; montantMax: Record<RythmeObjectif, ParDevise>; membresMax: number; dureeMaxMois: number };
+/** Le niveau d'un compte : non approuvé, approuvé par Me, ou abonné Pro. */
+export type NiveauCompte = 'standard' | 'approuve' | 'pro';
+export const NIVEAUX: NiveauCompte[] = ['standard', 'approuve', 'pro'];
+/** Par niveau : groupes en cours au plus, et cotisation au plus d'un groupe qu'on crée ou rejoint. */
+export type LimiteNiveau = { groupesMax: number; montantMax: ParDevise };
+export type ReglesPlateforme = Record<Visibilite, ReglesPlateformeType & { limites: LimitesType }> & { niveaux: Record<NiveauCompte, LimiteNiveau> };
+/** Groupes en cours par personne, au plus, quel que soit le niveau. */
+export const GROUPES_PLAFOND = 20;
+export const DUREE_MAX_MOIS = 36;
+const limitesTypeDefaut = (l: LimitesCotisation = LIMITES_DEFAUT): LimitesType => ({
+  montantMin: { USD: 100, CDF: 100000 },
+  montantMax: Object.fromEntries(RYTHMES.map((r) => [r, { ...l.montantMax }])) as LimitesType['montantMax'],
+  membresMax: l.membresMax,
+  dureeMaxMois: 12,
+});
+const niveauxDefaut = (l: LimitesCotisation = LIMITES_DEFAUT): Record<NiveauCompte, LimiteNiveau> => ({
+  standard: { groupesMax: GROUPES_PLAFOND, montantMax: { ...l.montantMax } },
+  approuve: { groupesMax: GROUPES_PLAFOND, montantMax: { ...l.montantMax } },
+  pro: { groupesMax: GROUPES_PLAFOND, montantMax: { ...l.montantMax } },
+});
 export const REGLES_PLATEFORME_DEFAUT: ReglesPlateforme = {
-  prive: { commissionBps: 500, demandes: 'initiateur', cautionObligatoire: false, especes: true, compteApprouve: false, penaliteMaxPct: 100, retardsMax: -1 },
-  public: { commissionBps: 1000, demandes: 'initiateur', cautionObligatoire: true, especes: false, compteApprouve: true, penaliteMaxPct: 100, retardsMax: -1 },
+  prive: { commissionBps: 500, demandes: 'initiateur', cautionObligatoire: false, especes: true, compteApprouve: false, penaliteMaxPct: 100, retardsMax: -1, limites: limitesTypeDefaut() },
+  public: { commissionBps: 1000, demandes: 'initiateur', cautionObligatoire: true, especes: false, compteApprouve: true, penaliteMaxPct: 100, retardsMax: -1, limites: limitesTypeDefaut() },
+  niveaux: niveauxDefaut(),
 };
 /** 20 % au plus : au-delà, la cagnotte ne vaut plus la peine. */
 export const COMMISSION_MAX_BPS = 2000;
 export const PENALITES_MAX_PCT = [0, 10, 25, 50, 100];
 
-/** Les règles enregistrées par l'admin, ramenées à ce qui est permis. Dans l'annuaire : jamais d'espèces, compte toujours approuvé. */
-export function reglesPlateformeDe(brut: unknown): ReglesPlateforme {
-  const b = (brut ?? {}) as Partial<Record<Visibilite, Partial<ReglesPlateformeType>>>;
-  const un = (v: Visibilite): ReglesPlateformeType => {
+const montant = (v: unknown, defaut: number) => entier(v, 1, 100000000, defaut);
+const parDevise = (v: unknown, d: ParDevise): ParDevise => {
+  const x = (v ?? {}) as Partial<ParDevise>;
+  return { USD: montant(x.USD, d.USD), CDF: montant(x.CDF, d.CDF) };
+};
+
+/**
+ * Les règles enregistrées par l'admin, ramenées à ce qui est permis. Dans l'annuaire : jamais d'espèces, compte toujours
+ * approuvé. `anciennes` : les limites d'avant (montant max par devise, membres), qui servent de valeurs par défaut.
+ */
+export function reglesPlateformeDe(brut: unknown, anciennes: LimitesCotisation = LIMITES_DEFAUT): ReglesPlateforme {
+  const b = (brut ?? {}) as Partial<Record<Visibilite, Partial<ReglesPlateformeType> & { limites?: Partial<LimitesType> }> & { niveaux?: Partial<Record<NiveauCompte, Partial<LimiteNiveau>>> }>;
+  const lim = (x: Partial<LimitesType> | undefined): LimitesType => {
+    const d = limitesTypeDefaut(anciennes);
+    const min = parDevise(x?.montantMin, d.montantMin);
+    const max = Object.fromEntries(RYTHMES.map((r) => {
+      const m = parDevise(x?.montantMax?.[r], d.montantMax[r]);
+      return [r, { USD: Math.max(m.USD, min.USD), CDF: Math.max(m.CDF, min.CDF) }];
+    })) as LimitesType['montantMax'];
+    return { montantMin: min, montantMax: max, membresMax: Math.max(2, entier(x?.membresMax, 2, MEMBRES_PLAFOND, d.membresMax)), dureeMaxMois: entier(x?.dureeMaxMois, 1, DUREE_MAX_MOIS, d.dureeMaxMois) };
+  };
+  const nd = niveauxDefaut(anciennes);
+  const niveaux = Object.fromEntries(NIVEAUX.map((n) => [n, { groupesMax: entier(b.niveaux?.[n]?.groupesMax, 1, GROUPES_PLAFOND, nd[n].groupesMax), montantMax: parDevise(b.niveaux?.[n]?.montantMax, nd[n].montantMax) }])) as Record<NiveauCompte, LimiteNiveau>;
+  const un = (v: Visibilite): ReglesPlateformeType & { limites: LimitesType } => {
     const x = b[v] ?? {};
     const d = REGLES_PLATEFORME_DEFAUT[v];
     return {
@@ -257,9 +345,51 @@ export function reglesPlateformeDe(brut: unknown): ReglesPlateforme {
       compteApprouve: v === 'public' || x.compteApprouve === true,
       penaliteMaxPct: PENALITES_MAX_PCT.includes(x.penaliteMaxPct as number) ? (x.penaliteMaxPct as number) : d.penaliteMaxPct,
       retardsMax: RETARDS_MAX.includes(x.retardsMax as number) ? (x.retardsMax as number) : d.retardsMax,
+      limites: lim(x.limites),
     };
   };
-  return { prive: un('prive'), public: un('public') };
+  return { prive: un('prive'), public: un('public'), niveaux };
+}
+
+/** Ce qu'un groupe peut être, pour cette sorte, ce rythme, cette devise et le niveau de la personne. */
+export function bornesGroupe(p: ReglesPlateforme, c: { visibilite: Visibilite; rythme: RythmeObjectif; devise: string }, niveau?: NiveauCompte) {
+  const l = p[c.visibilite].limites;
+  const dv = (c.devise === 'CDF' ? 'CDF' : 'USD') as Devise;
+  const max = Math.min(l.montantMax[c.rythme][dv], niveau ? p.niveaux[niveau].montantMax[dv] : Infinity);
+  return { montantMin: l.montantMin[dv], montantMax: max, membresMax: l.membresMax, dureeMaxMois: l.dureeMaxMois, groupesMax: niveau ? p.niveaux[niveau].groupesMax : GROUPES_PLAFOND };
+}
+
+const NOM_NIVEAU: Record<NiveauCompte, string> = { standard: 'un compte non approuvé', approuve: 'un compte approuvé', pro: 'un compte Pro' };
+export const libelleNiveau = (n: NiveauCompte) => ({ standard: 'Compte non approuvé', approuve: 'Compte approuvé', pro: 'Abonné Pro' })[n];
+export const libelleRythme = (r: RythmeObjectif) => ({ quotidien: 'Par jour', hebdomadaire: 'Par semaine', mensuel: 'Par mois', unique: 'Une fois' })[r];
+
+/**
+ * Ce qui empêche ce groupe d'être créé (ou rejoint, sans `places` ni `dateFin`) : un message clair, ou null.
+ * `jour` : aujourd'hui, pour la durée d'une raison précise.
+ */
+export function horsLimites(p: ReglesPlateforme, c: { visibilite: Visibilite; rythme: RythmeObjectif; devise: string; montant: number; places?: number; dateFin?: string | null; jour?: string }, niveau?: NiveauCompte): string | null {
+  const b = bornesGroupe(p, c);
+  const sorte = c.visibilite === 'public' ? 'dans l’annuaire' : 'sur invitation';
+  if (c.montant < b.montantMin) return `Cotisation d’au moins ${montantCotisation(b.montantMin, c.devise)} pour un groupe ${sorte}.`;
+  if (c.montant > b.montantMax) return `Cotisation d’au plus ${montantCotisation(b.montantMax, c.devise)} ${libelleRythme(c.rythme).toLowerCase()} pour un groupe ${sorte}.`;
+  if (niveau) {
+    const n = p.niveaux[niveau];
+    const dv = (c.devise === 'CDF' ? 'CDF' : 'USD') as Devise;
+    if (c.montant > n.montantMax[dv]) return `Avec ${NOM_NIVEAU[niveau]}, la cotisation va jusqu’à ${montantCotisation(n.montantMax[dv], c.devise)}.${niveau === 'standard' ? ' Fais approuver ton compte pour aller plus haut.' : ''}`;
+  }
+  if (c.places !== undefined && c.places > b.membresMax) return `Un groupe ${sorte} compte au plus ${b.membresMax} membres.`;
+  if (c.dateFin && c.jour) {
+    const d = enDate(c.jour);
+    const fin = enJour(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + b.dureeMaxMois, d.getUTCDate())));
+    if (c.dateFin > fin) return `Une cotisation ${sorte} dure au plus ${b.dureeMaxMois} mois : choisis une date de fin avant le ${fin.split('-').reverse().join('/')}.`;
+  }
+  return null;
+}
+
+/** Le plafond de groupes en cours pour ce niveau : un message, ou null. */
+export function tropDeGroupes(p: ReglesPlateforme, niveau: NiveauCompte, enCours: number): string | null {
+  const max = p.niveaux[niveau].groupesMax;
+  return enCours >= max ? `Avec ${NOM_NIVEAU[niveau]}, ${max} groupe${max > 1 ? 's' : ''} en cours au plus.${niveau === 'standard' ? ' Fais approuver ton compte pour en rejoindre plus.' : ''}` : null;
 }
 
 /** Les règles d'un groupe, dans le cadre fixé par la plateforme pour sa sorte. */
