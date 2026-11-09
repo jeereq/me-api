@@ -299,6 +299,7 @@ export function creerTontines(d: DepsTontines) {
       return;
     }
     if (b?.userId) await d.avertir(b.userId, contactDe(b).telephone, { cle: `tontine:complet:${tourId}`, titre: 'Ta cagnotte est complète', corps: `${montantCotisation(part.net, t.devise)} réunis dans « ${t.nom} », en cours de validation. Tu seras prévenu au versement.${enEspeces}` }).catch((e) => console.error('Avis de tontine', e));
+    await prevenirEquipe(`tontine:a-verser:${tourId}`, `À verser : ${montantCotisation(part.net, t.devise)}`, `« ${t.nom} », tour ${tour.numero} : la cagnotte de ${b ? contactDe(b).nom : 'ce tour'} est complète.`);
   }
 
   /** Argent reçu et vérifié. */
@@ -351,6 +352,7 @@ export function creerTontines(d: DepsTontines) {
     const part = repartitionCagnotte(total, 1, t.commissionBps);
     try {
       await d.db.tontineTour.create({ data: { tontineId: id, numero: 0, echeance: t.dateFin, etat: 'a_verser', ...part, especes } });
+      await prevenirEquipe(`tontine:a-verser:${id}:final`, `À verser : ${montantCotisation(part.net, t.devise)}`, `« ${t.nom} » est clôturée : ${montantCotisation(part.net, t.devise)} pour ${beneficiaireDe(t)?.nom ?? 'le bénéficiaire'}.`);
     } catch (e) {
       if (estDoublon(e)) return;
       throw e;
@@ -427,6 +429,12 @@ export function creerTontines(d: DepsTontines) {
 
   async function exigerApprobation(userId: string) {
     if (!(await d.comptesApprouves([userId])).has(userId)) throw new HttpError(403, 'Fais approuver ton compte pour utiliser l’annuaire.', COMPTE_A_APPROUVER);
+  }
+
+  /** Prévient l'équipe qui verse (admins, commerciaux du module « versements ») ; la notification ouvre l'écran des versements. */
+  async function prevenirEquipe(cle: string, titre: string, corps: string) {
+    for (const admin of (await d.responsablesVersements?.()) ?? [])
+      await d.avertir(admin, null, { cle, titre, corps: `${corps} À verser dans Utilisateurs › Cotisations.`, url: '/utilisateurs?page=cotisations' }, true).catch((e) => console.error('Avis de tontine', e));
   }
 
   /** La demande de paiement qu'un initiateur envoie au numéro d'un membre. */
@@ -1155,7 +1163,7 @@ export function creerTontines(d: DepsTontines) {
       const qui = prenomDe(t.organisateur?.nom ?? '') || 'L’initiateur';
       for (const admin of (await d.responsablesVersements?.()) ?? [])
         await d
-          .avertir(admin, null, { cle: `tontine:versement-demande:${tour.id}:${(tour.versementDemandes ?? 0) + 1}`, titre: `${relance ? 'Relance : versement' : 'Versement'} demandé : ${montantCotisation(tour.net, t.devise)}`, corps: `${qui} demande le versement de « ${t.nom} »${estObjectif(t) ? '' : `, tour ${tour.numero}`} à ${pour}. À valider dans Cotisations › Versements.` }, true)
+          .avertir(admin, null, { cle: `tontine:versement-demande:${tour.id}:${(tour.versementDemandes ?? 0) + 1}`, titre: `${relance ? 'Relance : versement' : 'Versement'} demandé : ${montantCotisation(tour.net, t.devise)}`, corps: `${qui} demande le versement de « ${t.nom} »${estObjectif(t) ? '' : `, tour ${tour.numero}`} à ${pour}. À verser dans Utilisateurs › Cotisations.`, url: '/utilisateurs?page=cotisations' }, true)
           .catch((e) => console.error('Avis de tontine', e));
       if (b?.userId && b.userId !== userId) await d.avertir(b.userId, null, { cle: `tontine:versement-demande-b:${tour.id}`, titre: 'Ton versement est demandé', corps: `${qui} a demandé à Me de te verser ${montantCotisation(tour.net, t.devise)} de « ${t.nom} ».` }, true).catch((e) => console.error('Avis de tontine', e));
       return relire(id, userId);

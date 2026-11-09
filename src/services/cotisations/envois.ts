@@ -7,7 +7,8 @@ import { SmsService } from '../SmsService.js';
 import { composerSms } from '../sms/asmsc.js';
 
 type Prefs = { app?: boolean; email?: boolean; sms?: boolean };
-export type AvisGroupe = { cle: string; titre: string; corps: string };
+/** `url` : l'écran ouvert en touchant la notification (par défaut, les cotisations). */
+export type AvisGroupe = { cle: string; titre: string; corps: string; url?: string };
 
 const lienApp = () => `${adresseApp() ?? ''}/finances?onglet=cotisations`;
 
@@ -34,7 +35,7 @@ export const Envois = {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { nom: true, email: true, emailVerifie: true, espace: { select: { data: true } } } });
     if (!u) return { nouveau: true, mail: false, sms: false };
     const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
-    if (obligatoire || prefs.app !== false) await PushService.envoyer(userId, { titre: avis.titre, corps: avis.corps, mode: 'normal', url: '/finances?onglet=cotisations', tag: avis.cle }).catch((e) => console.error('Push tontine', e));
+    if (obligatoire || prefs.app !== false) await PushService.envoyer(userId, { titre: avis.titre, corps: avis.corps, mode: 'normal', url: avis.url ?? '/finances?onglet=cotisations', tag: avis.cle }).catch((e) => console.error('Push tontine', e));
     if (seulementApp) return { nouveau: true, mail: false, sms: false };
     const canaux = await canauxSysteme();
     let mail = false;
