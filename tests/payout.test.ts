@@ -18,7 +18,7 @@ describe('FlexPaie Payout', () => {
     reponses = [];
     globalThis.fetch = (async (url: string, init: RequestInit) => {
       appels.push({ url, init });
-      const r = (reponses.shift() ?? (() => ({ body: {} })))(url);
+      const r: { status?: number; body: unknown } = (reponses.shift() ?? (() => ({ body: {} })))(url);
       return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
     }) as typeof fetch;
   });
