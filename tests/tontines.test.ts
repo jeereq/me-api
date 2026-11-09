@@ -198,7 +198,7 @@ describe('une tontine de bout en bout', () => {
   let etats: Map<string, { etat: 'paye' | 'echoue' | 'en_attente'; montant?: string; devise?: string }>;
   let ouvert: (role: string | null) => boolean;
   let api: boolean;
-  let avis: { userId: string; telephone: string | null; cle: string; titre: string; seul?: boolean; mode?: unknown }[];
+  let avis: { userId: string; telephone: string | null; cle: string; titre: string; url?: string; seul?: boolean; mode?: unknown }[];
   let vus: Set<string>;
   let instant: number;
   let approuves: Set<string>;
