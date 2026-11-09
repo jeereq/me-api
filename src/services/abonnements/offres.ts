@@ -19,7 +19,7 @@
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-11-06-2';
+export const VERSION_CGV = '2026-11-09';
 
 export type Periode = 'mensuel' | 'annuel';
 export type Formule = 'finances' | 'pro';
@@ -44,9 +44,9 @@ const FORMULE_PRO = {
  * `heures` : heures d'audio transcrites par mois civil, sans report. Les prix doivent rester ceux des CGV.
  */
 export const PALIERS = {
-  1: { nom: 'Pro 1', heures: 3, mensuel: { prix: 199, libelle: '+ 1,99 $ par mois' }, annuel: { prix: 2189, libelle: '+ 21,89 $ par an' } },
-  2: { nom: 'Pro 2', heures: 10, mensuel: { prix: 499, libelle: '+ 4,99 $ par mois' }, annuel: { prix: 5489, libelle: '+ 54,89 $ par an' } },
-  3: { nom: 'Pro 3', heures: 25, mensuel: { prix: 999, libelle: '+ 9,99 $ par mois' }, annuel: { prix: 10989, libelle: '+ 109,89 $ par an' } },
+  1: { nom: 'Pro 1', heures: 5, mensuel: { prix: 199, libelle: '+ 1,99 $ par mois' }, annuel: { prix: 2189, libelle: '+ 21,89 $ par an' } },
+  2: { nom: 'Pro 2', heures: 20, mensuel: { prix: 499, libelle: '+ 4,99 $ par mois' }, annuel: { prix: 5489, libelle: '+ 54,89 $ par an' } },
+  3: { nom: 'Pro 3', heures: 40, mensuel: { prix: 999, libelle: '+ 9,99 $ par mois' }, annuel: { prix: 10989, libelle: '+ 109,89 $ par an' } },
 } as const;
 /** Minutes de réunion offertes pendant l'essai de 14 jours (une fois). */
 export const ESSAI_REUNION_MINUTES = 45;
@@ -275,7 +275,7 @@ export const messageReserve = (f: Fonction) =>
 export type AvisAbonnement = { cle: string; titre: string; corps: string; parEmail: boolean };
 
 const SUITE =
-  "Ensuite, Me reste gratuite pour l'essentiel. Finances (2,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (3, 10 ou 25 h par mois).";
+  "Ensuite, Me reste gratuite pour l'essentiel. Finances (2,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (5, 20 ou 40 h par mois).";
 
 /**
  * Messages liés à l'abonnement, envoyés une seule fois grâce à leur clé :
