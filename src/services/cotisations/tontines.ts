@@ -767,6 +767,23 @@ export function creerTontines(d: DepsTontines) {
     }
   }
 
+  /**
+   * Avant d'envoyer : le compte de versement FlexPaie a-t-il de quoi payer ? S'il est connu et trop bas, on s'arrête là,
+   * sans créer de versement échoué. Si le solde ne se lit pas, FlexPaie tranchera à l'envoi.
+   */
+  async function exigerSolde(montant: number, devise: string) {
+    if (!d.flexpaie.solde) return;
+    let soldes: { devise: string; montant: number }[];
+    try {
+      soldes = await d.flexpaie.solde();
+    } catch {
+      return;
+    }
+    const dispo = soldes.find((x) => x.devise === devise)?.montant ?? 0;
+    if (dispo < montant)
+      throw new HttpError(409, `Solde FlexPaie insuffisant : ${montantCotisation(dispo, devise)} sur le compte de versement, il faut ${montantCotisation(montant, devise)}. Approvisionne le compte Payout FlexPaie en ${devise}, puis réessaie.`);
+  }
+
   /** Une sortie d'argent après validation de l'admin : API FlexPaie si elle est ouverte, sinon preuve d'un versement fait hors de Me. */
   async function sortie(c: { acteur: string; genre: 'versement' | 'caution_rendue'; tontineId: string; membreId: string | null; tourId: string | null; montant: number; devise: string; telephone: string; preuve?: string }) {
     const base = { reference: reference(), tontineId: c.tontineId, membreId: c.membreId, tourId: c.tourId, genre: c.genre, montant: c.montant, devise: c.devise, telephone: numeroMasque(c.telephone), validePar: c.acteur };
@@ -781,6 +798,7 @@ export function creerTontines(d: DepsTontines) {
       }
       return;
     }
+    await exigerSolde(c.montant, c.devise);
     let m: Mouvement;
     try {
       m = await d.db.tontineMouvement.create({ data: { ...base, mode: 'mobile', statut: 'en_attente' } });
@@ -795,7 +813,8 @@ export function creerTontines(d: DepsTontines) {
       await d.db.tontineMouvement.update({ where: { id: m.id }, data: { statut: 'echoue', message: (e as Error).message } });
       if (e instanceof ErreurFlexpaie) {
         console.error('FlexPaie', e.message);
-        throw new HttpError(502, 'Le versement n’a pas pu partir.');
+        // Réservé à l'équipe : le motif (solde, numéro, identifiants) dit quoi corriger. Jamais de secret dedans.
+        throw new HttpError(502, `Le versement n’a pas pu partir. ${e.message}`);
       }
       throw e;
     }

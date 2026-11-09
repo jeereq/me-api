@@ -7,6 +7,7 @@ process.env.ENCRYPTION_KEY ??= 'a'.repeat(64);
 const { apresLimite, echeancesAuJour, echeancesTontine, horsLimites, limitesDe, tropDeGroupes, LIMITES_DEFAUT, rappelDuJour, rappelsDe, RAPPELS_DEFAUT, reglesPlateformeDe, REGLES_PLATEFORME_DEFAUT, repartitionCagnotte } = await import('../src/commun/cotisations.js');
 const { tontineAdhererSchema, tontineCreerSchema, tontineRappelsSchema } = await import('../src/validators/schemas.js');
 const { creerTontines } = await import('../src/services/cotisations/tontines.js');
+const { ErreurFlexpaie } = await import('../src/services/abonnements/flexpaie.js');
 const { FONCTIONS_FINANCES, formuleDe, photoManquante } = await import('../src/services/abonnements/offres.js');
 const await_module = await import('../src/services/cotisations/approbations.js');
 type Deps = import('../src/services/cotisations/tontines.js').DepsTontines;
@@ -205,6 +206,8 @@ describe('une tontine de bout en bout', () => {
   let etats: Map<string, { etat: 'paye' | 'echoue' | 'en_attente'; montant?: string; devise?: string }>;
   let ouvert: (role: string | null) => boolean;
   let api: boolean;
+  let soldes: { devise: string; montant: number }[] | null;
+  let refusVersement: string | null;
   let avis: { userId: string; telephone: string | null; cle: string; titre: string; url?: string; seul?: boolean; mode?: unknown }[];
   let vus: Set<string>;
   let instant: number;
@@ -226,6 +229,8 @@ describe('une tontine de bout en bout', () => {
     etats = new Map();
     ouvert = () => true;
     api = false;
+    soldes = null;
+    refusVersement = null;
     avis = [];
     vus = new Set();
     instant = Date.UTC(2026, 10, 6, 12);
@@ -242,12 +247,17 @@ describe('une tontine de bout en bout', () => {
           return { commande: `C${demandes.length}` };
         },
         verser: async (p) => {
+          if (refusVersement) throw new ErreurFlexpaie(refusVersement);
           versements.push(p);
           return { commande: `V${versements.length}` };
         },
         verifier: async (commande) => {
           const e = etats.get(commande) ?? { etat: 'en_attente' as const };
           return { etat: e.etat, transaction: e.montant ? { amount: e.montant, currency: e.devise ?? 'USD' } : null, message: '' };
+        },
+        solde: async () => {
+          if (!soldes) throw new Error('Solde indisponible');
+          return soldes;
         },
       },
       paiementOuvert: (r) => ouvert(r),
@@ -500,6 +510,24 @@ describe('une tontine de bout en bout', () => {
     await s.retour({ orderNumber: 'V1' });
     assert.equal(t.etat, 'verse');
     assert.equal(b.tours.lignes[1].etat, 'collecte');
+  });
+
+  it('versement par API : solde trop bas arrêté avant l’envoi, refus de FlexPaie expliqué', async () => {
+    api = true;
+    const id = await complet();
+    await s.demarrer('orga', id);
+    await cotiserTous(id);
+    const t = b.tours.lignes[0];
+    soldes = [{ devise: 'USD', montant: 0 }];
+    await assert.rejects(s.verserTour(ADMIN, t.id), /Solde FlexPaie insuffisant : 0 USD .*il faut 28,50 USD/);
+    assert.equal(versements.length, 0);
+    assert.equal(b.mvts.lignes.filter((m) => m.genre === 'versement').length, 0);
+    soldes = [{ devise: 'USD', montant: 100000 }];
+    refusVersement = 'Ce numéro n’est pas pris en charge par FlexPaie.';
+    await assert.rejects(s.verserTour(ADMIN, t.id), /n’a pas pu partir\. Ce numéro n’est pas pris en charge/);
+    refusVersement = null;
+    await s.verserTour(ADMIN, t.id);
+    assert.equal(versements.length, 1);
   });
 
   it('une sortie sans réponse reste en attente, sans jamais expirer', async () => {
