@@ -161,13 +161,13 @@ describe('FlexPaie', () => {
 });
 
 describe('trois formules : Gratuit, Finances, Pro', () => {
-  it('garde le prix le plus haut à 4,99 $ par mois', () => {
-    assert.equal(OFFRES.formules.finances.mensuel.prix, 299);
-    assert.equal(OFFRES.formules.finances.annuel.prix, 3289);
-    assert.equal(OFFRES.formules.pro.mensuel.prix, 499);
-    assert.ok(Math.max(OFFRES.formules.finances.mensuel.prix, OFFRES.formules.pro.mensuel.prix) <= 499);
+  it('garde le prix le plus haut à 6,99 $ par mois', () => {
+    assert.equal(OFFRES.formules.finances.mensuel.prix, 399);
+    assert.equal(OFFRES.formules.finances.annuel.prix, 4389);
+    assert.equal(OFFRES.formules.pro.mensuel.prix, 699);
+    assert.ok(Math.max(OFFRES.formules.finances.mensuel.prix, OFFRES.formules.pro.mensuel.prix) <= 699);
     // Les anciennes versions de l'app lisent toujours `pro`.
-    assert.equal(OFFRES.pro.annuel.prix, 5489);
+    assert.equal(OFFRES.pro.annuel.prix, 7689);
   });
 
   it('ouvre les finances avancées, sans les fonctions Pro, avec Finances', () => {
@@ -200,9 +200,9 @@ describe('trois formules : Gratuit, Finances, Pro', () => {
   });
 
   it('convertit le temps restant au prorata des prix quand on change de formule', () => {
-    // 30 jours de Finances restants valent 30 × 2,99 / 4,99 ≈ 17,98 jours de Pro, puis le mois payé.
+    // 30 jours de Finances restants valent 30 × 3,99 / 6,99 ≈ 17,12 jours de Pro, puis le mois payé.
     const fin = prolonger({ fin: jours(30), formule: 'finances' }, 'mensuel', T0, null, 'pro');
-    const attendu = ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 299) / 499)), 1);
+    const attendu = ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 399) / 699)), 1);
     assert.equal(fin.toISOString(), attendu.toISOString());
     // Même formule : on prolonge simplement à partir de la fin.
     assert.equal(prolonger({ fin: jours(30), formule: 'finances' }, 'mensuel', T0, null, 'finances').toISOString(), ajouterMois(jours(30), 1).toISOString());
@@ -246,14 +246,14 @@ describe('jeton FlexPaie', () => {
 
 describe('paliers de réunions : Pro 0 à Pro 3', () => {
   it('additionne le prix du palier à celui de Pro', () => {
-    assert.equal(prixPeriode('pro', 'mensuel', 0), 499);
-    assert.equal(prixPeriode('pro', 'mensuel', 1), 698);
-    assert.equal(prixPeriode('pro', 'mensuel', 2), 998);
-    assert.equal(prixPeriode('pro', 'mensuel', 3), 1498);
-    assert.equal(prixPeriode('pro', 'annuel', 1), 7678);
-    assert.equal(prixPeriode('pro', 'annuel', 3), 16478);
+    assert.equal(prixPeriode('pro', 'mensuel', 0), 699);
+    assert.equal(prixPeriode('pro', 'mensuel', 1), 998);
+    assert.equal(prixPeriode('pro', 'mensuel', 2), 1398);
+    assert.equal(prixPeriode('pro', 'mensuel', 3), 1998);
+    assert.equal(prixPeriode('pro', 'annuel', 1), 10978);
+    assert.equal(prixPeriode('pro', 'annuel', 3), 21978);
     // Finances n'a pas de palier.
-    assert.equal(prixPeriode('finances', 'mensuel', 3), 299);
+    assert.equal(prixPeriode('finances', 'mensuel', 3), 399);
     assert.deepEqual([1, 2, 3].map((n) => PALIERS[n as 1 | 2 | 3].heures), [5, 20, 40]);
   });
   it('lit tout ce qui n’est pas 1, 2 ou 3 comme Pro 0', () => {
@@ -295,9 +295,9 @@ describe('paliers de réunions : Pro 0 à Pro 3', () => {
     assert.equal(e.reunions?.illimite, true);
   });
   it('convertit le temps restant au prorata quand on change de palier', () => {
-    // 30 jours de Pro 0 (4,99) valent 30 × 4,99 / 6,98 jours de Pro 1.
+    // 30 jours de Pro 0 (6,99) valent 30 × 6,99 / 9,98 jours de Pro 1.
     const fin = prolonger({ fin: jours(30), formule: 'pro', palier: 0 }, 'mensuel', T0, null, 'pro', 1);
-    assert.equal(fin.toISOString(), ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 499) / 698)), 1).toISOString());
+    assert.equal(fin.toISOString(), ajouterMois(new Date(T0.getTime() + Math.round((30 * 86400000 * 699) / 998)), 1).toISOString());
     // Même palier : on prolonge à partir de la fin.
     assert.equal(prolonger({ fin: jours(30), formule: 'pro', palier: 2 }, 'mensuel', T0, null, 'pro', 2).toISOString(), ajouterMois(jours(30), 1).toISOString());
     // Redescendre de palier rend plus de jours.
