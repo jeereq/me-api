@@ -19,7 +19,7 @@
 
 export const ESSAI_JOURS = 14;
 /** Version des conditions générales de vente acceptées au moment du paiement (à changer avec cgv.html). */
-export const VERSION_CGV = '2026-11-09';
+export const VERSION_CGV = '2026-11-10';
 
 export type Periode = 'mensuel' | 'annuel';
 export type Formule = 'finances' | 'pro';
@@ -29,24 +29,24 @@ export type Palier = 0 | 1 | 2 | 3;
 const FORMULE_FINANCES = {
   nom: 'Finances',
   /** Prix TTC en centimes de la devise. */
-  mensuel: { prix: 299, libelle: '2,99 $ par mois', mois: 1 },
-  annuel: { prix: 3289, libelle: '32,89 $ par an', mois: 12, economie: '1 mois offert' },
+  mensuel: { prix: 399, libelle: '3,99 $ par mois', mois: 1 },
+  annuel: { prix: 4389, libelle: '43,89 $ par an', mois: 12, economie: '1 mois offert' },
 } as const;
 const FORMULE_PRO = {
   nom: 'Pro',
-  mensuel: { prix: 499, libelle: '4,99 $ par mois', mois: 1 },
-  annuel: { prix: 5489, libelle: '54,89 $ par an', mois: 12, economie: '1 mois offert' },
+  mensuel: { prix: 699, libelle: '6,99 $ par mois', mois: 1 },
+  annuel: { prix: 7689, libelle: '76,89 $ par an', mois: 12, economie: '1 mois offert' },
 } as const;
 
 /**
  * Les paliers de Pro qui ajoutent l'enregistrement, la transcription et le résumé des réunions, avec l'attribution des tâches
- * aux membres, projets et plannings. Le prix d'un palier s'ajoute à celui de Pro (Pro 1 = 4,99 + 1,99 = 6,98 $ par mois).
+ * aux membres, projets et plannings. Le prix d'un palier s'ajoute à celui de Pro (Pro 1 = 6,99 + 2,99 = 9,98 $ par mois).
  * `heures` : heures d'audio transcrites par mois civil, sans report. Les prix doivent rester ceux des CGV.
  */
 export const PALIERS = {
-  1: { nom: 'Pro 1', heures: 5, mensuel: { prix: 199, libelle: '+ 1,99 $ par mois' }, annuel: { prix: 2189, libelle: '+ 21,89 $ par an' } },
-  2: { nom: 'Pro 2', heures: 20, mensuel: { prix: 499, libelle: '+ 4,99 $ par mois' }, annuel: { prix: 5489, libelle: '+ 54,89 $ par an' } },
-  3: { nom: 'Pro 3', heures: 40, mensuel: { prix: 999, libelle: '+ 9,99 $ par mois' }, annuel: { prix: 10989, libelle: '+ 109,89 $ par an' } },
+  1: { nom: 'Pro 1', heures: 5, mensuel: { prix: 299, libelle: '+ 2,99 $ par mois' }, annuel: { prix: 3289, libelle: '+ 32,89 $ par an' } },
+  2: { nom: 'Pro 2', heures: 20, mensuel: { prix: 699, libelle: '+ 6,99 $ par mois' }, annuel: { prix: 7689, libelle: '+ 76,89 $ par an' } },
+  3: { nom: 'Pro 3', heures: 40, mensuel: { prix: 1299, libelle: '+ 12,99 $ par mois' }, annuel: { prix: 14289, libelle: '+ 142,89 $ par an' } },
 } as const;
 /** Minutes de réunion offertes pendant l'essai de 14 jours (une fois). */
 export const ESSAI_REUNION_MINUTES = 45;
@@ -232,7 +232,7 @@ const prixMois = (f: Formule, palier: Palier = 0) => prixPeriode(f, 'mensuel', p
  * Nouvelle fin de l'abonnement après un paiement. La période part de la plus tardive de : la fin de l'essai en cours
  * (les jours d'essai ne sont pas perdus), maintenant. Le temps payé qui reste après ce départ s'y ajoute ; s'il était
  * payé pour une autre formule, il est converti au prorata des prix mensuels (un mois de Finances restant vaut
- * 2,99 / 4,99 mois de Pro, et inversement) : rien de ce qui est payé n'est perdu.
+ * 3,99 / 6,99 mois de Pro, et inversement) : rien de ce qui est payé n'est perdu.
  */
 export function prolonger(
   actuel: { fin?: Date | null; formule?: Formule | null; palier?: Palier } | Date | null | undefined,
@@ -275,7 +275,7 @@ export const messageReserve = (f: Fonction) =>
 export type AvisAbonnement = { cle: string; titre: string; corps: string; parEmail: boolean };
 
 const SUITE =
-  "Ensuite, Me reste gratuite pour l'essentiel. Finances (2,99 $ par mois) garde les finances avancées ; Pro (4,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (5, 20 ou 40 h par mois).";
+  "Ensuite, Me reste gratuite pour l'essentiel. Finances (3,99 $ par mois) garde les finances avancées ; Pro (6,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (5, 20 ou 40 h par mois).";
 
 /**
  * Messages liés à l'abonnement, envoyés une seule fois grâce à leur clé :
