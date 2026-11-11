@@ -1769,7 +1769,8 @@ export function creerTontines(d: DepsTontines) {
                 titre: retard ? `Cotisation en retard : ${montantCotisation(t.montant + penalite, t.devise)}${penalite ? ' avec la pénalité' : ''}` : moment === 'avant:0' ? `Cotisation à payer aujourd’hui${aHeure ? ` avant ${aHeure.slice(3)}` : ''} : ${montantCotisation(t.montant, t.devise)}` : `Cotisation de ${montantCotisation(t.montant, t.devise)} à payer avant le ${date}${aHeure}`,
                 corps: `Groupe « ${t.nom} »${estObjectif(t) ? '' : `, tour ${tour.numero} sur ${t.places}`}. ${retard ? `L’échéance du ${date} est passée : paie dès que possible.` : 'Paie dans Me, onglet Cotisations.'}`,
               },
-              { mail: reglage.mail, sms: reglage.sms },
+              // Le SMS coûte : seulement le jour de l'échéance et en cas de retard, et jamais pour un rythme quotidien (un SMS par jour).
+              { mail: reglage.mail, sms: reglage.sms && (retard || moment === 'avant:0') && t.rythme !== 'quotidien' },
             )
             .catch((e) => console.error('Avis de tontine', e));
         }

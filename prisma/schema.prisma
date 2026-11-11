@@ -89,11 +89,14 @@ model EnvoiSms {
   messageId String?
   /// soumis, delivre ou echec
   statut    String   @default("soumis")
-  /// compte (rappels et codes) ou cotisation (demandes envoyées à un groupe, avec leur propre limite).
+  /// compte (rappels, rapports, avis : comptés dans le forfait), securite (mot de passe, code d'inscription), code (vérification d'un numéro) ou cotisation (demandes envoyées à un groupe, avec leur propre limite).
   genre     String   @default("compte")
+  /// SMS facturés par cet envoi (un SMS long en compte plusieurs).
+  segments  Int      @default(1)
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+  @@index([userId, genre, createdAt])
 }
 
 /// Audio de réunion transcrit par compte et par période de comptage : le mois civil (« 2026-11 ») ou « essai » (les 45 minutes offertes).

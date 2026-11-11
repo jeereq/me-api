@@ -105,7 +105,7 @@ export const FONCTIONS_PRO = {
   equipes: 'Les équipes et leurs espaces partagés',
   emails: 'Les rappels par email',
   push: 'Les notifications push sur tes appareils',
-  sms: 'Les rappels par SMS',
+  sms: 'Les rappels et le rapport du soir par SMS, dans un forfait mensuel',
 } as const;
 
 /** Ce que les paliers Pro 1 à 3 ajoutent à Pro. */
