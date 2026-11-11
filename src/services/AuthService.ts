@@ -50,7 +50,7 @@ const exigerBonMotDePasse = (mdp: string, c: { email?: string | null; nom?: stri
 function alerterMotDePasse(u: { id: string; email: string | null; emailVerifie: boolean; telephone?: string | null }) {
   const envois: Promise<unknown>[] = [];
   if (u.email && u.emailVerifie && emailsActifs()) envois.push(EmailsCompte.motDePasseChange(u.email));
-  if (u.telephone) envois.push(SmsService.envoyer(u.id, u.telephone, 'Me : ton mot de passe vient de changer. Si ce n\'est pas toi, utilise "Mot de passe oublie" tout de suite.'));
+  if (u.telephone) envois.push(SmsService.envoyerSecurite(u.id, u.telephone, 'Me : ton mot de passe vient de changer. Si ce n\'est pas toi, utilise "Mot de passe oublie" tout de suite.'));
   Promise.allSettled(envois).catch(() => {});
 }
 

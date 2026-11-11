@@ -147,7 +147,7 @@ export function limitesDe(brut: unknown): LimitesCotisation {
 export type RappelsGroupe = { avant: number[]; apres: number[]; mail: boolean; sms: boolean };
 export const JOURS_AVANT = [7, 3, 1, 0];
 export const JOURS_APRES = [1, 3, 7];
-export const RAPPELS_DEFAUT: RappelsGroupe = { avant: [1, 0], apres: [1], mail: true, sms: true };
+export const RAPPELS_DEFAUT: RappelsGroupe = { avant: [1, 0], apres: [1], mail: true, sms: false };
 
 /** Un rappel est dû aujourd'hui ? « avant:1 », « apres:3 », ou null. */
 export function rappelDuJour(r: RappelsGroupe, jour: string, echeance: string) {
@@ -161,8 +161,8 @@ export function rappelsDe(brut: unknown): RappelsGroupe {
   const b = (brut ?? {}) as Partial<RappelsGroupe>;
   const avant = (Array.isArray(b.avant) ? b.avant : []).filter((j) => JOURS_AVANT.includes(j));
   const apres = (Array.isArray(b.apres) ? b.apres : []).filter((j) => JOURS_APRES.includes(j));
-  if (!avant.length) return { ...RAPPELS_DEFAUT, mail: b.mail !== false, sms: b.sms !== false };
-  return { avant, apres, mail: b.mail !== false, sms: b.sms !== false };
+  if (!avant.length) return { ...RAPPELS_DEFAUT, mail: b.mail !== false, sms: b.sms === true };
+  return { avant, apres, mail: b.mail !== false, sms: b.sms === true };
 }
 
 /** « 10 USD par mois », « par jour », « par semaine », « une fois ». */

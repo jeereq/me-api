@@ -717,7 +717,8 @@ describe('une tontine de bout en bout', () => {
     await s.rattraper(instant);
     const envoyes = avis.filter((a) => a.cle.startsWith('tontine:echeance'));
     assert.equal(envoyes.length, 3);
-    assert.deepEqual(envoyes[0].mode, { mail: false, sms: true });
+    // Le groupe est quotidien : un SMS par jour coûterait trop, le SMS est coupé même demandé (mail et notification restent).
+    assert.deepEqual(envoyes[0].mode, { mail: false, sms: false });
     await s.rattraper(instant);
     assert.equal(avis.filter((a) => a.cle.startsWith('tontine:echeance')).length, 3);
   });

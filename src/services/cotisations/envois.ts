@@ -21,7 +21,8 @@ export async function canauxSysteme() {
 export const Envois = {
   /**
    * Prévient un membre une seule fois : la clé empêche tout second envoi du même avis.
-   * Chacun garde la main sur le mail et le SMS dans les réglages de son compte.
+   * Chacun garde la main sur le mail et le SMS dans les réglages de son compte. Le SMS coûte : il n'est envoyé que si le
+   * membre l'a activé (ou si l'organisateur l'a choisi pour un rappel de groupe), et dans le forfait de SMS du compte.
    */
   async avertir(userId: string, telephone: string | null, avis: AvisGroupe, mode: boolean | { mail: boolean; sms: boolean } = false) {
     const seulementApp = mode === true;
@@ -44,7 +45,7 @@ export const Envois = {
       mail = await EmailService.envoyer(u.email, avis.titre, m.texte, m.html);
       if (mail) await prisma.notification.updateMany({ where: { userId, cle: avis.cle }, data: { parEmail: true } });
     }
-    const sms = canaux.sms && (obligatoire ? obligatoire.sms : prefs.sms !== false) && !!telephone ? await SmsService.envoyer(userId, telephone, composerSms([avis.titre, avis.corps], lienApp())) : false;
+    const sms = canaux.sms && (obligatoire ? obligatoire.sms : prefs.sms === true) && !!telephone ? await SmsService.envoyer(userId, telephone, composerSms([avis.titre, avis.corps], lienApp())) : false;
     return { nouveau: true, mail, sms };
   },
 
