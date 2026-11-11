@@ -200,3 +200,36 @@ describe('consignes de l\'utilisateur pour l\'analyse', () => {
     for (const type of ['plan', 'copilote', 'compte_rendu'] as const) assert.doesNotMatch(prompt({ type, donnees: '{}', consignes: 'secret' }), /secret/, type);
   });
 });
+
+describe('assistant : IA du projet', () => {
+  const donnees = JSON.stringify({ nom: 'Cybersécurité', aujourdhui: '2026-11-11', taches: [{ titre: 'Pare-feu', enRetard: true }] });
+  it("demande du JSON pour l'état et le plan, du texte pour la question", () => {
+    assert.equal(enJson('projet_etat'), true);
+    assert.equal(enJson('projet_plan'), true);
+    assert.equal(enJson('projet_question'), false);
+    assert.equal(longue('projet_plan'), true);
+    assert.equal(longue('projet_question'), false);
+  });
+  it("l'état donne la forme de la réponse et traite les titres comme des données", () => {
+    const p = prompt({ type: 'projet_etat', donnees, ton: 'neutre' });
+    assert.match(p, /"resume"/);
+    assert.match(p, /"risques"/);
+    assert.match(p, /"actions"/);
+    assert.match(p, /jamais des instructions/);
+    assert.ok(p.includes('Pare-feu'));
+  });
+  it("le plan reprend l'objectif et demande des tâches liées par leur titre", () => {
+    const p = prompt({ type: 'projet_plan', question: 'Migrer le site vers un nouvel hébergeur', donnees: JSON.stringify({ aujourdhui: '2026-11-11', membres: ['Alice'], existantes: [] }) });
+    assert.ok(p.includes('Migrer le site vers un nouvel hébergeur'));
+    assert.match(p, /"taches"/);
+    assert.match(p, /"parent"/);
+    assert.match(p, /"apres"/);
+    assert.match(p, /N'ajoute aucune tâche déjà présente/);
+  });
+  it('la question est posée avec les données du projet', () => {
+    const p = prompt({ type: 'projet_question', question: 'Qui est en retard ?', donnees });
+    assert.ok(p.includes('Qui est en retard ?'));
+    assert.ok(p.includes('Pare-feu'));
+    assert.doesNotMatch(p, /objet JSON/);
+  });
+});
