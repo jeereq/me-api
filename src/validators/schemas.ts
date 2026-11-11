@@ -73,7 +73,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'etiquettes', 'traduction', 'compte_rendu', 'notes_reunion']),
+    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'etiquettes', 'traduction', 'compte_rendu', 'notes_reunion', 'projet_etat', 'projet_plan', 'projet_question']),
     /** Pour « redaction » : ce qu'il faut faire du nouveau mail. */
     redaction: z.enum(['contexte', 'court', 'formel', 'refaire']).optional(),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
