@@ -20,6 +20,7 @@ const RATTRAPAGE_MIN = 45;
 type Prefs = { app?: boolean; email?: boolean; sms?: boolean; mails?: boolean };
 /** Ce que dit l'avis selon ce qui est confié, au singulier, au pluriel, et où il mène. */
 const PHRASE_AFFECTATION: Record<Affectation['genre'], string> = { tache: "t'a confié une tâche", relance: "t'a confié une relance", rdv: "t'a affecté un rendez-vous" };
+const PHRASE_SUIVI: Record<Affectation['genre'], string> = { tache: "t'a ajouté au suivi d'une tâche", relance: "t'a ajouté au suivi d'une relance", rdv: "t'a ajouté au suivi d'un rendez-vous" };
 const PLURIEL_AFFECTATION: Record<Affectation['genre'], string> = { tache: 'tâches', relance: 'relances', rdv: 'rendez-vous' };
 const URL_AFFECTATION: Record<Affectation['genre'], string> = { tache: '/taches', relance: '/relances', rdv: '/calendrier' };
 
@@ -189,8 +190,8 @@ export const NotificationService = {
       const qui = acteur.nom || "Quelqu'un";
       const avis: Rappel[] = liste.map((a) => ({
         // La clé d'une tâche garde sa forme d'origine : un avis déjà envoyé n'est pas renvoyé après une mise à jour.
-        cle: `affectation|${a.genre === 'tache' ? '' : `${a.genre}|`}${a.id}|${userId}|${revision}`,
-        titre: `${qui} ${PHRASE_AFFECTATION[a.genre]}`,
+        cle: `affectation|${a.role === 'suit' ? 'suivi|' : ''}${a.genre === 'tache' ? '' : `${a.genre}|`}${a.id}|${userId}|${revision}`,
+        titre: `${qui} ${(a.role === 'suit' ? PHRASE_SUIVI : PHRASE_AFFECTATION)[a.genre]}`,
         corps: `« ${a.titre} »${a.echeance ? ` · ${a.genre === 'tache' ? 'pour le' : 'le'} ${dateFr(a.echeance)}${a.heure ? ` à ${heureLisible(a.heure)}` : ''}` : ''} · équipe ${equipe.nom}`,
         mode: 'normal',
         quand,
@@ -202,7 +203,8 @@ export const NotificationService = {
       });
       if (!count) continue;
       const genres = new Set(liste.map((a) => a.genre));
-      const resume = `${qui} t'a confié ${avis.length} ${genres.size === 1 ? PLURIEL_AFFECTATION[liste[0].genre] : 'éléments'}`;
+      const seulementSuivi = liste.every((a) => a.role === 'suit');
+      const resume = `${qui} ${seulementSuivi ? "t'a ajouté au suivi de" : "t'a confié"} ${avis.length} ${genres.size === 1 ? PLURIEL_AFFECTATION[liste[0].genre] : 'éléments'}`;
       if (prefs.app !== false) {
         const m = avis.length === 1 ? { titre: avis[0].titre, corps: avis[0].corps } : { titre: resume, corps: avis.map((r) => r.corps.split(' · ')[0]).join(' · ') };
         await PushService.envoyer(userId, { ...m, mode: 'normal', url: genres.size === 1 ? URL_AFFECTATION[liste[0].genre] : '/', tag: avis[0].cle });
