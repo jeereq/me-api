@@ -20,7 +20,7 @@ async function assertPasDernierAdmin(id: string) {
 const CHAMPS_GESTION = { id: true, email: true, telephone: true, nom: true, photoUrl: true, emailVerifie: true, createdAt: true, approbation: { select: { statut: true } }, ...SELECT_ABONNEMENT } as const;
 const PAR_PAGE = 50;
 const jourFr = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-const nomOffre = (f: Formule, p: Palier) => (f === 'finances' ? 'Finances' : p ? `Pro ${p}` : 'Pro');
+const nomOffre = (f: Formule, p: Palier) => (f === 'finances' ? 'Finances' : f === 'projets' ? 'Projets' : p ? `Pro ${p}` : 'Pro');
 
 export type ActionAdmin = { action: 'offrir'; formule: Formule; palier: number; mois: number; note?: string } | { action: 'essai'; jours: number; note?: string } | { action: 'retirer'; note?: string };
 

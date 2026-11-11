@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
-import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_FINANCES, FONCTIONS_PRO, FONCTIONS_REUNIONS, formulePayee, OFFRES, palierDe, prixPeriode, prolonger, VERSION_CGV, type Formule, type Palier, type Periode } from './abonnements/offres.js';
+import { abonnementsActifs, etatAbonnement, finEssaiEffective, FONCTIONS_FINANCES, FONCTIONS_PRO, FONCTIONS_PROJETS, FONCTIONS_REUNIONS, formulePayee, OFFRES, palierDe, prixPeriode, prolonger, VERSION_CGV, type Formule, type Palier, type Periode } from './abonnements/offres.js';
 import { NumerosAutorises } from './sms/numeros.js';
 import { ErreurFlexpaie, Flexpaie, flexpaieConfigure, normaliserTelephone, type EtatCommande } from './abonnements/flexpaie.js';
 import { NotificationService } from './NotificationService.js';
@@ -21,7 +21,7 @@ const CHAMPS = { id: true, role: true, essaiJusqua: true, abonnementFormule: tru
 const VUE_PAIEMENT = { reference: true, formule: true, palier: true, periode: true, montant: true, devise: true, statut: true, message: true, payeLe: true, createdAt: true } as const;
 type APayer = { id: string; commande: string | null; statut: string; montant: number; devise: string };
 
-/** « Pro », « Pro 2 » ou « Finances ». */
+/** « Pro », « Pro 2 », « Finances » ou « Projets ». */
 const nomFormule = (f: Formule, palier: number) => (f === 'pro' && palier ? `Pro ${palier}` : OFFRES.formules[f].nom);
 
 const adresseServeur = () => (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
@@ -48,7 +48,7 @@ async function conclure(id: string, etat: EtatCommande, message = '') {
     if (!p.userId) return null;
     const u = await tx.user.findUniqueOrThrow({ where: { id: p.userId }, select: { abonnementFinLe: true, abonnementFormule: true, abonnementPalier: true, essaiJusqua: true } });
     const periode = p.periode as Periode;
-    const formule: Formule = p.formule === 'finances' ? 'finances' : 'pro';
+    const formule: Formule = p.formule === 'finances' || p.formule === 'projets' ? p.formule : 'pro';
     const palier: Palier = formule === 'pro' ? palierDe(p.palier) : 0;
     const fin = prolonger({ fin: u.abonnementFinLe, formule: formulePayee(u), palier: formulePayee(u) === 'pro' ? palierDe(u.abonnementPalier) : 0 }, periode, new Date(), finEssaiEffective(u.essaiJusqua), formule, palier);
     await tx.user.update({ where: { id: p.userId }, data: { abonnementFormule: formule, abonnementPalier: palier, abonnementPeriode: periode, abonnementFinLe: fin } });
@@ -98,7 +98,7 @@ export const AbonnementService = {
    * versions de l'app, qui ne connaissent que Pro.
    */
   offres() {
-    return { actif: abonnementsActifs(), paiement: abonnementsActifs() && flexpaieConfigure(), versionCgv: VERSION_CGV, ...OFFRES, fonctions: FONCTIONS_PRO, fonctionsFinances: FONCTIONS_FINANCES, fonctionsReunions: FONCTIONS_REUNIONS };
+    return { actif: abonnementsActifs(), paiement: abonnementsActifs() && flexpaieConfigure(), versionCgv: VERSION_CGV, ...OFFRES, fonctions: FONCTIONS_PRO, fonctionsFinances: FONCTIONS_FINANCES, fonctionsProjets: FONCTIONS_PROJETS, fonctionsReunions: FONCTIONS_REUNIONS };
   },
 
   async etat(userId: string) {
@@ -109,7 +109,7 @@ export const AbonnementService = {
   },
 
   /**
-   * Demande un paiement mobile money pour une période d'une formule (Finances ou Pro). Le compte a accepté les CGV et demandé l'accès immédiat
+   * Demande un paiement mobile money pour une période d'une formule (Finances, Projets ou Pro). Le compte a accepté les CGV et demandé l'accès immédiat
    * (noté avec la version des CGV). Le client valide ensuite sur son téléphone.
    */
   async payer(userId: string, periode: Periode, telephoneBrut: string, formule: Formule = 'pro', palierDemande: number = 0) {

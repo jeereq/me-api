@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { PALIERS, ESSAI_REUNION_MINUTES, moisReunions, palierDe, prixPeriode, aDroit, abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, formuleDe, messageReserve, OFFRES, prolonger } from '../src/services/abonnements/offres.js';
+import { PALIERS, ESSAI_REUNION_MINUTES, moisReunions, palierDe, prixPeriode, aDroit, abonnementsActifs, ajouterMois, avisAbonnement, debutAbonnements, etatAbonnement, finEssai, finEssaiEffective, formuleDe, messageReserve, OFFRES, prolonger, formulePayee } from '../src/services/abonnements/offres.js';
 import { empreintesCompte, normaliserEmail } from '../src/services/abonnements/essai-unique.js';
 import { base64Strict, erreurFlexpaie, jetonFlexpaie, lireEtat, montantTexte, normaliserTelephone, problemeJeton } from '../src/services/abonnements/flexpaie.js';
 
@@ -309,5 +309,56 @@ describe('offres annuelles', () => {
   it('coûtent onze mois : un seul mois offert', () => {
     for (const f of ['finances', 'pro'] as const) assert.equal(OFFRES.formules[f].annuel.prix, OFFRES.formules[f].mensuel.prix * 11);
     for (const p of [1, 2, 3] as const) assert.equal(PALIERS[p].annuel.prix, PALIERS[p].mensuel.prix * 11);
+  });
+});
+
+describe('formule Projets', () => {
+  it('coûte comme Finances, avec un mois offert à l’année', () => {
+    assert.equal(OFFRES.formules.projets.mensuel.prix, 399);
+    assert.equal(OFFRES.formules.projets.annuel.prix, 399 * 11);
+  });
+
+  it('ouvre la gestion de projets avancée, sans les finances ni les fonctions Pro', () => {
+    const e = etatAbonnement({ abonnementFormule: 'projets', abonnementFinLe: jours(20), abonnementPeriode: 'mensuel' }, T0, true);
+    assert.equal(e.offre, 'projets');
+    assert.equal(e.projets, true);
+    assert.equal(e.finances, false);
+    assert.equal(e.pro, false);
+    for (const f of ['projetsVues', 'projetsRapport', 'projetsIA', 'projetsMails'] as const) {
+      assert.equal(aDroit(e, f), true);
+      assert.equal(formuleDe(f), 'projets');
+    }
+    assert.equal(aDroit(e, 'justificatifs'), false);
+    assert.equal(aDroit(e, 'assistant'), false);
+    assert.equal(aDroit(e, 'equipes'), false);
+    assert.match(messageReserve('projetsVues'), /Me Projets \(et Pro\)/);
+  });
+
+  it('laisse Finances sans les projets avancés, et Pro avec tout', () => {
+    const f = etatAbonnement({ abonnementFormule: 'finances', abonnementFinLe: jours(20) }, T0, true);
+    assert.equal(f.projets, false);
+    assert.equal(aDroit(f, 'projetsIA'), false);
+    const pro = etatAbonnement({ abonnementFormule: 'pro', abonnementFinLe: jours(20) }, T0, true);
+    assert.equal(pro.projets, true);
+    assert.equal(aDroit(pro, 'projetsRapport'), true);
+    assert.equal(etatAbonnement({}, T0, true).projets, false);
+    assert.equal(etatAbonnement({}, T0, false).projets, true);
+    assert.equal(etatAbonnement({ essaiJusqua: jours(5) }, T0, true).projets, true);
+  });
+
+  it('prend le relais après l’essai et prévient avant la fin', () => {
+    const e = etatAbonnement({ essaiJusqua: jours(5), abonnementFormule: 'projets', abonnementFinLe: jours(35) }, T0, true);
+    assert.equal(e.offre, 'essai');
+    assert.equal(e.ensuite?.formule, 'projets');
+    assert.match(avisAbonnement({ essaiJusqua: jours(2), abonnementFormule: 'projets', abonnementFinLe: jours(32) }, T0, true)!.corps, /Projets prend le relais/);
+    assert.match(avisAbonnement({ abonnementFormule: 'projets', abonnementFinLe: jours(6) }, T0, true)!.titre, /Projets/);
+  });
+
+  it('convertit le temps restant entre Projets et Pro au prorata', () => {
+    // Même prix que Finances : changer de Projets à Finances ne perd rien.
+    assert.equal(prolonger({ fin: jours(30), formule: 'projets' }, 'mensuel', T0, null, 'finances').toISOString(), ajouterMois(jours(30), 1).toISOString());
+    // Passer de Projets à Pro raccourcit le temps restant (3,99 / 6,99).
+    assert.ok(prolonger({ fin: jours(30), formule: 'projets' }, 'mensuel', T0, null, 'pro') < ajouterMois(jours(30), 1));
+    assert.equal(formulePayee({ abonnementFormule: 'projets' }), 'projets');
   });
 });
