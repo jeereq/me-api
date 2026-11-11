@@ -68,10 +68,10 @@ export const analyseMailsLimiter = rateLimit({
   message: { error: "Beaucoup de mails analysés d'un coup : la suite reprendra dans quelques minutes.", code: 'LIMITE_ANALYSE' },
 });
 
-/** Transcription des réunions : 10 enregistrements / heure par compte (un enregistrement d'une heure coûte plus qu'une question). */
+/** Transcription des réunions : 40 envois / heure par compte. Une longue réunion arrive par morceaux de 20 minutes (12 pour 4 heures), avec ses nouveaux essais. */
 export const transcriptionLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  limit: 10,
+  limit: 40,
   keyGenerator: cleCompte,
   standardHeaders: 'draft-7',
   legacyHeaders: false,

@@ -71,6 +71,8 @@ export const AssistantController = {
     res.json(await AssistantService.modeles());
   },
   demander: async (req: Request, res: Response) => {
+    // Les notes d'une partie de longue réunion sont une étape du serveur, pas une demande de l'app.
+    if (req.body.type === 'notes_reunion') throw new HttpError(400, 'Type de demande inconnu.');
     // L'analyse d'une réunion enregistrée (une transcription dans le compte rendu) fait partie des paliers Pro 1 à 3 ; celle de simples notes reste dans Pro.
     if (req.body.type === 'compte_rendu' && contientTranscription(req.body.donnees)) {
       const etat = etatAbonnement(await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id }, select: SELECT_ABONNEMENT }));
