@@ -104,3 +104,43 @@ test('l’heure précise d’une tâche ou d’une relance suit l’avis, seulem
   assert.equal(r.find((x) => x.id === 'b')?.heure, undefined);
   assert.equal(r.find((x) => x.id === 'r')?.heure, undefined);
 });
+
+test('plusieurs exécutants : chacun est prévenu, une seule fois', () => {
+  const r = nouvellesAffectations(espace(tache('t1')), espace(tache('t1', { affecteA: 'bob', executants: ['bob', 'chloe', 'chloe'] })), 'alice', membres);
+  assert.deepEqual(r.map((x) => x.userId), ['bob', 'chloe']);
+  assert.ok(r.every((x) => x.role === undefined));
+});
+
+test('un exécutant ajouté plus tard : seul le nouveau est prévenu', () => {
+  const avant = espace(tache('t1', { affecteA: 'bob', executants: ['bob'] }));
+  const r = nouvellesAffectations(avant, espace(tache('t1', { affecteA: 'bob', executants: ['bob', 'chloe'] })), 'alice', membres);
+  assert.deepEqual(r.map((x) => x.userId), ['chloe']);
+});
+
+test('les suivis sont prévenus avec le rôle « suit »', () => {
+  const r = nouvellesAffectations(espace(tache('t1')), espace(tache('t1', { suivis: ['bob'] })), 'alice', membres);
+  assert.deepEqual(r, [{ genre: 'tache', id: 't1', titre: 'Tâche t1', echeance: null, userId: 'bob', role: 'suit' }]);
+});
+
+test('quelqu’un à la fois exécutant et suivi n’est prévenu que comme exécutant', () => {
+  const r = nouvellesAffectations(null, espace(tache('t1', { executants: ['bob'], suivis: ['bob', 'chloe'] })), 'alice', membres);
+  assert.deepEqual(r.map((x) => [x.userId, x.role]), [['bob', undefined], ['chloe', 'suit']]);
+});
+
+test('passer de suivi à exécutant prévient de nouveau', () => {
+  const avant = espace(tache('t1', { suivis: ['bob'] }));
+  const r = nouvellesAffectations(avant, espace(tache('t1', { executants: ['bob'] })), 'alice', membres);
+  assert.deepEqual(r.map((x) => [x.userId, x.role]), [['bob', undefined]]);
+});
+
+test('suivi inchangé, acteur ou non-membre : personne n’est prévenu', () => {
+  const avant = espace(tache('t1', { suivis: ['bob'] }));
+  assert.deepEqual(nouvellesAffectations(avant, espace(tache('t1', { suivis: ['bob'], titre: 'x' })), 'alice', membres), []);
+  assert.deepEqual(nouvellesAffectations(null, espace(tache('t1', { executants: ['alice', 'zoe'], suivis: ['zoe'] })), 'alice', membres), []);
+});
+
+test('aDesAffectations repère aussi les exécutants et les suivis', () => {
+  assert.equal(aDesAffectations(espace(tache('t1', { suivis: ['bob'] }))), true);
+  assert.equal(aDesAffectations(espace(tache('t1', { executants: ['bob'] }))), true);
+  assert.equal(aDesAffectations(espace(tache('t1', { executants: [], suivis: [] }))), false);
+});
