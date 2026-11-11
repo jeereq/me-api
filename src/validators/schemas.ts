@@ -73,7 +73,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'etiquettes', 'traduction', 'compte_rendu']),
+    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'etiquettes', 'traduction', 'compte_rendu', 'notes_reunion']),
     /** Pour « redaction » : ce qu'il faut faire du nouveau mail. */
     redaction: z.enum(['contexte', 'court', 'formel', 'refaire']).optional(),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
@@ -87,7 +87,7 @@ export const assistantSchema = z.object({
     nom: z.string().max(100).optional(),
     /** Pour « mails » et « lot » : les consignes de l'utilisateur sur la façon d'analyser (angle, priorités, ce qu'il cherche). */
     consignes: z.string().max(1000).optional(),
-    donnees: z.string().max(200_000).optional(),
+    donnees: z.string().max(400_000).optional(),
     question: z.string().max(2000).optional(),
     /** Pour « conversation » : les derniers échanges, du plus ancien au plus récent. */
     historique: z.array(z.object({ q: z.string().max(2000), r: z.string().max(4000) })).max(6).optional(),

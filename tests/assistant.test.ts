@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { consignesPrompt, corpsRequete, enJson, longue, MAX_CONSIGNES, MAX_DONNEES_COMPTE_RENDU, modelePourDuree, modeleTranscription, prompt, raisonne, tropLongPourModele } from '../src/services/AssistantService.js';
+import { avecNotes, decouperTranscription, SEUIL_NOTES, TAILLE_PARTIE, transcriptionLongue, consignesPrompt, corpsRequete, enJson, longue, MAX_CONSIGNES, MAX_DONNEES_COMPTE_RENDU, modelePourDuree, modeleTranscription, prompt, raisonne, tropLongPourModele } from '../src/services/AssistantService.js';
 
 describe('assistant : requête OpenAI', () => {
   it('reconnaît les modèles qui raisonnent', () => {
@@ -111,6 +111,32 @@ describe('assistant : compte rendu', () => {
     assert.ok(MAX_DONNEES_COMPTE_RENDU > 60_000);
     assert.equal(longue('compte_rendu'), true);
     assert.ok(corpsRequete('gpt-4o-mini', 'x', true, true).max_completion_tokens >= 8000);
+  });
+  it('découpe une longue transcription en parties, sans couper un mot ni rien perdre', () => {
+    const phrase = 'On a parlé du budget et Paul envoie le devis lundi. ';
+    const texte = phrase.repeat(Math.ceil(240_000 / phrase.length));
+    const parties = decouperTranscription(texte);
+    assert.ok(parties.length >= 8 && parties.length <= 10, String(parties.length));
+    for (const p of parties) {
+      assert.ok(p.length <= TAILLE_PARTIE);
+      assert.ok(p.startsWith('On a parlé'), p.slice(0, 20));
+    }
+    assert.equal(parties.join(' ').length, texte.trim().length);
+    assert.deepEqual(decouperTranscription('court'), ['court']);
+    assert.equal(decouperTranscription('a'.repeat(70_000)).length, 3);
+  });
+  it('ne passe par des notes que les très longues réunions', () => {
+    assert.equal(transcriptionLongue(JSON.stringify({ titre: 'x', transcription: 'a'.repeat(SEUIL_NOTES) })), null);
+    assert.equal(transcriptionLongue('pas du json'), null);
+    assert.equal(transcriptionLongue(JSON.stringify({ notes: 'a'.repeat(SEUIL_NOTES + 1) })), null);
+    const r = transcriptionLongue(JSON.stringify({ titre: 'Comité', transcription: 'a'.repeat(SEUIL_NOTES + 1) }));
+    assert.equal(r?.objet.titre, 'Comité');
+    const j = JSON.parse(avecNotes(r!.objet, ['début', 'fin']));
+    assert.equal(j.transcriptionEnNotes, true);
+    assert.equal(j.titre, 'Comité');
+    assert.equal(j.transcription, '[Partie 1 sur 2]\ndébut\n\n[Partie 2 sur 2]\nfin');
+    assert.ok(prompt({ type: 'notes_reunion', donnees: 'bonjour à tous', question: 'partie 2 sur 9' }).includes('partie 2 sur 9'));
+    assert.equal(longue('notes_reunion'), true);
   });
   it('transcrit avec gpt-4o-mini-transcribe sauf réglage du serveur', () => {
     delete process.env.OPENAI_MODEL_TRANSCRIPTION;
