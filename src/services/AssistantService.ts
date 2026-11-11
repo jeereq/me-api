@@ -219,30 +219,54 @@ ${donnees}`;
 
 /** Modèle de transcription (OpenAI) ; `OPENAI_MODEL_TRANSCRIPTION` pour en changer. */
 export const modeleTranscription = () => process.env.OPENAI_MODEL_TRANSCRIPTION || 'gpt-4o-mini-transcribe';
+/**
+ * Les modèles « gpt-4o-…-transcribe » refusent un audio de plus de 1 500 secondes (25 minutes).
+ * Les réunions plus longues passent par `OPENAI_MODEL_TRANSCRIPTION_LONGUE` (`whisper-1` par défaut), limité seulement à 25 Mo.
+ */
+export const modeleTranscriptionLongue = () => process.env.OPENAI_MODEL_TRANSCRIPTION_LONGUE || 'whisper-1';
+/** Marge sous les 1 500 s d'OpenAI : la durée annoncée par l'app est arrondie. */
+export const DUREE_MAX_MODELE_COURT_S = 23 * 60;
+export const modelePourDuree = (dureeSecondes?: number | null) => (typeof dureeSecondes === 'number' && dureeSecondes > DUREE_MAX_MODELE_COURT_S ? modeleTranscriptionLongue() : modeleTranscription());
+/** Le refus d'OpenAI pour un audio trop long : « audio duration … is longer than 1500 seconds which is the maximum for this model ». */
+export const tropLongPourModele = (statut: number, message?: string) => statut === 400 && /longer than|maximum for this model|duration/i.test(message ?? '');
 /** Une réunion d'une heure ou deux : la transcription peut prendre plusieurs minutes. */
 const DELAI_TRANSCRIPTION_MS = 10 * 60_000;
 
 export const AssistantService = {
-  /** Transcrit un enregistrement audio en français (réunion, appel). `contexte` : noms propres et sujet, pour aider la reconnaissance. */
-  async transcrire(audio: File, contexte?: string): Promise<{ texte: string; modele: string }> {
+  /**
+   * Transcrit un enregistrement audio en français (réunion, appel). `contexte` : noms propres et sujet, pour aider la reconnaissance.
+   * `dureeSecondes` : au-delà de 23 minutes, le modèle des longues réunions transcrit directement.
+   */
+  async transcrire(audio: File, contexte?: string, dureeSecondes?: number): Promise<{ texte: string; modele: string }> {
     if (!(await this.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.", 'IA_INDISPONIBLE');
-    const modele = modeleTranscription();
-    const form = new FormData();
-    form.append('file', audio, audio.name || 'reunion.m4a');
-    form.append('model', modele);
-    form.append('language', 'fr');
-    form.append('response_format', 'json');
     const aide = (contexte ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
-    if (aide) form.append('prompt', aide);
-    let res: Response;
-    try {
-      res = await fetch(`${OPENAI_URL()}/audio/transcriptions`, { method: 'POST', signal: AbortSignal.timeout(DELAI_TRANSCRIPTION_MS), headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form });
-    } catch (e) {
-      console.error('OpenAI injoignable (transcription)', e);
-      if ((e as Error)?.name === 'TimeoutError') throw new HttpError(504, 'La transcription met trop de temps, réessaie avec un enregistrement plus court.');
-      throw new HttpError(502, "OpenAI est injoignable pour l'instant, réessaie dans un moment.");
+    const envoyer = async (modele: string) => {
+      const form = new FormData();
+      form.append('file', audio, audio.name || 'reunion.m4a');
+      form.append('model', modele);
+      form.append('language', 'fr');
+      form.append('response_format', 'json');
+      if (aide) form.append('prompt', aide);
+      let res: Response;
+      try {
+        res = await fetch(`${OPENAI_URL()}/audio/transcriptions`, { method: 'POST', signal: AbortSignal.timeout(DELAI_TRANSCRIPTION_MS), headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form });
+      } catch (e) {
+        console.error('OpenAI injoignable (transcription)', e);
+        if ((e as Error)?.name === 'TimeoutError') throw new HttpError(504, 'La transcription met trop de temps, réessaie avec un enregistrement plus court.');
+        throw new HttpError(502, "OpenAI est injoignable pour l'instant, réessaie dans un moment.");
+      }
+      const data = (await res.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
+      return { res, data };
+    };
+    let modele = modelePourDuree(dureeSecondes);
+    let { res, data } = await envoyer(modele);
+    // La durée annoncée était fausse ou absente : OpenAI refuse l'audio trop long pour ce modèle, l'autre le prend.
+    const long = modeleTranscriptionLongue();
+    if (!res.ok && modele !== long && tropLongPourModele(res.status, data?.error?.message)) {
+      console.warn('Transcription : audio trop long pour', modele, '→', long);
+      modele = long;
+      ({ res, data } = await envoyer(modele));
     }
-    const data = (await res.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
     if (!res.ok) {
       console.error('OpenAI (transcription)', res.status, modele, data?.error?.message);
       if (res.status === 400 || res.status === 415) throw new HttpError(422, "Cet enregistrement n'a pas pu être lu. Réessaie, ou colle le texte de la réunion dans les notes.", 'AUDIO_ILLISIBLE');

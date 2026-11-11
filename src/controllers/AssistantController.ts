@@ -59,7 +59,7 @@ export const AssistantController = {
       const reste = Math.floor(compteur.restantesSecondes! / 60);
       throw new HttpError(402, `Il te reste ${reste} min de réunion${etat.offre === 'essai' ? ' dans ton essai' : ' ce mois-ci'}, et cet enregistrement en demande ${Math.ceil(duree / 60)}. Passe au palier supérieur dans Mon compte › Abonnement.`, 'QUOTA_REUNIONS');
     }
-    const r = await AssistantService.transcrire(audio, typeof contexte === 'string' ? contexte : undefined);
+    const r = await AssistantService.transcrire(audio, typeof contexte === 'string' ? contexte : undefined, duree);
     // Une transcription qui échoue ne consomme rien : on ne compte qu'ici.
     if (compteur && !compteur.illimite) await ReunionService.consommer(req.user!.id, compteur.cle, duree);
     res.json({ ...r, dureeSecondes: duree });

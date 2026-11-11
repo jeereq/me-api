@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { consignesPrompt, corpsRequete, enJson, longue, MAX_CONSIGNES, MAX_DONNEES_COMPTE_RENDU, modeleTranscription, prompt, raisonne } from '../src/services/AssistantService.js';
+import { consignesPrompt, corpsRequete, enJson, longue, MAX_CONSIGNES, MAX_DONNEES_COMPTE_RENDU, modelePourDuree, modeleTranscription, prompt, raisonne, tropLongPourModele } from '../src/services/AssistantService.js';
 
 describe('assistant : requête OpenAI', () => {
   it('reconnaît les modèles qui raisonnent', () => {
@@ -115,6 +115,22 @@ describe('assistant : compte rendu', () => {
   it('transcrit avec gpt-4o-mini-transcribe sauf réglage du serveur', () => {
     delete process.env.OPENAI_MODEL_TRANSCRIPTION;
     assert.equal(modeleTranscription(), 'gpt-4o-mini-transcribe');
+  });
+  it('passe les réunions de plus de 23 minutes au modèle sans limite de durée', () => {
+    delete process.env.OPENAI_MODEL_TRANSCRIPTION;
+    delete process.env.OPENAI_MODEL_TRANSCRIPTION_LONGUE;
+    assert.equal(modelePourDuree(10 * 60), 'gpt-4o-mini-transcribe');
+    assert.equal(modelePourDuree(23 * 60), 'gpt-4o-mini-transcribe');
+    assert.equal(modelePourDuree(31 * 60), 'whisper-1');
+    assert.equal(modelePourDuree(undefined), 'gpt-4o-mini-transcribe');
+    process.env.OPENAI_MODEL_TRANSCRIPTION_LONGUE = 'autre';
+    assert.equal(modelePourDuree(90 * 60), 'autre');
+    delete process.env.OPENAI_MODEL_TRANSCRIPTION_LONGUE;
+  });
+  it('reconnaît le refus d\'OpenAI pour un audio trop long', () => {
+    assert.equal(tropLongPourModele(400, 'audio duration 1890.2 seconds is longer than 1500 seconds which is the maximum for this model'), true);
+    assert.equal(tropLongPourModele(400, 'Invalid file format.'), false);
+    assert.equal(tropLongPourModele(500, 'duration'), false);
   });
 });
 
