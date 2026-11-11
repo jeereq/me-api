@@ -23,7 +23,7 @@ export type LigneMembre = {
   eligibilite: string | null;
   emailVerifie: boolean;
   creeLe: string;
-  offre: 'gratuit' | 'essai' | 'finances' | 'pro' | 'libre';
+  offre: 'gratuit' | 'essai' | 'finances' | 'projets' | 'pro' | 'libre';
   palier: Palier;
   periode: string | null;
   jusqua: string | null;
@@ -48,14 +48,14 @@ export function ligneMembre(u: CompteGestion, maintenant = new Date(), depuis = 
     creeLe: u.createdAt.toISOString(),
     offre: e.offre,
     palier: e.offre === 'pro' ? e.palier : 0,
-    periode: e.offre === 'pro' || e.offre === 'finances' ? e.periode : null,
+    periode: e.offre === 'pro' || e.offre === 'finances' || e.offre === 'projets' ? e.periode : null,
     jusqua: e.jusqua,
     joursRestants: e.joursRestants,
     expireLe: passe ? passe.toISOString() : null,
   };
 }
 
-const estAbonne = (l: LigneMembre) => l.offre === 'pro' || l.offre === 'finances';
+const estAbonne = (l: LigneMembre) => l.offre === 'pro' || l.offre === 'finances' || l.offre === 'projets';
 const expireBientot = (l: LigneMembre) => estAbonne(l) && l.joursRestants !== null && l.joursRestants <= JOURS_EXPIRE_BIENTOT;
 const correspond: Record<FiltreMembres, (l: LigneMembre) => boolean> = {
   tous: () => true,

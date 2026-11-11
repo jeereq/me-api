@@ -290,7 +290,7 @@ export const paiementSchema = z.object({
   body: z.object({
     periode: z.enum(['mensuel', 'annuel'], { errorMap: () => ({ message: 'Choisis mensuel ou annuel.' }) }),
     /** Absente pour les anciennes versions de l'app, qui ne vendaient que Pro. */
-    formule: z.enum(['finances', 'pro'], { errorMap: () => ({ message: 'Choisis la formule Finances ou Pro.' }) }).default('pro'),
+    formule: z.enum(['finances', 'projets', 'pro'], { errorMap: () => ({ message: 'Choisis la formule Finances, Projets ou Pro.' }) }).default('pro'),
     /** Palier de réunions de Pro (0 à 3) : son prix s'ajoute à celui de Pro. */
     palier: z.number().int().min(0).max(3).default(0),
     telephone: z.string({ required_error: 'Numéro de téléphone requis' }).trim().min(8, 'Numéro de téléphone requis').max(20),
@@ -408,7 +408,7 @@ export const gestionMembresSchema = z.object({
 const noteAdmin = z.string().trim().max(300).optional();
 export const actionAbonnementSchema = membreParamsSchema.extend({
   body: z.discriminatedUnion('action', [
-    z.object({ action: z.literal('offrir'), formule: z.enum(['finances', 'pro']), palier: z.number().int().min(0).max(3).default(0), mois: z.number().int().min(1).max(24), note: noteAdmin }),
+    z.object({ action: z.literal('offrir'), formule: z.enum(['finances', 'projets', 'pro']), palier: z.number().int().min(0).max(3).default(0), mois: z.number().int().min(1).max(24), note: noteAdmin }),
     z.object({ action: z.literal('essai'), jours: z.number().int().min(1).max(90), note: noteAdmin }),
     z.object({ action: z.literal('retirer'), note: noteAdmin }),
   ]),

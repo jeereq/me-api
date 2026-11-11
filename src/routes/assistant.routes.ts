@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { AssistantController } from '../controllers/AssistantController.js';
-import { requireFonction, requirePro } from '../middlewares/abonnement.js';
+import { requireFonction, requireFonctionSelon, requirePro } from '../middlewares/abonnement.js';
 import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js';
 import { analyseMailsLimiter, assistantLimiter, transcriptionLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
@@ -12,7 +12,9 @@ const router = Router();
 router.use(authenticateJWT);
 router.get('/', asyncHandler(AssistantController.status));
 router.get('/modeles', requireAdmin, asyncHandler(AssistantController.modeles));
-router.post('/', requirePro('assistant'), assistantLimiter, validateRequest(assistantSchema), asyncHandler(AssistantController.demander));
+// L'IA des projets s'ouvre avec la formule Projets ; le reste du copilote demande Pro.
+const fonctionAssistant = (req: { body?: { type?: unknown } }): 'projetsIA' | 'assistant' => (typeof req.body?.type === 'string' && req.body.type.startsWith('projet_') ? 'projetsIA' : 'assistant');
+router.post('/', requireFonctionSelon(fonctionAssistant), assistantLimiter, validateRequest(assistantSchema), asyncHandler(AssistantController.demander));
 router.post('/traduire', requirePro('assistant'), analyseMailsLimiter, validateRequest(traduireSchema), asyncHandler(AssistantController.traduire));
 router.post('/mails/etiquettes', requirePro('assistant'), analyseMailsLimiter, validateRequest(proposerEtiquettesSchema), asyncHandler(AssistantController.proposerEtiquettes));
 router.post('/mails/ajuster', requirePro('assistant'), analyseMailsLimiter, validateRequest(ajusterReponseSchema), asyncHandler(AssistantController.ajusterReponse));

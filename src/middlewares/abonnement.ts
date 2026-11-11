@@ -27,5 +27,14 @@ export const requireFonction =
     }
   };
 
+/**
+ * Comme `requireFonction`, mais la fonction dépend de la demande : l'IA des projets (`type` « projet_… ») s'ouvre avec Projets,
+ * le reste de l'assistant avec Pro.
+ */
+export const requireFonctionSelon =
+  (choisir: (req: Request) => Fonction) =>
+  (req: Request, res: Response, next: NextFunction): Promise<void> =>
+    requireFonction(choisir(req))(req, res, next);
+
 /** Réserve une route à Pro (voir `requireFonction`). */
 export const requirePro = requireFonction;

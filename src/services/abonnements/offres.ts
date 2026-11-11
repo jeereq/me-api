@@ -1,11 +1,12 @@
 /**
  * Offres d'abonnement et droits d'un compte. Module pur (sans base ni réseau), testé dans tests/abonnements.test.ts.
  *
- * Trois formules (et, pour Pro, quatre paliers de réunions : Pro 0 à Pro 3, voir PALIERS) :
+ * Quatre formules (et, pour Pro, quatre paliers de réunions : Pro 0 à Pro 3, voir PALIERS) :
  * - Gratuit : l'espace personnel (tâches, relances, habitudes, projets) et les finances de base (budgets, dépenses,
  *   revenus, objectifs, statistiques, export), avec les rappels dans l'app.
  * - Finances : en plus, les finances avancées (voir FONCTIONS_FINANCES), avec leurs alertes en push et par email.
- * - Pro : tout Finances, plus les fonctions qui coûtent au serveur ou demandent des accès externes (voir FONCTIONS_PRO).
+ * - Projets : en plus, la gestion de projets avancée (voir FONCTIONS_PROJETS), sans les finances avancées. Distincte de Finances.
+ * - Pro : tout Finances et tout Projets, plus les fonctions qui coûtent au serveur ou demandent des accès externes (voir FONCTIONS_PRO).
  *
  * - Chaque nouveau compte a un essai de ESSAI_JOURS jours de tout Pro, sans paiement, une fois par personne. Le jour où
  *   les abonnements sont mis en service (ABONNEMENTS_DEPUIS), chaque compte qui a un essai garde au moins ESSAI_JOURS
@@ -22,13 +23,18 @@ export const ESSAI_JOURS = 14;
 export const VERSION_CGV = '2026-11-10';
 
 export type Periode = 'mensuel' | 'annuel';
-export type Formule = 'finances' | 'pro';
+export type Formule = 'finances' | 'projets' | 'pro';
 /** Palier de réunions de Pro : 0 (sans réunions, le Pro d'origine), 1, 2 ou 3. */
 export type Palier = 0 | 1 | 2 | 3;
 
 const FORMULE_FINANCES = {
   nom: 'Finances',
   /** Prix TTC en centimes de la devise. */
+  mensuel: { prix: 399, libelle: '3,99 $ par mois', mois: 1 },
+  annuel: { prix: 4389, libelle: '43,89 $ par an', mois: 12, economie: '1 mois offert' },
+} as const;
+const FORMULE_PROJETS = {
+  nom: 'Projets',
   mensuel: { prix: 399, libelle: '3,99 $ par mois', mois: 1 },
   annuel: { prix: 4389, libelle: '43,89 $ par an', mois: 12, economie: '1 mois offert' },
 } as const;
@@ -64,7 +70,7 @@ export const OFFRES = {
   devise: 'USD',
   essaiJours: ESSAI_JOURS,
   gratuit: { nom: 'Gratuit', prix: 0 },
-  formules: { finances: FORMULE_FINANCES, pro: FORMULE_PRO },
+  formules: { finances: FORMULE_FINANCES, projets: FORMULE_PROJETS, pro: FORMULE_PRO },
   /** Paliers de réunions de Pro (1 à 3) et minutes offertes à l'essai. */
   paliers: PALIERS,
   essaiReunionMinutes: ESSAI_REUNION_MINUTES,
@@ -84,6 +90,14 @@ export const FONCTIONS_FINANCES = {
   alertes: 'Les alertes de budget et d’objectifs en push et par email',
 } as const;
 
+/** Ce que Projets débloque (Pro le comprend). Les projets de base (tâches, planning, import) sont inclus dans l'offre gratuite. */
+export const FONCTIONS_PROJETS = {
+  projetsVues: 'Les vues d’ensemble des projets : Ensemble, Feuille de route, À compléter, en plein écran et avec filtres',
+  projetsRapport: 'Le rapport trimestriel (écran, impression, Excel) et les piliers configurables',
+  projetsIA: 'L’IA des projets : état et résumé, plan depuis un objectif, risques, questions',
+  projetsMails: 'Les mails aux responsables et les commandes vocales des projets, avec la lecture d’un projet',
+} as const;
+
 /** Ce que Pro ajoute à Finances. */
 export const FONCTIONS_PRO = {
   assistant: 'Le copilote IA (questions, plans, brouillons de relance)',
@@ -100,16 +114,18 @@ export const FONCTIONS_REUNIONS = {
 } as const;
 
 export type FonctionFinances = keyof typeof FONCTIONS_FINANCES;
+export type FonctionProjets = keyof typeof FONCTIONS_PROJETS;
 export type FonctionPro = keyof typeof FONCTIONS_PRO;
 export type FonctionReunions = keyof typeof FONCTIONS_REUNIONS;
-export type Fonction = FonctionFinances | FonctionPro | FonctionReunions;
+export type Fonction = FonctionFinances | FonctionProjets | FonctionPro | FonctionReunions;
 
 const TOUT_FINANCES = Object.keys(FONCTIONS_FINANCES) as FonctionFinances[];
-const TOUT_PRO0 = [...TOUT_FINANCES, ...(Object.keys(FONCTIONS_PRO) as FonctionPro[])];
+const TOUT_PROJETS = Object.keys(FONCTIONS_PROJETS) as FonctionProjets[];
+const TOUT_PRO0 = [...TOUT_FINANCES, ...TOUT_PROJETS, ...(Object.keys(FONCTIONS_PRO) as FonctionPro[])];
 const TOUT = [...TOUT_PRO0, ...(Object.keys(FONCTIONS_REUNIONS) as FonctionReunions[])];
 
 /** La formule qui débloque une fonction. */
-export const formuleDe = (f: Fonction): Formule => (f in FONCTIONS_FINANCES ? 'finances' : 'pro');
+export const formuleDe = (f: Fonction): Formule => (f in FONCTIONS_FINANCES ? 'finances' : f in FONCTIONS_PROJETS ? 'projets' : 'pro');
 
 /** Champs du compte qui décrivent son abonnement (colonnes de User). */
 export type ChampsAbonnement = {
@@ -129,11 +145,13 @@ export type EtatAbonnement = {
   /** Les abonnements sont-ils en service sur ce serveur ? Sinon tout est ouvert. */
   actif: boolean;
   /** `libre` : abonnements coupés ou compte admin. */
-  offre: 'gratuit' | 'essai' | 'finances' | 'pro' | 'libre';
+  offre: 'gratuit' | 'essai' | 'finances' | 'projets' | 'pro' | 'libre';
   /** Les fonctions Pro sont ouvertes (essai, Pro, libre). */
   pro: boolean;
   /** Les finances avancées sont ouvertes (Finances, et tout ce qui ouvre Pro). */
   finances: boolean;
+  /** La gestion de projets avancée est ouverte (Projets, et tout ce qui ouvre Pro). */
+  projets: boolean;
   periode: Periode | null;
   /** Palier de réunions de la formule Pro payée (0 sans réunions). */
   palier: Palier;
@@ -148,8 +166,8 @@ export type EtatAbonnement = {
   ensuite?: { formule: Formule; jusqua: string } | null;
 };
 
-/** Formule payée notée sur le compte. Un compte payé avant les trois formules avait Pro. */
-export const formulePayee = (c: ChampsAbonnement): Formule => (c.abonnementFormule === 'finances' ? 'finances' : 'pro');
+/** Formule payée notée sur le compte. Un compte payé avant les formules Finances et Projets avait Pro. */
+export const formulePayee = (c: ChampsAbonnement): Formule => (c.abonnementFormule === 'finances' ? 'finances' : c.abonnementFormule === 'projets' ? 'projets' : 'pro');
 
 /** Les abonnements sont activés par ABONNEMENTS=true. Sans, le serveur reste ouvert à tous comme avant. */
 export const abonnementsActifs = (env: Record<string, string | undefined> = process.env) => env.ABONNEMENTS?.trim().toLowerCase() === 'true';
@@ -185,7 +203,7 @@ export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
   const periode: Periode | null = c.abonnementPeriode === 'annuel' || c.abonnementPeriode === 'mensuel' ? c.abonnementPeriode : null;
   const palier = palierDe(c.abonnementPalier);
   const base = { actif, periode, palier };
-  const tout = { pro: true, finances: true, fonctions: TOUT };
+  const tout = { pro: true, finances: true, projets: true, fonctions: TOUT };
 
   const fin = c.abonnementFinLe && c.abonnementFinLe > maintenant ? c.abonnementFinLe : null;
   const formule = formulePayee(c);
@@ -202,9 +220,10 @@ export function etatAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
   if (essai && essai > maintenant)
     return { ...base, offre: 'essai', ...tout, reunions: { cle: 'essai', secondes: ESSAI_REUNION_MINUTES * 60 }, jusqua: essai.toISOString(), joursRestants: jours(essai, maintenant), ensuite: fin ? { formule, jusqua: fin.toISOString() } : null };
 
-  if (fin) return { ...base, offre: 'finances', pro: false, finances: true, fonctions: TOUT_FINANCES, reunions: null, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
+  if (fin && formule === 'projets') return { ...base, offre: 'projets', pro: false, finances: false, projets: true, fonctions: TOUT_PROJETS, reunions: null, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
+  if (fin) return { ...base, offre: 'finances', pro: false, finances: true, projets: false, fonctions: TOUT_FINANCES, reunions: null, jusqua: fin.toISOString(), joursRestants: jours(fin, maintenant) };
 
-  return { ...base, offre: 'gratuit', pro: false, finances: false, reunions: null, jusqua: null, joursRestants: null, fonctions: [] };
+  return { ...base, offre: 'gratuit', pro: false, finances: false, projets: false, reunions: null, jusqua: null, joursRestants: null, fonctions: [] };
 }
 
 /** Le compte a-t-il droit à cette fonction ? */
@@ -268,14 +287,16 @@ export function prolongerDe(
 export const messageReserve = (f: Fonction) =>
   formuleDe(f) === 'finances'
     ? `${FONCTIONS_FINANCES[f as FonctionFinances]} : c'est inclus dans Me Finances (et Pro). Choisis une formule dans Mon compte › Abonnement.`
-    : f === 'reunions'
-      ? `${FONCTIONS_REUNIONS.reunions} : c'est inclus dans Pro 1, Pro 2 et Pro 3. Choisis un palier dans Mon compte › Abonnement.`
-      : `${FONCTIONS_PRO[f as FonctionPro]} : c'est inclus dans Me Pro. Passe à Pro depuis Mon compte › Abonnement.`;
+    : formuleDe(f) === 'projets'
+      ? `${FONCTIONS_PROJETS[f as FonctionProjets]} : c'est inclus dans Me Projets (et Pro). Choisis une formule dans Mon compte › Abonnement.`
+      : f === 'reunions'
+        ? `${FONCTIONS_REUNIONS.reunions} : c'est inclus dans Pro 1, Pro 2 et Pro 3. Choisis un palier dans Mon compte › Abonnement.`
+        : `${FONCTIONS_PRO[f as FonctionPro]} : c'est inclus dans Me Pro. Passe à Pro depuis Mon compte › Abonnement.`;
 
 export type AvisAbonnement = { cle: string; titre: string; corps: string; parEmail: boolean };
 
 const SUITE =
-  "Ensuite, Me reste gratuite pour l'essentiel. Finances (3,99 $ par mois) garde les finances avancées ; Pro (6,99 $ par mois) ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (5, 20 ou 40 h par mois).";
+  "Ensuite, Me reste gratuite pour l'essentiel. Finances (3,99 $ par mois) garde les finances avancées ; Projets (3,99 $ par mois) garde la gestion de projets avancée ; Pro (6,99 $ par mois) comprend les deux et ajoute le copilote IA, les comptes connectés, les équipes et les rappels par email et push ; Pro 1, 2 et 3 y ajoutent les réunions enregistrées (5, 20 ou 40 h par mois).";
 
 /**
  * Messages liés à l'abonnement, envoyés une seule fois grâce à leur clé :
@@ -291,13 +312,15 @@ export function avisAbonnement(c: ChampsAbonnement, maintenant = new Date(), act
   if (e.offre === 'essai' && e.joursRestants <= 3) {
     if (e.ensuite?.formule === 'pro') return null;
     const corps = e.ensuite
-      ? `Ta formule Finances prend le relais : tes finances avancées restent ouvertes. Le copilote IA, les comptes connectés, les équipes et les rappels par email et push demandent Pro.`
+      ? e.ensuite.formule === 'projets'
+        ? `Ta formule Projets prend le relais : ta gestion de projets avancée reste ouverte. Les finances avancées, le copilote IA des mails, les comptes connectés, les équipes et les rappels par email et push demandent Finances ou Pro.`
+        : `Ta formule Finances prend le relais : tes finances avancées restent ouvertes. Le copilote IA, les comptes connectés, les équipes et les rappels par email et push demandent Pro.`
       : `${SUITE} Pour choisir : Mon compte › Abonnement.`;
     return { cle: `abonnement:essai:${jour}`, titre: `Ton essai se termine ${quand}`, corps, parEmail: false };
   }
-  if ((e.offre === 'pro' || e.offre === 'finances') && e.joursRestants <= 7) {
+  if ((e.offre === 'pro' || e.offre === 'finances' || e.offre === 'projets') && e.joursRestants <= 7) {
     const palier = e.joursRestants <= 1 ? 1 : 7;
-    const nom = e.offre === 'pro' ? (e.palier ? `Pro ${e.palier}` : 'Pro') : 'Finances';
+    const nom = e.offre === 'pro' ? (e.palier ? `Pro ${e.palier}` : 'Pro') : e.offre === 'projets' ? 'Projets' : 'Finances';
     return {
       cle: `abonnement:fin:${jour}:${palier}`,
       titre: `Ton abonnement ${nom} se termine ${quand}`,
