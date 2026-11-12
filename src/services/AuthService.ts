@@ -9,6 +9,7 @@ import { etatAbonnement, finEssai, type ChampsAbonnement } from './abonnements/o
 import { HttpError } from '../utils/http.js';
 import { generateToken } from '../utils/jwt.js';
 import { prisma } from '../utils/prisma.js';
+import { NotificationService } from './NotificationService.js';
 import { EmailsCompte, emailsActifs, adresseApp, lienReinitialisation } from './comptes/emails.js';
 import { normaliserTelephone } from './abonnements/flexpaie.js';
 import { NumerosAutorises } from './sms/numeros.js';
@@ -48,7 +49,7 @@ const exigerBonMotDePasse = (mdp: string, c: { email?: string | null; nom?: stri
 
 /** Prévient que le mot de passe vient de changer, par les canaux prouvés du compte. Une alerte perdue ne bloque rien. */
 function alerterMotDePasse(u: { id: string; email: string | null; emailVerifie: boolean; telephone?: string | null }) {
-  const envois: Promise<unknown>[] = [];
+  const envois: Promise<unknown>[] = [NotificationService.avisPush(u.id, { cle: `securite:mot-de-passe:${Date.now()}`, titre: 'Ton mot de passe a changé', corps: 'Si ce n’est pas toi, utilise « Mot de passe oublié » tout de suite.', url: '/compte' }, { toujours: true })];
   if (u.email && u.emailVerifie && emailsActifs()) envois.push(EmailsCompte.motDePasseChange(u.email));
   if (u.telephone) envois.push(SmsService.envoyerSecurite(u.id, u.telephone, 'Me : ton mot de passe vient de changer. Si ce n\'est pas toi, utilise "Mot de passe oublie" tout de suite.'));
   Promise.allSettled(envois).catch(() => {});

@@ -4,6 +4,7 @@ import type { RoleEquipe } from '@prisma/client';
 
 import { HttpError } from '../utils/http.js';
 import { prisma } from '../utils/prisma.js';
+import { NotificationService } from './NotificationService.js';
 
 import { assertPeutGerer, assertResteUnProprietaire } from './equipes/droits.js';
 import { invitationPourApp, invitationsAffichables, memeAdresse } from './equipes/invitations.js';
@@ -93,6 +94,9 @@ export const EquipeService = {
     const invitation = await prisma.invitationEquipe.create({ data: { equipeId, email, role, parNom, empreinte: empreinte(brut), expireLe }, select: invitationSelect });
 
     const envoye = await EmailsEquipe.invitation(email, brut, equipe.nom, parNom);
+    // La personne a déjà un compte : l'invitation arrive aussi dans l'app et en push.
+    const invite = await prisma.user.findFirst({ where: { email }, select: { id: true } });
+    if (invite) await NotificationService.avisPush(invite.id, { cle: `equipe:invitation:${invitation.id}`, titre: `${parNom} t’invite dans « ${equipe.nom} »`, corps: 'Ouvre l’invitation pour rejoindre l’équipe.', url: '/equipe' }).catch((e) => console.error('Avis invitation', e));
     // Sans email configuré, le lien est renvoyé à celui qui invite : à lui de le transmettre.
     return { id: invitation.id, email, role, expireLe: expireLe.toISOString(), envoye, lien: envoye ? undefined : EmailsEquipe.lienInvitation(brut) };
   },

@@ -158,11 +158,25 @@ export const NotificationService = {
     if (u) await this.envoyerAvis(u, avis, maintenant);
   },
 
-  async envoyerAvis(u: { id: string; email: string | null; emailVerifie: boolean; nom: string }, avis: AvisAbonnement, maintenant: Date) {
-    const cree = await prisma.notification.createMany({
-      data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: maintenant.toISOString().slice(0, 16) }],
+  /**
+   * Un avis qui n'est pas un rappel (invitation, sécurité, abonnement) : une notification dans l'app et un push, une seule fois
+   * grâce à la clé. `toujours` : le push part même si le compte a coupé les notifications de l'app (alertes de sécurité).
+   */
+  async avisPush(userId: string, a: { cle: string; titre: string; corps: string; url?: string }, o: { toujours?: boolean; maintenant?: Date } = {}) {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { espace: { select: { data: true } } } });
+    if (!u) return false;
+    const prefs = ((u.espace?.data as { notifs?: Prefs } | null)?.notifs ?? {}) as Prefs;
+    const coupe = prefs.app === false && !o.toujours;
+    const { count } = await prisma.notification.createMany({
+      data: [{ userId, cle: a.cle, titre: a.titre, corps: a.corps, mode: 'briefing', quand: (o.maintenant ?? new Date()).toISOString().slice(0, 16), lu: coupe }],
       skipDuplicates: true,
     });
+    if (count && !coupe) await PushService.envoyer(userId, { titre: a.titre, corps: a.corps, mode: 'briefing', url: a.url ?? '/notifications', tag: a.cle }).catch((e) => console.error('Push avis', e));
+    return count > 0;
+  },
+
+  async envoyerAvis(u: { id: string; email: string | null; emailVerifie: boolean; nom: string }, avis: AvisAbonnement, maintenant: Date) {
+    const cree = { count: Number(await this.avisPush(u.id, { cle: avis.cle, titre: avis.titre, corps: avis.corps, url: '/abonnement' }, { maintenant })) };
     if (!cree.count || !avis.parEmail || !u.emailVerifie || !EmailService.configure()) return;
     const m = emailRappels([{ cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand: '' } as Rappel], u.nom);
     if (await EmailService.envoyer(u.email, avis.titre, m.texte, m.html)) await prisma.notification.updateMany({ where: { userId: u.id, cle: avis.cle }, data: { parEmail: true } });
