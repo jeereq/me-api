@@ -409,14 +409,15 @@ export const microsoft: Connecteur = {
     if (m.isRead === false && !ou?.garderNonLu) await json('Outlook', url, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {});
     // Les messages plus anciens de la conversation (sans tri côté Graph, qui refuse filtre et tri sur ces champs ensemble).
     const conv = m.conversationId
-      ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '25', $select: champs })}`, auth).catch(() => ({ value: [] }))).value ?? [])
+      ? ((await json<{ value?: MailComplet[] }>('Outlook', `${base}/messages?${new URLSearchParams({ $filter: `conversationId eq '${m.conversationId.replace(/'/g, "''")}'`, $top: '50', $select: champs })}`, auth).catch(() => ({ value: [] }))).value ?? [])
       : [];
     // Les autres messages non lus de la conversation aussi : la liste de Me montre la conversation entière comme non lue.
     if (!ou?.garderNonLu) await Promise.all(conv.filter((x) => x.id !== m.id && x.isRead === false && !x.isDraft).map((x) => json('Outlook', `${base}/messages/${encodeURIComponent(x.id)}`, corpsJson(accessToken, 'PATCH', { isRead: true })).catch(() => {})));
-    const avant = conv
-      .filter((x) => x.id !== m.id && !x.isDraft && (x.receivedDateTime ?? '') <= (m.receivedDateTime ?? ''))
-      .sort((a, b) => (a.receivedDateTime ?? '').localeCompare(b.receivedDateTime ?? ''))
-      .slice(-FIL_MAX);
+    // Toute la conversation, mes réponses comprises : les messages plus anciens (30 au plus) et les réponses arrivées depuis (30 au plus), dans l'ordre.
+    const autres = conv.filter((x) => x.id !== m.id && !x.isDraft).sort((a, b) => (a.receivedDateTime ?? '').localeCompare(b.receivedDateTime ?? ''));
+    const posterieurs = autres.filter((x) => (x.receivedDateTime ?? '') > (m.receivedDateTime ?? '')).slice(0, FIL_MAX);
+    const apresIds = new Set(posterieurs.map((x) => x.id));
+    const avant = [...autres.filter((x) => (x.receivedDateTime ?? '') <= (m.receivedDateTime ?? '')).slice(-FIL_MAX), ...posterieurs];
     // receivedDateTime est en UTC (« …Z ») : on le ramène au fuseau de l'utilisateur.
     const quand = (x: MailComplet) => (x.receivedDateTime ? local(x.receivedDateTime, fuseau) : undefined);
     const d = quand(m);
@@ -442,7 +443,7 @@ export const microsoft: Connecteur = {
       libelles: m.categories ?? [],
       fil: avant.map((x) => {
         const lu = x.body?.contentType?.toLowerCase() === 'html' ? messageDuFil(x.body.content || '', ou?.riche) : null;
-        return { id: x.id, de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, ...(lu ?? { texte: corpsTexte(x) }), piecesJointes: (piecesFil.get(x.id) ?? []).map((p) => p.name!), pieces: (piecesFil.get(x.id) ?? []).map((p) => ({ id: p.id, nom: p.name!, ...(p.size ? { taille: p.size } : {}), ...(p.contentType ? { type: p.contentType } : {}) })) };
+        return { id: x.id, ...(apresIds.has(x.id) ? { apres: true } : {}), de: x.from?.emailAddress?.name || x.from?.emailAddress?.address || '', adresse: x.from?.emailAddress?.address, date: quand(x)?.date, heure: quand(x)?.heure, ...(lu ?? { texte: corpsTexte(x) }), piecesJointes: (piecesFil.get(x.id) ?? []).map((p) => p.name!), pieces: (piecesFil.get(x.id) ?? []).map((p) => ({ id: p.id, nom: p.name!, ...(p.size ? { taille: p.size } : {}), ...(p.contentType ? { type: p.contentType } : {}) })) };
       }),
     };
   },

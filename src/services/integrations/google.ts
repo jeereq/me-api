@@ -337,7 +337,11 @@ export const google: Connecteur = {
     const d = quand(m);
     const de = entete(m, 'From');
     const parId = m.labelIds?.some((x) => x.startsWith('Label_')) ? await libellesDuCompte(accessToken).catch(() => new Map<string, Libelle>()) : new Map<string, Libelle>();
-    const avant = tous.filter((x) => x.id !== m.id && Number(x.internalDate ?? 0) <= Number(m.internalDate ?? 0) && !x.labelIds?.includes('DRAFT')).slice(-FIL_MAX);
+    // Toute la conversation, mes réponses comprises : les messages plus anciens (30 au plus) et les réponses arrivées depuis (30 au plus), dans l'ordre.
+    const autres = tous.filter((x) => x.id !== m.id && !x.labelIds?.includes('DRAFT')).sort((a, b) => Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0));
+    const dateDe = (x: Message) => Number(x.internalDate ?? 0);
+    const apresIds = new Set(autres.filter((x) => dateDe(x) > dateDe(m)).slice(0, FIL_MAX).map((x) => x.id));
+    const avant = [...autres.filter((x) => dateDe(x) <= dateDe(m)).slice(-FIL_MAX), ...autres.filter((x) => apresIds.has(x.id))];
     return {
       id: m.id,
       sujet: entete(m, 'Subject') || '(sans objet)',
@@ -362,7 +366,7 @@ export const google: Connecteur = {
         const decoupe = messageDuFil(h.html, ou?.riche);
         // Les images du texte (logo de signature) ne sont pas des pièces jointes.
         const images = new Set(h.images.map((i) => i.filename).filter(Boolean));
-        return { id: x.id, de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, ...(decoupe ? { message: decoupe.message, ...(decoupe.riche ? { riche: decoupe.riche } : {}) } : {}), piecesJointes: c.piecesJointes.filter((n) => !images.has(n)), pieces: piecesDeGmail(x.payload, images as Set<string>) };
+        return { id: x.id, ...(apresIds.has(x.id) ? { apres: true } : {}), de: nomContact(exp), adresse: exp, date: q?.date, heure: q?.heure, texte: c.texte, ...(decoupe ? { message: decoupe.message, ...(decoupe.riche ? { riche: decoupe.riche } : {}) } : {}), piecesJointes: c.piecesJointes.filter((n) => !images.has(n)), pieces: piecesDeGmail(x.payload, images as Set<string>) };
       }),
     };
   },

@@ -6,7 +6,7 @@ import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
-import { dernierDe, donneesBoucle, exemplesEtiquettes, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
+import { dernierDe, exemplesEtiquettes, paquetsBoucle, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -115,7 +115,7 @@ export const AnalyseMailService = {
    * Comprendre une boucle de mails : de quoi il s'agit, ce qui s'est passé, qui doit agir, et une réponse prête s'il en faut une.
    * Gardée 30 jours comme les autres analyses, sous sa propre clé : un nouveau message de la boucle est un autre mail, donc une nouvelle lecture.
    */
-  async analyserBoucle(userId: string, b: AnalyseBoucleBody): Promise<AnalyseBoucle & { messages: number; enCache: boolean }> {
+  async analyserBoucle(userId: string, b: AnalyseBoucleBody): Promise<AnalyseBoucle & { messages: number; paquets?: number; omis?: number; enCache: boolean }> {
     const ref = lireRef(b.mail);
     if (!ref) throw new HttpError(400, 'Ce mail ne vient pas d’un compte connecté.');
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
@@ -123,16 +123,25 @@ export const AnalyseMailService = {
     const cle = empreinte(ton, b.consignes);
     const mailId = `boucle:${ref.mailId}`;
     const gardee = await prisma.analyseMail.findFirst({ where: { userId, integrationId: ref.integrationId, mailId, empreinte: cle, majLe: { gte: limiteAge() } } });
-    const relue = gardee ? horsCoffre<AnalyseBoucle & { messages: number }>(gardee.resultat) : null;
+    const relue = gardee ? horsCoffre<AnalyseBoucle & { messages: number; paquets?: number; omis?: number }>(gardee.resultat) : null;
     if (relue) return { ...relue, enCache: true };
 
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
-    const donnees = donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: moiDe(compte, garde?.boite), boite: ctx, extrait: garde?.extrait });
-    if (!donnees.messages.length) throw new HttpError(422, 'Ce mail ne contient pas de texte à analyser.');
-    const r = await AssistantService.demanderAvecModeles({ type: 'boucle', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
-    const lu = lireBoucle(r.texte);
-    if (!lu) throw new HttpError(502, "L'IA n'a pas pu lire cette boucle. Réessaie dans un instant.");
-    const resultat = { ...lu, messages: donnees.messages.length, dernier: dernierDe(contenu, moiDe(compte, garde?.boite)) };
+    const { base, paquets, omis } = paquetsBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: moiDe(compte, garde?.boite), boite: ctx, extrait: garde?.extrait });
+    if (!paquets.length) throw new HttpError(422, 'Ce mail ne contient pas de texte à analyser.');
+    // Un seul paquet : une lecture. Sinon les paquets se lisent dans l'ordre, chacun avec l'analyse des précédents.
+    let lu: AnalyseBoucle | null = null;
+    const modeles = new Set<string>();
+    for (const [i, messages] of paquets.entries()) {
+      const dernier = i === paquets.length - 1;
+      const donnees = { ...base, messages, ...(paquets.length > 1 ? { paquet: `${i + 1}/${paquets.length}`, dernier_paquet: dernier, ...(lu ? { analyse_avant: { resume: lu.resume, etapes: lu.etapes, decisions: lu.decisions, ouverts: lu.ouverts } } : {}) } : {}) };
+      const r = await AssistantService.demanderAvecModeles({ type: 'boucle', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
+      r.modeles.forEach((x) => modeles.add(x));
+      lu = lireBoucle(r.texte);
+      if (!lu) throw new HttpError(502, "L'IA n'a pas pu lire cette boucle. Réessaie dans un instant.");
+    }
+    const r = { modeles: [...modeles] };
+    const resultat = { ...(lu as AnalyseBoucle), messages: paquets.reduce((n, p) => n + p.filter((x) => !x.partie || x.partie.startsWith('1/')).length, 0), ...(paquets.length > 1 ? { paquets: paquets.length } : {}), ...(omis ? { omis } : {}), dernier: dernierDe(contenu, moiDe(compte, garde?.boite)) };
     const json = enCoffre(jsonPropre(resultat)) as unknown as Prisma.InputJsonObject;
     await prisma.analyseMail.upsert({
       where: { integrationId_mailId: { integrationId: ref.integrationId, mailId } },
