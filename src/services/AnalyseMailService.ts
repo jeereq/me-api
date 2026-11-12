@@ -6,6 +6,7 @@ import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
+import { paquetsDuServeur } from './analyses/budget-paquets.js';
 import { dernierDe, donneesBoucle, exemplesEtiquettes, paquetsBoucle, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
@@ -129,6 +130,8 @@ export const AnalyseMailService = {
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
     const { base, paquets, omis } = paquetsBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: moiDe(compte, garde?.boite), boite: ctx, extrait: garde?.extrait });
     if (!paquets.length) throw new HttpError(422, 'Ce mail ne contient pas de texte à analyser.');
+    // Chaque paquet au-delà du premier est un appel à l'IA de plus : il compte dans le plafond du compte.
+    if (!paquetsDuServeur.depenser(userId, paquets.length)) throw new HttpError(429, 'Beaucoup de longues conversations analysées d’un coup : réessaie dans quelques minutes.', 'LIMITE_ANALYSE');
     // Un seul paquet : une lecture. Sinon les paquets se lisent dans l'ordre, chacun avec l'analyse des précédents.
     let lu: AnalyseBoucle | null = null;
     const modeles = new Set<string>();
