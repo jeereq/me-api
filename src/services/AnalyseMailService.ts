@@ -7,7 +7,7 @@ import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
 import { paquetsDuServeur } from './analyses/budget-paquets.js';
-import { dernierDe, donneesBoucle, exemplesEtiquettes, paquetsBoucle, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
+import { BUDGET_PAQUET, decouper, partiesRetenues, texteUtile, dernierDe, donneesBoucle, exemplesEtiquettes, paquetsBoucle, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
   AGE_MAX_JOURS,
@@ -20,6 +20,7 @@ import {
   limiteAge,
   lireRef,
   mailPourIA,
+  MAX_TEXTE_MAIL,
   mailsAPreparer,
   refMail,
   tonDe,
@@ -95,7 +96,23 @@ export const AnalyseMailService = {
         lire: async (ref) => {
           const { integrationId, mailId } = lireRef(ref)!;
           const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, integrationId, mailId);
-          return mailPourIA(ref, contenu, ctx, garde?.extrait, [compte, garde?.boite].filter((x): x is string => !!x));
+          // Un très long mail ne se coupe pas : il est condensé partie par partie, puis analysé sur ces notes.
+          const brut = texteUtile(contenu.message?.trim() || contenu.texte || garde?.extrait || '');
+          let source = contenu;
+          let condense = false;
+          if (brut.length > MAX_TEXTE_MAIL) {
+            const parties = partiesRetenues(decouper(brut, BUDGET_PAQUET)).length;
+            if (paquetsDuServeur.depenser(userId, parties)) {
+              try {
+                source = { ...contenu, message: (await AssistantService.condenserMail(brut, user.nomApp)).texte };
+                condense = true;
+              } catch (e) {
+                console.error('Condensé du mail', (e as Error).message);
+              }
+            }
+          }
+          const mail = mailPourIA(ref, source, ctx, garde?.extrait, [compte, garde?.boite].filter((x): x is string => !!x));
+          return condense ? { ...mail, condense: true } : mail;
         },
         demander: (donnees) => AssistantService.demanderAvecModeles({ type: 'mails', ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees }),
         garder: async (ref, analyse, modeles) => {

@@ -94,3 +94,13 @@ describe('analyse par paquets', () => {
     assert.deepEqual(r.paquets.flat().map((x) => x.texte), ['Avant', 'Ok']);
   });
 });
+
+describe('très long mail', () => {
+  it('garde toutes les parties jusqu’au maximum, sinon le début et la fin', async () => {
+    const { partiesRetenues } = await import('../src/services/analyse-mails.js');
+    const parties = Array.from({ length: 10 }, (_, i) => `p${i + 1}`);
+    assert.deepEqual(partiesRetenues(parties.slice(0, 3)).map((p) => p.numero), [1, 2, 3]);
+    assert.deepEqual(partiesRetenues(parties, 6).map((p) => p.numero), [1, 2, 3, 8, 9, 10]);
+    assert.deepEqual(partiesRetenues(parties, 5).map((p) => p.numero), [1, 2, 3, 9, 10]);
+  });
+});
