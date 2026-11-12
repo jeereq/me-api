@@ -167,7 +167,7 @@ export type Etiquetage = OuMail & { mailId: string; ajouter: string[]; retirer: 
 /** `message` : ce que la personne a écrit, sans sa signature ni le message cité. `riche` : le même message mis en forme, pour l'écran. */
 /** Une pièce jointe, de quoi l'ouvrir et la décrire. */
 export type PieceMail = { id: string; nom: string; taille?: number; type?: string };
-export type MessageFil = { id: string; de: string; adresse?: string; date?: string; heure?: string; texte: string; message?: string; riche?: MailRiche; piecesJointes: string[]; pieces?: PieceMail[] };
+export type MessageFil = { id: string; /** Réponse arrivée après le mail ouvert (sinon : plus ancien). */ apres?: boolean; de: string; adresse?: string; date?: string; heure?: string; texte: string; message?: string; riche?: MailRiche; piecesJointes: string[]; pieces?: PieceMail[] };
 /** Un mail lu en entier : le texte brut, sa mise en forme quand il est en HTML, et le nom des pièces jointes. */
 export type ContenuMail = {
   id: string;
@@ -187,7 +187,7 @@ export type ContenuMail = {
   lien?: string;
   /** Étiquettes posées sur le mail (libellés Gmail, catégories Outlook). */
   libelles?: string[];
-  /** Les messages plus anciens du fil, du plus ancien au plus récent (10 au plus). */
+  /** Les autres messages du fil, du plus ancien au plus récent : jusqu'à 30 plus anciens, puis jusqu'à 30 réponses arrivées depuis (`apres`). */
   fil?: MessageFil[];
 };
 /** Un nouveau mail écrit dans Me : adresses déjà vérifiées. */
@@ -198,5 +198,5 @@ export type EcritureTache = { listeId: string; titre: string; echeance?: string 
 
 export const vide = (): Elements => ({ agenda: [], taches: [], relances: [], mails: [] });
 
-/** Les messages du fil affichés avec le mail ouvert : les plus récents, sans le mail lui-même. */
-export const FIL_MAX = 10;
+/** Les messages du fil lus avec le mail ouvert, de chaque côté du mail (sans le mail lui-même). */
+export const FIL_MAX = 30;

@@ -49,3 +49,48 @@ describe('boucle de mails', () => {
     assert.equal(lireBoucle('{"resume":"x"}'), null);
   });
 });
+
+describe('analyse par paquets', () => {
+  const o = { aujourdhui: '2026-11-03', moi: 'moi@x.com', boite: 'pro' };
+  it('une conversation courte tient en un seul paquet', async () => {
+    const { paquetsBoucle } = await import('../src/services/analyse-mails.js');
+    const r = paquetsBoucle({ de: 'Paul', texte: 'Ok', fil: [{ de: 'Moi', texte: 'Jeudi ?' }] }, o);
+    assert.equal(r.paquets.length, 1);
+    assert.deepEqual(r.paquets[0].map((m) => m.texte), ['Jeudi ?', 'Ok']);
+    assert.equal(r.omis, 0);
+  });
+  it('une longue conversation est coupée en paquets consécutifs, dans l’ordre', async () => {
+    const { paquetsBoucle } = await import('../src/services/analyse-mails.js');
+    const fil = Array.from({ length: 10 }, (_, i) => ({ de: i % 2 ? 'Moi' : 'Paul', texte: `m${i} ${'x'.repeat(400)}` }));
+    const r = paquetsBoucle({ de: 'Paul', texte: 'fin', fil }, o, 1000);
+    assert.ok(r.paquets.length > 1);
+    assert.ok(r.paquets.every((p) => p.reduce((n, x) => n + x.texte.length, 0) <= 1000));
+    const textes = r.paquets.flat().map((x) => x.texte.slice(0, 2));
+    assert.deepEqual(textes, ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'fi']);
+    assert.equal(r.paquets.at(-1)!.at(-1)!.texte, 'fin');
+  });
+  it('un très long mail est découpé en parties, sans rien perdre', async () => {
+    const { paquetsBoucle, decouper } = await import('../src/services/analyse-mails.js');
+    const long = Array.from({ length: 300 }, (_, i) => `Ligne ${i} du long message.`).join('\n');
+    const morceaux = decouper(long, 2000);
+    assert.ok(morceaux.length > 1 && morceaux.every((x) => x.length <= 2000));
+    assert.equal(morceaux.join('\n').replace(/\s+/g, ' '), long.replace(/\s+/g, ' '));
+    const r = paquetsBoucle({ de: 'Paul', texte: long }, o, 2000);
+    const parties = r.paquets.flat();
+    assert.equal(parties[0].partie, `1/${parties.length}`);
+    assert.ok(r.paquets.length > 1);
+  });
+  it('au plus 6 paquets : les plus anciens sont laissés de côté et signalés', async () => {
+    const { paquetsBoucle, MAX_PAQUETS } = await import('../src/services/analyse-mails.js');
+    const fil = Array.from({ length: 30 }, (_, i) => ({ de: 'A', texte: `m${i} ${'x'.repeat(900)}` }));
+    const r = paquetsBoucle({ de: 'B', texte: 'fin', fil }, o, 1000);
+    assert.equal(r.paquets.length, MAX_PAQUETS);
+    assert.ok(r.omis > 0);
+    assert.equal(r.paquets.at(-1)!.at(-1)!.texte, 'fin');
+  });
+  it('les réponses arrivées après le mail ouvert ne passent pas avant lui', async () => {
+    const { paquetsBoucle } = await import('../src/services/analyse-mails.js');
+    const r = paquetsBoucle({ de: 'Paul', texte: 'Ok', fil: [{ de: 'Moi', texte: 'Avant' }, { de: 'Moi', texte: 'Plus tard', apres: true }] }, o);
+    assert.deepEqual(r.paquets.flat().map((x) => x.texte), ['Avant', 'Ok']);
+  });
+});
