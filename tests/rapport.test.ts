@@ -76,7 +76,7 @@ describe('rapport des dépenses', () => {
   });
 
   it('quand l’envoyer : chaque soir, et le dernier jour des périodes choisies', () => {
-    assert.deepEqual(rapportsDuSoir(f, '2026-11-08').map((x) => [x.periode, x.heure]), [['jour', '21:00']]);
+    assert.deepEqual(rapportsDuSoir(f, '2026-11-08').map((x) => [x.periode, x.heure]), [['jour', '23:50']]);
     const g = { ...f, alertes: { rapport: { heure: '20:00', periodes: { semaine: true, mois: true, trimestre: true, annee: true } } } };
     assert.deepEqual(rapportsDuSoir(g, '2026-11-08').map((x) => x.cle), ['rapport|jour|2026-11-08', 'rapport|semaine|2026-11-02']);
     assert.deepEqual(rapportsDuSoir(g, '2026-12-31').map((x) => x.periode), ['jour', 'mois', 'trimestre', 'annee']);

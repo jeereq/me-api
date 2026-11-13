@@ -15,12 +15,12 @@ export type ReglagesRapport = {
   soir?: boolean;
   /** Les rapports plus longs, le soir du dernier jour de la période (non par défaut). */
   periodes?: Partial<Record<Exclude<PeriodeRapport, 'jour'>, boolean>>;
-  /** Heure d'envoi, « HH:MM » (21 h par défaut). */
+  /** Heure d'envoi, « HH:MM » (23 h 50 par défaut : le bilan de la journée). */
   heure?: string;
   /** Par SMS aussi, si le SMS est activé dans Mon compte (oui par défaut). */
   sms?: boolean;
 };
-export const HEURE_RAPPORT = '21:00';
+export const HEURE_RAPPORT = '23:50';
 
 type Operation = { id: string; montant: number; date: string; note?: string; categories?: string[]; lien?: string };
 export type FinancesRapport = Omit<FinancesRappels, 'depenses'> & {
