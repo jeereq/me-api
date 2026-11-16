@@ -1,12 +1,14 @@
 import type { Prisma } from '@prisma/client';
 
-import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, ProposerEtiquettesBody, RedigerMailBody, RelireNouveauBody, RelireReponseBody } from '../validators/schemas.js';
+import type { AjusterReponseBody, AnalyseBoucleBody, AnalyseMailsBody, OrthographeBody, ProposerEtiquettesBody, RedigerMailBody, RelireNouveauBody, RelireReponseBody } from '../validators/schemas.js';
 import { enCoffre, horsCoffre } from '../utils/coffre.js';
 import { HttpError } from '../utils/http.js';
 import { jsonPropre } from '../utils/json.js';
 import { prisma } from '../utils/prisma.js';
 import { etatAbonnement } from './abonnements/offres.js';
 import { paquetsDuServeur } from './analyses/budget-paquets.js';
+import { appliquerFautes, lireFautes, type Verification } from './analyses/orthographe.js';
+import { condenserSources, MAX_SOURCES } from './analyses/sources.js';
 import { BUDGET_PAQUET, decouper, partiesRetenues, texteUtile, dernierDe, donneesBoucle, exemplesEtiquettes, paquetsBoucle, lireAjustement, lireBoucle, lireEtiquettes, lireRedaction, lireRelecture, type AnalyseBoucle, type RedactionMail, type RelectureReponse } from './analyse-mails.js';
 import { AssistantService } from './AssistantService.js';
 import {
@@ -49,6 +51,23 @@ async function nouveauMailDe(userId: string, b: { a?: string; sujet?: string; bo
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
   const destinataires = (b.a ?? '').split(/[,;]/).map((x) => x.trim()).filter(Boolean).slice(0, 20);
   return { user, ton: b.ton ?? tonDe(user.espace?.data), donnees: { aujourdhui: jour(0, user.fuseau), boite: b.boite ?? 'pro', destinataires, objet: b.sujet?.trim() ?? '' } };
+}
+
+/**
+ * Les mails choisis comme source (`ext:<compte>:<mail>`), lus chez le service et ramenés à leur part du budget, pour « mails_contexte ».
+ * Un mail illisible ou qui n'est pas au compte est laissé de côté ; `sauf` : le mail auquel on répond, déjà dans la conversation.
+ */
+async function sourcesDe(userId: string, refs: string[] | undefined, fuseau: string, sauf?: string) {
+  const uniques = [...new Set(refs ?? [])].filter((r) => r !== sauf).map((r) => ({ r, ref: lireRef(r) })).filter((x): x is { r: string; ref: NonNullable<ReturnType<typeof lireRef>> } => !!x.ref).slice(0, MAX_SOURCES);
+  if (!uniques.length) return [];
+  const lus = await Promise.allSettled(uniques.map((x) => IntegrationService.lirePourAnalyse(userId, x.ref.integrationId, x.ref.mailId)));
+  const sources = lus.flatMap((l) => {
+    if (l.status !== 'fulfilled') return [];
+    const { contenu, ctx, garde, compte } = l.value;
+    const d = donneesBoucle(contenu, { aujourdhui: jour(0, fuseau), moi: compte, boite: ctx, extrait: garde?.extrait });
+    return [{ sujet: d.sujet, messages: d.messages.map((m) => ({ de: m.de, ...(m.date ? { date: m.date } : {}), texte: m.texte })) }];
+  });
+  return condenserSources(sources);
 }
 
 export const AnalyseMailService = {
@@ -192,7 +211,8 @@ export const AnalyseMailService = {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { fuseau: true, nomApp: true, espace: { select: { data: true } } } });
     const ton = b.ton ?? tonDe(user.espace?.data);
     const { contenu, ctx, garde, compte } = await IntegrationService.lirePourAnalyse(userId, ref.integrationId, ref.mailId);
-    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), reponse_proposee: b.reponse ?? '', ...(b.action === 'contexte' ? { contexte_utilisateur: b.contexte } : {}) };
+    const mails_contexte = await sourcesDe(userId, b.sources, user.fuseau, b.mail);
+    const donnees = { ...donneesBoucle(contenu, { aujourdhui: jour(0, user.fuseau), moi: compte, boite: ctx, extrait: garde?.extrait }), reponse_proposee: b.reponse ?? '', ...(b.action === 'contexte' ? { contexte_utilisateur: b.contexte } : {}), ...(mails_contexte.length ? { mails_contexte } : {}) };
     const r = await AssistantService.demanderAvecModeles({ type: 'ajustement', ajustement: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify(donnees) });
     const lu = lireAjustement(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu ajuster cette réponse. Réessaie dans un instant.");
@@ -202,10 +222,19 @@ export const AnalyseMailService = {
   /** Écrit ou ajuste un nouveau mail, et son objet. Rien n'est gardé. */
   async redigerMail(userId: string, b: RedigerMailBody): Promise<RedactionMail> {
     const { user, ton, donnees } = await nouveauMailDe(userId, b);
-    const r = await AssistantService.demanderAvecModeles({ type: 'redaction', redaction: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify({ ...donnees, brouillon: b.texte ?? '', ...(b.action === 'contexte' ? { contexte_utilisateur: b.contexte } : {}) }) });
+    const mails_contexte = await sourcesDe(userId, b.sources, user.fuseau);
+    const r = await AssistantService.demanderAvecModeles({ type: 'redaction', redaction: b.action, ton, nom: user.nomApp, ...(b.consignes?.trim() ? { consignes: b.consignes } : {}), donnees: JSON.stringify({ ...donnees, brouillon: b.texte ?? '', ...(b.action === 'contexte' ? { contexte_utilisateur: b.contexte } : {}), ...(mails_contexte.length ? { mails_contexte } : {}) }) });
     const lu = lireRedaction(r.texte);
     if (!lu) throw new HttpError(502, "L'IA n'a pas pu écrire ce mail. Réessaie dans un instant.");
     return lu;
+  },
+
+  /** Cherche les fautes de français d'un texte et le corrige : l'IA liste les fautes, le serveur les applique. Rien n'est gardé. */
+  async verifierFrancais(_userId: string, b: OrthographeBody): Promise<Verification> {
+    const r = await AssistantService.demanderAvecModeles({ type: 'orthographe', donnees: JSON.stringify({ texte: b.texte }) });
+    const fautes = lireFautes(r.texte);
+    if (!fautes) throw new HttpError(502, "L'IA n'a pas pu vérifier ce texte. Réessaie dans un instant.");
+    return appliquerFautes(b.texte, fautes);
   },
 
   /** Relit un nouveau mail avant son envoi. Rien n'est gardé. */
