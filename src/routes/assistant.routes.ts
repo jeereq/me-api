@@ -6,7 +6,7 @@ import { authenticateJWT, requireAdmin } from '../middlewares/authenticateJWT.js
 import { analyseMailsLimiter, assistantLimiter, transcriptionLimiter } from '../middlewares/rateLimits.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { asyncHandler } from '../utils/http.js';
-import { redigerMailSchema, relireNouveauSchema, ajusterReponseSchema, proposerEtiquettesSchema, analyseBoucleSchema, etatsAnalyseSchema, relireReponseSchema, traduireSchema, analyseMailsSchema, assistantSchema } from '../validators/schemas.js';
+import { redigerMailSchema, orthographeSchema, relireNouveauSchema, ajusterReponseSchema, proposerEtiquettesSchema, analyseBoucleSchema, etatsAnalyseSchema, relireReponseSchema, traduireSchema, analyseMailsSchema, assistantSchema } from '../validators/schemas.js';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -20,6 +20,7 @@ router.post('/mails/etiquettes', requirePro('assistant'), analyseMailsLimiter, v
 router.post('/mails/ajuster', requirePro('assistant'), analyseMailsLimiter, validateRequest(ajusterReponseSchema), asyncHandler(AssistantController.ajusterReponse));
 router.post('/mails/etats', requirePro('assistant'), validateRequest(etatsAnalyseSchema), asyncHandler(AssistantController.etatsAnalyse));
 router.post('/mails/rediger', requirePro('assistant'), analyseMailsLimiter, validateRequest(redigerMailSchema), asyncHandler(AssistantController.redigerMail));
+router.post('/mails/orthographe', requirePro('assistant'), analyseMailsLimiter, validateRequest(orthographeSchema), asyncHandler(AssistantController.verifierFrancais));
 router.post('/mails/relire-nouveau', requirePro('assistant'), analyseMailsLimiter, validateRequest(relireNouveauSchema), asyncHandler(AssistantController.relireNouveau));
 router.post('/mails/relire', requirePro('assistant'), analyseMailsLimiter, validateRequest(relireReponseSchema), asyncHandler(AssistantController.relireReponse));
 router.post('/mails/boucle', requirePro('assistant'), analyseMailsLimiter, validateRequest(analyseBoucleSchema), asyncHandler(AssistantController.analyserBoucle));

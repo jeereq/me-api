@@ -119,6 +119,11 @@ export const AssistantController = {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
     res.json(await AnalyseMailService.redigerMail(req.user!.id, req.body));
   },
+  /** Vérifier le français d'un mail ou d'une réponse. */
+  verifierFrancais: async (req: Request, res: Response) => {
+    if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");
+    res.json(await AnalyseMailService.verifierFrancais(req.user!.id, req.body));
+  },
   /** Relire un nouveau mail avant de l'envoyer. */
   relireNouveau: async (req: Request, res: Response) => {
     if (!(await AssistantService.disponible())) throw new HttpError(503, "L'IA n'est pas activée sur ce serveur.");

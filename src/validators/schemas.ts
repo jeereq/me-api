@@ -73,7 +73,7 @@ export const patchMembreSchema = membreParamsSchema.extend({ body: z.object({ ro
 
 export const assistantSchema = z.object({
   body: z.object({
-    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'etiquettes', 'traduction', 'compte_rendu', 'notes_reunion', 'notes_mail', 'projet_etat', 'projet_plan', 'projet_question']),
+    type: z.enum(['question', 'conversation', 'plan', 'relance', 'copilote', 'mails', 'lot', 'synthese', 'boucle', 'relecture', 'relecture_nouveau', 'ajustement', 'redaction', 'orthographe', 'etiquettes', 'traduction', 'compte_rendu', 'notes_reunion', 'notes_mail', 'projet_etat', 'projet_plan', 'projet_question']),
     /** Pour « redaction » : ce qu'il faut faire du nouveau mail. */
     redaction: z.enum(['contexte', 'court', 'formel', 'refaire']).optional(),
     /** Pour « ajustement » : ce qu'il faut faire du brouillon. */
@@ -142,21 +142,27 @@ export const relireReponseSchema = z.object({ body: z.object({ mail: z.string().
 export type RelireReponseBody = z.infer<typeof relireReponseSchema>['body'];
 
 /** Ajuster une réponse : le mail, le brouillon, et ce qu'il faut en faire. Avec un contexte, le brouillon peut être vide. */
+/** D'autres mails choisis comme source pour écrire (`ext:<compte>:<mail>`, au plus 5). */
+const sources = z.array(z.string().min(1).max(500)).max(5).optional();
 export const ajusterReponseSchema = z.object({
   body: z
-    .object({ mail: z.string().min(1).max(500), reponse: z.string().trim().max(8000).optional(), action: z.enum(['court', 'formel', 'decliner', 'refaire', 'contexte', 'repondre']), contexte: z.string().trim().max(2000).optional(), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() })
-    .refine((b) => (b.action === 'repondre' ? true : b.action === 'contexte' ? !!b.contexte : !!b.reponse), { message: 'Rien à rédiger.' }),
+    .object({ mail: z.string().min(1).max(500), reponse: z.string().trim().max(8000).optional(), action: z.enum(['court', 'formel', 'decliner', 'refaire', 'contexte', 'repondre']), contexte: z.string().trim().max(2000).optional(), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional(), sources })
+    .refine((b) => (b.action === 'repondre' ? true : b.action === 'contexte' ? !!b.contexte || !!b.sources?.length : !!b.reponse), { message: 'Rien à rédiger.' }),
 });
 export type AjusterReponseBody = z.infer<typeof ajusterReponseSchema>['body'];
 
-const nouveauMail = { a: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), boite: z.enum(['perso', 'pro']).optional(), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() };
+const nouveauMail = { sources, a: z.string().max(5000).optional(), sujet: z.string().max(500).optional(), boite: z.enum(['perso', 'pro']).optional(), ton: z.string().max(40).optional(), consignes: z.string().max(1000).optional() };
 /** Écrire un nouveau mail avec le copilote. Avec un contexte, le brouillon peut être vide. */
 export const redigerMailSchema = z.object({
   body: z
     .object({ ...nouveauMail, texte: z.string().trim().max(8000).optional(), action: z.enum(['contexte', 'court', 'formel', 'refaire']), contexte: z.string().trim().max(2000).optional() })
-    .refine((b) => (b.action === 'contexte' ? !!b.contexte : !!b.texte), { message: 'Rien à rédiger.' }),
+    .refine((b) => (b.action === 'contexte' ? !!b.contexte || !!b.sources?.length : !!b.texte), { message: 'Rien à rédiger.' }),
 });
 export type RedigerMailBody = z.infer<typeof redigerMailSchema>['body'];
+/** Vérifier le français d'un texte (mail neuf ou réponse). */
+export const orthographeSchema = z.object({ body: z.object({ texte: z.string().trim().min(1).max(8000) }) });
+export type OrthographeBody = z.infer<typeof orthographeSchema>['body'];
+
 /** Relire un nouveau mail avant de l'envoyer. */
 export const relireNouveauSchema = z.object({ body: z.object({ ...nouveauMail, texte: z.string().trim().min(1).max(8000) }) });
 export type RelireNouveauBody = z.infer<typeof relireNouveauSchema>['body'];
