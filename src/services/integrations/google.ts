@@ -150,7 +150,9 @@ export const google: Connecteur = {
       scope: SCOPES.join(' '),
       access_type: 'offline',
       prompt: 'consent select_account',
-      include_granted_scopes: 'true',
+      // Pas d'`include_granted_scopes` : l'écran de consentement doit montrer ces habilitations-là et rien d'autre.
+      // Avec l'autorisation incrémentale, celui qui s'est déjà connecté avec Google voyait un écran qui cumulait
+      // aussi `profile`, donc un écran différent de ce que la console déclare — ce que la vérification Google refuse.
       state,
     })}`,
 
