@@ -429,6 +429,7 @@ export const filtresAnnuaireSchema = z.object({
   montantMax: z.coerce.number().int().positive().optional().catch(undefined),
   tri: z.enum(['recent', 'montant', 'places']).optional().catch(undefined),
   ouverts: z.preprocess((v) => v === '1' || v === 'true' || v === true, z.boolean()).optional().catch(undefined),
+  confiance: z.preprocess((v) => v === '1' || v === 'true' || v === true, z.boolean()).optional().catch(undefined),
 });
 
 /** Une recherche enregistrée : les mêmes critères que l'annuaire, sans le tri. */

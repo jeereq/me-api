@@ -5,7 +5,7 @@
 
 export type TriAnnuaire = 'recent' | 'montant' | 'places';
 export type FiltresAlerte = { q?: string; mode?: string; rythme?: string; devise?: string; montantMax?: number };
-export type FiltresAnnuaire = FiltresAlerte & { tri?: TriAnnuaire; ouverts?: boolean };
+export type FiltresAnnuaire = FiltresAlerte & { tri?: TriAnnuaire; ouverts?: boolean; /** Seulement les organisateurs qui ont déjà mené un groupe à terme. */ confiance?: boolean };
 
 /** Ce que l'annuaire dit d'un organisateur : seulement des faits vérifiables sur Me. */
 export type Confiance = { termines: number; versements: number; aTemps: number; depuis: string | null };

@@ -37,6 +37,8 @@ describe('outils de l’annuaire', () => {
   });
   it('valide les filtres, les alertes et les signalements', () => {
     assert.deepEqual(filtresAnnuaireSchema.parse({ tri: 'places', ouverts: '1' }), { tri: 'places', ouverts: true });
+    assert.deepEqual(filtresAnnuaireSchema.parse({ confiance: '1' }), { confiance: true });
+    assert.deepEqual(filtresAnnuaireSchema.parse({ confiance: 'non' }), { confiance: false });
     assert.equal(filtresAnnuaireSchema.parse({ tri: 'pirate' }).tri, undefined);
     assert.equal(alerteAnnuaireSchema.safeParse({ body: { devise: 'EUR' } }).success, false);
     assert.equal(signalerTontineSchema.safeParse({ params: { id: 'x' }, body: { motif: 'arnaque', texte: 'x'.repeat(501) } }).success, false);
