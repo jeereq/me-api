@@ -1016,13 +1016,16 @@ export function creerTontines(d: DepsTontines) {
       const groupes = tous.filter((t) => accueille(t) && acceptes(t).length < t.places && (!mot || t.nom.toLowerCase().includes(mot)));
       // Seuls les groupes des comptes approuvés sont visibles.
       const approuves = await d.comptesApprouves(groupes.flatMap((t) => (t.organisateurId ? [t.organisateurId] : [])));
+      const ouverts = groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId));
+      // La confiance se calcule avant de couper la liste : « organisateur expérimenté » doit pouvoir écarter des groupes.
+      const confiances = await confianceOrganisateurs(ouverts);
+      const retenus = f.confiance ? ouverts.filter((t) => (confiances.get(t.organisateurId!)?.termines ?? 0) > 0) : ouverts;
       const visibles = trier(
-        groupes.filter((t) => t.organisateurId && approuves.has(t.organisateurId)).map((t) => ({ t, montant: t.montant, places: t.places, inscrits: acceptes(t).length, createdAt: t.createdAt })),
+        retenus.map((t) => ({ t, montant: t.montant, places: t.places, inscrits: acceptes(t).length, createdAt: t.createdAt })),
         f.tri,
       )
         .slice(0, 100)
         .map((x) => x.t);
-      const confiances = await confianceOrganisateurs(visibles);
       return { groupes: visibles.map((t) => carteVisible(t, userId, confiances.get(t.organisateurId!) ?? null)) };
     },
 
