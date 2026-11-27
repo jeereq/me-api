@@ -10,14 +10,21 @@ import { aDroit, avisAbonnement, etatAbonnement, type AvisAbonnement } from './a
 import { annonceMails, type MailImporte } from './integrations/choix.js';
 import { local } from './integrations/http.js';
 import type { Affectation } from './equipes/affectations.js';
-import { heureLisible, rappelsDuJour, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
+import { heureLisible, rappelsDuJour, relanceAttendue, type ConfigRappels, type EspaceRappels, type Rappel } from '../commun/calcul.js';
+import { tachesActives } from '../commun/projets.js';
+import { avisAbsence } from './rappels-absence.js';
 import { aDesFinances, type FinancesRapport, type NomsCategories, rapportDepenses, rapportsDuSoir } from '../commun/rapport.js';
 import { avisRapport, emailRapport, SEGMENTS_RAPPORT, smsRapportComplet } from './rapport-email.js';
 
 // Un rappel manqué (serveur endormi, redémarrage) part encore s'il date de moins de 45 minutes.
 const RATTRAPAGE_MIN = 45;
+// Quand tu ouvres l'app, les rappels du jour que la tâche planifiée n'a pas pu créer (serveur endormi) apparaissent dans
+// la cloche : seulement ceux qui datent de plus de 10 minutes, pour laisser la tâche planifiée envoyer les récents (push, email).
+const DELAI_PLANIFIEE_MIN = 10;
+const MAX_RATTRAPES = 20;
+const dernierRattrapage = new Map<string, number>();
 
-type Prefs = { app?: boolean; email?: boolean; sms?: boolean; mails?: boolean };
+type Prefs = { app?: boolean; email?: boolean; sms?: boolean; mails?: boolean; absence?: boolean };
 /** Ce que dit l'avis selon ce qui est confié, au singulier, au pluriel, et où il mène. */
 const PHRASE_AFFECTATION: Record<Affectation['genre'], string> = { tache: "t'a confié une tâche", relance: "t'a confié une relance", rdv: "t'a affecté un rendez-vous" };
 const PHRASE_SUIVI: Record<Affectation['genre'], string> = { tache: "t'a ajouté au suivi d'une tâche", relance: "t'a ajouté au suivi d'une relance", rdv: "t'a ajouté au suivi d'un rendez-vous" };
@@ -34,7 +41,7 @@ export const NotificationService = {
     const smsActif = cfg.canaux?.sms !== false && SmsService.configure();
     const users = await prisma.user.findMany({
       select: {
-        id: true, email: true, emailVerifie: true, nom: true, fuseau: true, telephone: true, espace: { select: { data: true } },
+        id: true, email: true, emailVerifie: true, nom: true, fuseau: true, telephone: true, updatedAt: true, espace: { select: { data: true, majLe: true } },
         role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true,
       },
     });
@@ -61,6 +68,8 @@ export const NotificationService = {
       if (aDroit(etat, 'alertes')) {
         await this.rapports(u, e as EspaceRappels & { finances?: FinancesRapport; categories?: NomsCategories }, { jours, borne, nowLocal, aujourdhui: date, push: prefs.app !== false, mail: parMailPossible, sms: parSmsPossible && aDroit(etat, 'sms') }).catch((x) => console.error('Rapport du soir', x));
       }
+
+      await this.absence(u, e, cfg, { date, borne, nowLocal, push: prefs.app !== false }).catch((x) => console.error('Rappel d’absence', x));
 
       if (!dus.length) continue;
       // Un rappel déjà créé lors d'un passage précédent n'est pas renvoyé.
@@ -93,6 +102,58 @@ export const NotificationService = {
     await SmsService.purger(maintenant);
     // On garde 60 jours d'historique.
     await prisma.notification.deleteMany({ where: { createdAt: { lt: new Date(maintenant.getTime() - 60 * 86400000) } } });
+  },
+
+  /**
+   * « Ça fait N jours » : quand tu n'as pas ouvert Me depuis au moins deux jours, un message le matin (une fois par seuil),
+   * dans la cloche et en push sur tes appareils, quelle que soit la formule : c'est l'appel à revenir, pas un rappel d'élément.
+   * La dernière visite : l'app écrit à chaque ouverture (fuseau, synchro), donc le plus récent de ces deux repères.
+   */
+  async absence(
+    u: { id: string; fuseau: string; updatedAt: Date; espace?: { majLe: Date } | null },
+    e: EspaceRappels & { notifs?: Prefs },
+    cfg: ConfigRappels,
+    o: { date: string; borne: string; nowLocal: string; push: boolean },
+  ) {
+    if (!o.push || e.notifs?.absence === false || !u.espace) return;
+    const heure = cfg.routineHeure || '07:00';
+    const quand = `${o.date}T${heure}`;
+    if (!(quand > o.borne && quand <= o.nowLocal)) return;
+    const vue = new Date(Math.max(u.updatedAt.getTime(), u.espace.majLe.getTime()));
+    const avis = avisAbsence({
+      derniereVue: local(vue, u.fuseau).date,
+      aujourdhui: o.date,
+      relances: (e.relances ?? []).filter((r) => relanceAttendue(r) && r.date && r.date <= o.date).length,
+      taches: tachesActives(e).filter((t) => t.echeance && t.echeance <= o.date).length,
+    });
+    if (!avis) return;
+    const { count } = await prisma.notification.createMany({ data: [{ userId: u.id, cle: avis.cle, titre: avis.titre, corps: avis.corps, mode: 'briefing', quand, lu: false }], skipDuplicates: true });
+    if (count) await PushService.envoyer(u.id, { titre: avis.titre, corps: avis.corps, mode: 'briefing', url: '/', tag: avis.cle });
+  },
+
+  /**
+   * À l'ouverture de l'app : les rappels du jour déjà passés qui n'ont pas été créés (serveur endormi, tâche planifiée en retard)
+   * rejoignent la cloche, sans push ni email (ils seraient périmés). Au plus une fois toutes les 10 minutes par compte.
+   */
+  async rattraperApp(userId: string, maintenant = new Date()) {
+    if (maintenant.getTime() - (dernierRattrapage.get(userId) ?? 0) < DELAI_PLANIFIEE_MIN * 60000) return;
+    dernierRattrapage.set(userId, maintenant.getTime());
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { fuseau: true, role: true, essaiJusqua: true, abonnementFormule: true, abonnementPeriode: true, abonnementFinLe: true, espace: { select: { data: true } } } });
+    if (!u?.espace) return;
+    const e = u.espace.data as EspaceRappels & { notifs?: Prefs };
+    if (e.notifs?.app === false) return;
+    const cfg = ((await prisma.config.findUnique({ where: { id: 1 } }))?.data ?? {}) as ConfigRappels;
+    const { date } = local(maintenant, u.fuseau);
+    const limite = local(new Date(maintenant.getTime() - DELAI_PLANIFIEE_MIN * 60000), u.fuseau);
+    // Juste après minuit, il n'y a encore rien à rattraper pour le nouveau jour.
+    if (limite.date !== date) return;
+    const jusqua = `${limite.date}T${limite.heure}`;
+    const dus = rappelsDuJour(e, cfg, date, { financesAvancees: aDroit(etatAbonnement(u, maintenant), 'prets') })
+      .filter((r) => r.quand <= jusqua)
+      .sort((a, b) => a.quand.localeCompare(b.quand))
+      .slice(-MAX_RATTRAPES);
+    if (!dus.length) return;
+    await prisma.notification.createMany({ data: dus.map((r) => ({ userId, cle: r.cle, titre: r.titre, corps: r.corps, mode: r.mode, quand: r.quand, lu: false })), skipDuplicates: true });
   },
 
   /**
@@ -233,6 +294,7 @@ export const NotificationService = {
   },
 
   async liste(userId: string) {
+    await this.rattraperApp(userId).catch((e) => console.error('Rattrapage des rappels', e));
     const [notifications, nonLues] = await Promise.all([
       prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 50, select: { id: true, titre: true, corps: true, mode: true, quand: true, lu: true, parEmail: true, createdAt: true } }),
       prisma.notification.count({ where: { userId, lu: false } }),
