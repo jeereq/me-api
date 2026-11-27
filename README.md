@@ -264,6 +264,10 @@ Une app plus ancienne, qui n'envoie pas `baseRevision`, continue de fonctionner 
 
 Les rappels (toutes les 5 min), la synchro des comptes connectés (toutes les 15 min) et l'analyse des mails préparée à l'avance (toutes les 15 min, 7 minutes après la synchro) tournent dans le processus du serveur. Un **verrou à bail dans la base** (table `VerrouCron`) garantit qu'un seul passage tourne à la fois, même avec plusieurs instances ou un redémarrage en plein passage : si l'instance tombe, son bail expire et une autre reprend au passage suivant.
 
+**Hébergement gratuit (Render…)** : le serveur s'endort après un quart d'heure sans visite, et ses tâches planifiées avec lui. Sur Render, il s'appelle donc lui-même toutes les 10 minutes (`RENDER_EXTERNAL_URL`, ou `ADRESSE_PUBLIQUE` ailleurs ; `KEEP_ALIVE=false` pour couper). Et quand quelqu'un ouvre l'app, `GET /api/notifications` rattrape les rappels du jour que la tâche planifiée n'a pas pu créer (seulement dans la cloche, sans push ni email).
+
+**Rappel d'absence** : si le compte n'a pas ouvert Me depuis 2 jours, une notification et un push partent le matin, une fois à 2, 5, 10 et 21 jours (`notifs.absence: false` pour le couper). La dernière visite est le plus récent de `User.updatedAt` (l'app écrit le fuseau à chaque ouverture) et `Espace.majLe`.
+
 Pour ne faire tourner les tâches que sur une instance, mets `RUN_CRONS=false` sur les autres (par défaut, toutes les instances les lancent, ce qui reste sûr grâce au verrou).
 
 ## Sauvegardes
