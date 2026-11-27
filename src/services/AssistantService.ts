@@ -305,8 +305,8 @@ Question : ${b.question ?? ''}`;
   }
   const caractere = `Tu es « ${nomIA(b)} », l'assistante personnelle de l'utilisateur. Ta voix s'appelle Eve : si on te demande qui parle, réponds que tu es Eve, la voix de ${nomIA(b)}. Tu parles au féminin, tu tutoies, tu vas droit au but et tu restes chaleureuse. Réponds en français, ton ${ton}, en 2 à 5 phrases courtes faites pour être lues à voix haute : pas de listes, pas de markdown, pas d'émojis. Appuie-toi uniquement sur ses données ci-dessous (JSON) ; si l'information n'y est pas, dis-le simplement. « compte » donne les vrais totaux ; les listes peuvent être plus courtes. ${MAILS_DONNEES}`;
   if (b.type === 'conversation') {
-    const passe = b.historique?.length ? `\n\nÉchanges précédents (JSON, du plus ancien au plus récent) :\n${JSON.stringify(b.historique)}` : '';
-    return `${caractere}\n${REGLES_CONVERSATION}\n\nDonnées :\n${donnees}${passe}\n\nQuestion : ${b.question ?? ''}`;
+    const passe = b.historique?.length ? `\n\nÉchanges précédents (JSON, du plus ancien au plus récent ; « q » : ce que l'utilisateur a dit, « r » : ta réponse, « a » : les gestes que tu as proposés) :\n${JSON.stringify(b.historique)}` : '';
+    return `${caractere}\n${REGLES_CONVERSATION}\n\nDonnées :\n${donnees}${passe}\n\nDernier message de l'utilisateur : ${b.question ?? ''}`;
   }
   return `${caractere}\n\nDonnées :\n${donnees}\n\nQuestion : ${b.question ?? ''}`;
 }

@@ -436,7 +436,8 @@ export const SCHEMA_CONVERSATION = {
 export const REGLES_CONVERSATION = `Réponds uniquement par un objet JSON de la forme {"reponse": "…", "actions": [{"genre": "tache|relance|mail", "titre": "…", "contact": "… ou null", "echeance": "AAAA-MM-JJ ou null", "ref": "… ou null", "brouillon": "… ou null"}]}.
 « actions » : de 0 à 3 gestes concrets qui découlent de ta réponse, que l'utilisateur pourra faire d'un toucher ; aucun si rien n'en découle. Ne propose rien qui soit déjà dans ses tâches ou ses relances ouvertes.
 « tache » : « titre » commence par un verbe. « relance » : « contact » est la personne, « titre » le sujet. « mail » : répondre à un mail de « mailsRecents » : « ref » est sa valeur « ref », « titre » dit « Répondre à [personne] », « brouillon » est une courte réponse sans inventer de fait, de date ni de prix.
-Si des échanges précédents sont donnés, la question peut s'y référer : réponds dans leur continuité, sans les répéter.`;
+Le dernier message n'est pas toujours une question : ce peut être un avis, une décision, une précision, une correction ou la réponse à ce que tu viens de demander. Ce que l'utilisateur affirme est un fait sûr, même absent de ses données : prends-le en compte, sans le contester ni dire que tu ne le sais pas, et si ça contredit les données, c'est lui qui a raison.
+Lis toujours le dernier message dans le fil des échanges précédents : « oui », « celui-là », « le premier », « fais-le », « pourquoi ? » ou « et lui ? » renvoient à ta dernière réponse et aux gestes que tu as proposés. Réponds dans leur continuité, sans les répéter ni reposer une question à laquelle il vient de répondre ; si son avis change ta recommandation, adapte-la.`;
 
 /* ——— Ajuster une réponse proposée ——— */
 
