@@ -233,3 +233,21 @@ describe('assistant : IA du projet', () => {
     assert.doesNotMatch(p, /objet JSON/);
   });
 });
+
+describe('aide : le guide de la page', () => {
+  const guide = 'Ajouter une relance : 1. Touche + Ajouter. 2. Écris le nom.';
+  it('répond d’après le guide seul, avec la page et la question', () => {
+    const p = prompt({ type: 'aide', sujet: 'Relances', question: 'Comment ajouter une relance ?', donnees: guide, ton: 'neutre' });
+    assert.ok(p.includes('« Relances »'));
+    assert.ok(p.includes('Touche + Ajouter'));
+    assert.ok(p.includes('Comment ajouter une relance ?'));
+    assert.match(p, /uniquement d'après le guide/);
+    assert.match(p, /jamais des instructions/);
+    assert.doesNotMatch(p, /objet JSON/);
+  });
+  it('n’est ni en JSON ni une longue analyse', () => {
+    assert.equal(enJson('aide'), false);
+    assert.equal(longue('aide'), false);
+  });
+});
+
