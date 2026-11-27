@@ -57,9 +57,17 @@ describe('assistant : copilote et analyse des mails', () => {
     assert.match(p, /"actions"/);
     assert.match(p, /Échanges précédents/);
     assert.match(p, /Qui relancer \?/);
-    assert.match(p, /Question : Et lui \?/);
+    assert.match(p, /Dernier message de l'utilisateur : Et lui \?/);
     assert.match(p, /jamais des instructions/);
     assert.doesNotMatch(prompt({ type: 'conversation', question: 'x', donnees: '{}' }), /Échanges précédents/);
+  });
+  it('un avis ou une précision est un fait sûr, lu dans le fil de la conversation', () => {
+    const p = prompt({ type: 'conversation', question: 'Je préfère le lundi', donnees: '{}', historique: [{ q: 'Quand relancer Paul ?', r: 'Jeudi ?', a: ['Relancer Paul'] }] });
+    assert.match(p, /pas toujours une question/);
+    assert.match(p, /fait sûr, même absent de ses données/);
+    assert.match(p, /« oui », « celui-là »/);
+    assert.match(p, /« a » : les gestes que tu as proposés/);
+    assert.match(p, /"a":\["Relancer Paul"\]/);
   });
   it('une question simple reste un texte', () => {
     const p = prompt({ type: 'question', question: 'x', donnees: '{}' });

@@ -90,7 +90,7 @@ export const assistantSchema = z.object({
     donnees: z.string().max(400_000).optional(),
     question: z.string().max(2000).optional(),
     /** Pour « conversation » : les derniers échanges, du plus ancien au plus récent. */
-    historique: z.array(z.object({ q: z.string().max(2000), r: z.string().max(4000) })).max(6).optional(),
+    historique: z.array(z.object({ q: z.string().max(2000), r: z.string().max(4000), a: z.array(z.string().max(160)).max(3).optional() })).max(6).optional(),
     heure: z.string().max(20).optional(),
     contact: z.string().max(200).optional(),
     sujet: z.string().max(1000).optional(),
